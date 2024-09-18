@@ -69,7 +69,7 @@ class Splitter:
 
         new_graph.recycle_tensors_buffers()
 
-        return new_graph.export()
+        return new_graph
 
     def traverse_til_end(self,current_opid):
         for parent in self.nodes[current_opid].node.parents:
@@ -282,6 +282,7 @@ class Splitter:
 
                 self.new_operators.append(new_op_info)
                 op = Node(new_op_info, split_op_id)
+                op.is_mac_main_op = True
                 self.nodes.append(SplitterNode(op))
                 self.nodes[opid].split_id.append(split_op_id)
                 split_op_id += 1
@@ -366,6 +367,7 @@ class Splitter:
 
                 self.new_operators.append(new_op_info)
                 op = Node(new_op_info, split_op_id)
+                op.is_mac_main_op = True
                 self.nodes.append(SplitterNode(op))
                 self.nodes[opid].split_id.append(split_op_id)
                 split_op_id += 1
@@ -392,6 +394,7 @@ class Splitter:
                 new_op_info['inputs'] = [a,b]
                 new_op_info['outputs'] = [c]
                 op = Node(new_op_info,split_op_id)
+                op.is_elem_wise_main_op = True
                 self.nodes.append(SplitterNode(op))
                 self.new_operators.append(new_op_info)
                 self.nodes[opid].split_id.append(split_op_id)

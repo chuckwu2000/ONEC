@@ -1,4 +1,5 @@
 import copy
+import sys
 
 class Node:
     def __init__(self, op_info, id):
@@ -6,6 +7,12 @@ class Node:
         self.children = []
         self.info = copy.deepcopy(op_info)
         self.opid = id
+        self.is_mac_main_op = False
+        self.is_elem_wise_main_op = False
+        # This represent this op only can hoist to the opid larger than this value.
+        self.hoist_max_opid = sys.maxsize
+        # This represent that this op is matched with another op run currently in each of MAC/ELE engine.
+        self.have_matched = False
     def append_children(self, children):
         self.children+=children
 
@@ -120,6 +127,8 @@ class Graph:
             for child in sorted(self.ops[current_id].children, key=lambda op_id: self.ops[op_id].info['outputs'][0]):
                 if child not in DFS_orderred_operators:
                     DFS_ordering(child, DFS_orderred_operators)
+            for parent in self.ops[current_id].parents:
+                self.ops[current_id].hoist_max_opid = min(self.ops[current_id].hoist_max_opid, parent)
         if self.DFS_ordered == False:
             self.DFS_ordered = True
             self.BFS_ordered = False
@@ -279,4 +288,3 @@ class Graph:
     def export(self):
         self.ensure_order()
         return self.buffers, self.tensors, self.inputs, self.outputs, self.operators, self.opcodes
-

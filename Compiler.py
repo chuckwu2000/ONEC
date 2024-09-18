@@ -5,11 +5,12 @@ import os
 from MyGraph import Graph
 from AutoSplit import Splitter
 import tempfile
+from pipeline_schedule import pipeline_schedule
 
 parser = argparse.ArgumentParser()
 parser.add_argument("model_path")
 parser.add_argument("--schema_path", nargs='?', default="utils/schema.fbs")
-parser.add_argument("--out_path", nargs='?', default="__DEFAULT__")
+parser.add_argument("--out_path")
 parser.add_argument("--exec_order", nargs='?', default="DF")
 parser.add_argument("--split_height", nargs='?', type=int, default=2)
 parser.add_argument("--pad_fusion", action='store_true')
@@ -21,9 +22,6 @@ schema_path = args.schema_path
 
 tmp_dir = tempfile.TemporaryDirectory(dir='.')
 tmp_dir_path = tmp_dir.name
-
-if args.out_path == '__DEFAULT__':
-    args.out_path = os.path.splitext(args.model_path)[0] + f"_splitted_{args.exec_order}_{args.split_height}.tflite"
 
 if os.path.splitext(filename)[1] != '.tflite':
     raise "input model path doesn't match: .tflite extension is required'"
@@ -78,7 +76,10 @@ ori_graph = Graph(operators, tensors, buffers, new_opcodes, subgraphs[0]['inputs
 splitter = Splitter(ori_graph, args.split_height)
 if args.pad_fusion:
     splitter.PaddingFusion()
-new_buffers, new_tensors, new_inputs, new_outputs, new_operators, new_opcodes = splitter.perform_split()
+
+new_graph = splitter.perform_split()
+pipeline_new_graph = pipeline_schedule(new_graph)
+new_buffers, new_tensors, new_inputs, new_outputs, new_operators, new_opcodes = pipeline_new_graph.export()
 
 new_model['buffers'] = new_buffers
 new_model['subgraphs'][0]['tensors'] = new_tensors
