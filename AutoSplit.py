@@ -225,7 +225,6 @@ class Splitter:
             ker_shape = self.tensors[inputs[1]]['shape']
             stride_h = info['builtin_options']['stride_h']
             stride_w = info['builtin_options']['stride_w']
-            print(f"in_shape: {in_shape}, out_shape: {out_shape}, ker_shape: {ker_shape}, stride_h: {stride_h}, stride_w: {stride_w}")
 
             if(len(inputs) == 4):
                 tokens = self.tensors[info['inputs'][3]]['name'].split('_')
@@ -282,7 +281,6 @@ class Splitter:
 
                 self.new_operators.append(new_op_info)
                 op = Node(new_op_info, split_op_id)
-                op.is_mac_main_op = True
                 self.nodes.append(SplitterNode(op))
                 self.nodes[opid].split_id.append(split_op_id)
                 split_op_id += 1
@@ -367,7 +365,6 @@ class Splitter:
 
                 self.new_operators.append(new_op_info)
                 op = Node(new_op_info, split_op_id)
-                op.is_mac_main_op = True
                 self.nodes.append(SplitterNode(op))
                 self.nodes[opid].split_id.append(split_op_id)
                 split_op_id += 1
@@ -394,7 +391,6 @@ class Splitter:
                 new_op_info['inputs'] = [a,b]
                 new_op_info['outputs'] = [c]
                 op = Node(new_op_info,split_op_id)
-                op.is_elem_wise_main_op = True
                 self.nodes.append(SplitterNode(op))
                 self.new_operators.append(new_op_info)
                 self.nodes[opid].split_id.append(split_op_id)

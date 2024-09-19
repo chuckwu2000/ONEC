@@ -7,10 +7,11 @@ class Node:
         self.children = []
         self.info = copy.deepcopy(op_info)
         self.opid = id
+        self.schedule_order = -1
         self.is_mac_main_op = False
         self.is_elem_wise_main_op = False
         # This represent this op only can hoist to the opid larger than this value.
-        self.hoist_max_opid = sys.maxsize
+        self.hoist_min_schedule_order = -1
         # This represent that this op is matched with another op run currently in each of MAC/ELE engine.
         self.have_matched = False
     def append_children(self, children):
@@ -127,8 +128,6 @@ class Graph:
             for child in sorted(self.ops[current_id].children, key=lambda op_id: self.ops[op_id].info['outputs'][0]):
                 if child not in DFS_orderred_operators:
                     DFS_ordering(child, DFS_orderred_operators)
-            for parent in self.ops[current_id].parents:
-                self.ops[current_id].hoist_max_opid = min(self.ops[current_id].hoist_max_opid, parent)
         if self.DFS_ordered == False:
             self.DFS_ordered = True
             self.BFS_ordered = False
@@ -137,7 +136,13 @@ class Graph:
                 if self.in_tensor_id in op.info['inputs']:
                     start_id = i
             DFS_ordering(start_id, new_operators)
-            self.operators = [self.ops[op].info for op in new_operators]
+            self.operators = []
+            # For pipeline schedule, we need to record the order of each op.
+            self.ordered_opid = new_operators
+            for i, op in enumerate(new_operators):
+                self.ops[op].schedule_order = i
+                self.operators.append(self.ops[op].info)
+
 
     def ensure_BFS_order(self):
         import collections
