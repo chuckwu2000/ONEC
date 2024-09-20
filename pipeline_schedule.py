@@ -58,11 +58,18 @@ def pipeline_schedule(split_graph: Graph):
                         split_graph.ops[opid].have_matched = True
                         split_graph.ops[opid].schedule_order = insert_pos
                         break
-        # TODO: Rewrite the operators (represents the execution order)
+        # Store the new schedule order into a list
         split_graph.operators = []
-        for i, op in enumerate(new_operators):
-            split_graph.ops[op].schedule_order = i
-            split_graph.operators.append(split_graph.ops[op].info)
+        new_schedule_order_list = []
+        for i, op in enumerate(split_graph.ops):
+            new_schedule_order_list.append((i, op.schedule_order))
+        # Sort the list by schedule order
+        order = 0
+        for elem in sorted(new_schedule_order_list, key=lambda pair: pair[1]):
+            op = split_graph.ops[elem[0]]
+            op.schedule_order = order
+            order += 1
+            split_graph.operators.append(op.info)
     
     # Assume root id is 0
     set_hoist_min_schedule_order(split_graph, 0)
