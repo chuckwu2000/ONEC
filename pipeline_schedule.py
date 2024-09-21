@@ -1,4 +1,5 @@
 from MyGraph import Graph
+from performance import estimate_add_cycles
 import queue
 
 def pipeline_schedule(split_graph: Graph):
@@ -22,14 +23,15 @@ def pipeline_schedule(split_graph: Graph):
     def set_active_engine(split_graph: Graph):
         new_operators = split_graph.ordered_opid
         for opid in new_operators:
-            opcode_idx = split_graph.ops[opid].info.get("builtin_options_type")
-            if opcode_idx == "AddOptions":
+            opcode_type = split_graph.ops[opid].info.get("builtin_options_type")
+            if opcode_type == "AddOptions":
                 split_graph.ops[opid].is_mac_main_op = False
                 split_graph.ops[opid].is_elem_wise_main_op = True
-            elif opcode_idx == "Conv2DOptions":
+                estimate_add_cycles(split_graph, opid)
+            elif opcode_type == "Conv2DOptions":
                 split_graph.ops[opid].is_mac_main_op = True
                 split_graph.ops[opid].is_elem_wise_main_op = False
-            elif opcode_idx == "DepthwiseConv2DOptions":
+            elif opcode_type == "DepthwiseConv2DOptions":
                 split_graph.ops[opid].is_mac_main_op = True
                 split_graph.ops[opid].is_elem_wise_main_op = False
             else:
