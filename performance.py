@@ -101,8 +101,66 @@ def estimate_conv_cycles(model: Graph, opid: int) -> int:
     return total_cycles
 
 # Estimate the number of cycles for a given depthwise convolution operation (reference to _estimate_depthwise_conv_cycles)
-def estimate_depthwise_conv_cycles():
-    pass
+def estimate_depthwise_conv_cycles(model: Graph, opid: int) -> int:
+    tensors = model.tensors
+    info = model.ops[opid].info
+    inputs = info.get("inputs")
+    outputs = info.get("outputs")
+
+    # Not constraint the number of inputs, since in TS model, the input tensor is represent the dependence relationship, so it may have more than 1 inputs
+    if len(outputs) != 1:
+        raise "DepthwiseConv2D operation should have at least 1 output"
+    
+    ifm_list = []
+    for input_id in range (4, len(inputs)):
+        ifm_list.append(tensors[inputs[input_id]])
+    ifm = tensors[inputs[4]]
+    ofm = tensors[outputs[0]]
+
+    # Only fetch first ifm in the list, since it has checked that all ifm have the same shape in the TS model
+    ifm_shape = ifm.get("shape")
+    ofm_shape = ofm.get("shape")
+    if ifm.get("type") == "INT8":
+        ifm_elem_size = 8
+    else:
+        raise "IFM only support INT8 data type"
+    # ifm's size (bytes)
+    ifm_storge_size = ifm_shape[0] * ifm_shape[1] * ifm_shape[2] * ifm_shape[3] * (ifm_elem_size / 8)
+    
+    # Weight tensor
+    weight = tensors[inputs[1]]
+    weight_shape = weight.get("shape")
+    if weight.get("type") == "INT8":
+        weight_elem_size = 8
+    else:
+        raise "Weights only support INT8 data type"
+    # weight's size (bytes)
+    weight_storge_size = weight_shape[0] * weight_shape[1] * weight_shape[2] * weight_shape[3] * (weight_elem_size / 8)
+    
+    # Bias tensor
+    bias = tensors[inputs[2]]
+    bias_shape = bias.get("shape")
+    if bias.get("type") == "INT32":
+        bias_elem_size = 32
+    else:
+        raise "Bias only support INT32 data type"
+    # bias's size (bytes)
+    bias_storge_size = bias_shape[0] * (bias_elem_size / 8)
+
+    # DMA transfer cycles
+    total_ifm_storge_size = ifm_storge_size * len(ifm_list)
+    dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, total_ifm_storge_size)
+    dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.OffChipFlash, Mem_area.SRAM, weight_storge_size)
+    dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.OffChipFlash, Mem_area.SRAM, bias_storge_size)
+
+    # Computations cycles
+    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["MAC"]
+    # Total produce height * width * channel elements, each element need 1 * weight_size * weight_size MACs => weight_shape * ofm_height * ofm_width
+    MACs = weight_shape[0] * weight_shape[1] * weight_shape[2] * weight_shape[3] * ofm_shape[1] * ofm_shape[2]
+    op_cycles = MACs * cycle_per_elem
+
+    total_cycles = dma_transfer_cycles + op_cycles
+    return total_cycles
 
 # Estimate the number of cycles for memory to memory transfer (reference to measure_mem2mem_cycles)
 def estimate_mem2mem_cycles(src_tensor_mem_area, dst_tensor_mem_area, transfer_size) -> int:
@@ -125,10 +183,8 @@ def estimate_op_cycles(model: Graph, opid: int) -> int:
         op_cycles = estimate_conv_cycles(model, opid)
         op.estimated_cycles = op_cycles
     elif opcode_type == "DepthwiseConv2DOptions":
-        # op_cycles = estimate_depthwise_conv_cycles(model, opid)
-        op_cycles = 0
-        op.estimated_cycles = 0
-        pass
+        op_cycles = estimate_depthwise_conv_cycles(model, opid)
+        op.estimated_cycles = op_cycles
     else:
         op_cycles = 0
         op.estimated_cycles = 0
