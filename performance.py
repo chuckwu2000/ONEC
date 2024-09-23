@@ -35,8 +35,10 @@ def estimate_add_cycles(model: Graph, opid: int) -> int:
     dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm1_storge_size + ifm2_storge_size)
 
     # TODO Computations cycles
+    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["ADD/SUB"]
+    op_cycles = ofm_shape[0] * ofm_shape[1] * ofm_shape[2] * ofm_shape[3] * cycle_per_elem
 
-    total_cycles = dma_transfer_cycles
+    total_cycles = dma_transfer_cycles + op_cycles
     return total_cycles
 
 # Estimate the number of cycles for a given convolution operation (reference to _estimate_conv_cycles)
