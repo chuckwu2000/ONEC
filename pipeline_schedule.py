@@ -1,5 +1,4 @@
 from MyGraph import Graph
-from performance import estimate_add_cycles
 import queue
 
 def pipeline_schedule(split_graph: Graph):
@@ -27,7 +26,6 @@ def pipeline_schedule(split_graph: Graph):
             if opcode_type == "AddOptions":
                 split_graph.ops[opid].is_mac_main_op = False
                 split_graph.ops[opid].is_elem_wise_main_op = True
-                estimate_add_cycles(split_graph, opid)
             elif opcode_type == "Conv2DOptions":
                 split_graph.ops[opid].is_mac_main_op = True
                 split_graph.ops[opid].is_elem_wise_main_op = False
@@ -60,8 +58,9 @@ def pipeline_schedule(split_graph: Graph):
                         split_graph.ops[opid].have_matched = True
                         split_graph.ops[opid].schedule_order = insert_pos
                         break
-        # Store the new schedule order into a list
+        # Store the new schedule order into a list, it contain some op have the same schedule order
         split_graph.operators = []
+        split_graph.ordered_opid = []
         new_schedule_order_list = []
         for i, op in enumerate(split_graph.ops):
             new_schedule_order_list.append((i, op.schedule_order))
@@ -72,6 +71,7 @@ def pipeline_schedule(split_graph: Graph):
             op.schedule_order = order
             order += 1
             split_graph.operators.append(op.info)
+            split_graph.ordered_opid.append(op.opid)
     
     # Assume root id is 0
     set_hoist_min_schedule_order(split_graph, 0)

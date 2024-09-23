@@ -6,6 +6,7 @@ from MyGraph import Graph
 from AutoSplit import Splitter
 import tempfile
 from pipeline_schedule import pipeline_schedule
+from performance import estimate_model
 
 parser = argparse.ArgumentParser()
 parser.add_argument("model_path")
@@ -79,6 +80,7 @@ if args.pad_fusion:
 
 new_graph = splitter.perform_split()
 pipeline_new_graph = pipeline_schedule(new_graph)
+estimate_model(pipeline_new_graph)
 new_buffers, new_tensors, new_inputs, new_outputs, new_operators, new_opcodes = pipeline_new_graph.export()
 
 new_model['buffers'] = new_buffers
