@@ -3,21 +3,6 @@ import queue
 
 def pipeline_schedule(split_graph: Graph):
     # TODO: Implement pipeline scheduling
-    def set_hoist_min_schedule_order(split_graph: Graph, current_id):
-        q = queue.Queue()
-        q.put(current_id)
-        # Use BFS to traverse the graph & set hoist_min_schedule_order
-        visited_node = []
-        while(not q.empty()):
-            current_id = q.get()
-            visited_node.append(current_id)
-            for parent in split_graph.ops[current_id].parents:
-                split_graph.ops[current_id].hoist_min_schedule_order = max(split_graph.ops[current_id].hoist_min_schedule_order, split_graph.ops[parent].schedule_order)
-            for child in split_graph.ops[current_id].children:
-                if child not in visited_node:
-                    q.put(child)
-        # for op in split_graph.ordered_opid:
-        #     print(f"opid: {op}, hoist_min_schedule_order: {split_graph.ops[op].hoist_min_schedule_order}")
 
     def set_active_engine(split_graph: Graph):
         new_operators = split_graph.ordered_opid
@@ -47,7 +32,12 @@ def pipeline_schedule(split_graph: Graph):
         new_operators = split_graph.ordered_opid
         # Check each op whether can hoist and modify its order in DF-1 schedule
         for opid in new_operators:
-            #print(f"opid: {opid}, is_mac_main_op: {split_graph.ops[opid].is_mac_main_op}, is_ele_main_op: {split_graph.ops[opid].is_elem_wise_main_op}")
+            # Before re-schedule this op, update its hoidt_min_schedule_order, since their parents may have been re-scheduled
+            split_graph.ops[opid].hoist_min_schedule_order = -1
+            for parent in split_graph.ops[opid].parents:
+                split_graph.ops[opid].hoist_min_schedule_order = max(split_graph.ops[opid].hoist_min_schedule_order, round(split_graph.ops[parent].schedule_order)) + 1
+
+            # Check whether this op can be hoisted
             if split_graph.ops[opid].is_mac_main_op:
                 # Find the insert position
                 for insert_pos in range(split_graph.ops[opid].hoist_min_schedule_order, split_graph.ops[opid].schedule_order):
@@ -55,7 +45,8 @@ def pipeline_schedule(split_graph: Graph):
                     if split_graph.ops[insert_pos_opid].is_elem_wise_main_op and split_graph.ops[insert_pos_opid].have_matched is False:
                         split_graph.ops[insert_pos_opid].have_matched = True
                         split_graph.ops[opid].have_matched = True
-                        split_graph.ops[opid].schedule_order = insert_pos
+                        split_graph.ops[opid].schedule_order = insert_pos + 0.5
+                        split_graph.matched_ops.append((insert_pos_opid, opid))
                         break
             elif split_graph.ops[opid].is_elem_wise_main_op:
                 for insert_pos in range(split_graph.ops[opid].hoist_min_schedule_order, split_graph.ops[opid].schedule_order):
@@ -63,7 +54,8 @@ def pipeline_schedule(split_graph: Graph):
                     if split_graph.ops[insert_pos_opid].is_mac_main_op and split_graph.ops[insert_pos_opid].have_matched is False:
                         split_graph.ops[insert_pos_opid].have_matched = True
                         split_graph.ops[opid].have_matched = True
-                        split_graph.ops[opid].schedule_order = insert_pos
+                        split_graph.ops[opid].schedule_order = insert_pos + 0.5
+                        split_graph.matched_ops.append((insert_pos_opid, opid))
                         break
         # Store the new schedule order into a list, it contain some op have the same schedule order
         split_graph.operators = []
@@ -79,9 +71,6 @@ def pipeline_schedule(split_graph: Graph):
             order += 1
             split_graph.operators.append(op.info)
             split_graph.ordered_opid.append(op.opid)
-    
-    # Assume root id is 0
-    set_hoist_min_schedule_order(split_graph, 0)
 
     # Set active engine
     set_active_engine(split_graph)

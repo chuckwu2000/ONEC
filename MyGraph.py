@@ -14,7 +14,9 @@ class Node:
         self.hoist_min_schedule_order = -1
         # This represent that this op is matched with another op run currently in each of MAC/ELE engine.
         self.have_matched = False
-        self.estimated_cycles = 0
+        self.estimated_DMA_cycles = 0
+        self.estimated_op_cycles = 0
+        self.estimated_total_cycles = 0
     def append_children(self, children):
         self.children+=children
 
@@ -79,6 +81,7 @@ class Graph:
         self.ops = None
         self.DFS_ordered = False
         self.BFS_ordered = False
+        self.matched_ops = []
         self.build_graph_from_ops(copy.deepcopy(ops))
 
     def build_DFS(self, current_id, op_lookup_input):

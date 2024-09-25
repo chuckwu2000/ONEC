@@ -36,7 +36,7 @@ def estimate_add_cycles(model: Graph, opid: int) -> int:
     op_cycles = ofm_elems * cycle_per_elem
 
     total_cycles = dma_transfer_cycles + op_cycles
-    return total_cycles
+    return dma_transfer_cycles, op_cycles, total_cycles
 
 # Estimate the number of cycles for a given mul operation
 def estimate_mul_cycles(model: Graph, opid: int) -> int:
@@ -72,7 +72,7 @@ def estimate_mul_cycles(model: Graph, opid: int) -> int:
     op_cycles = ofm_elems * cycle_per_elem
 
     total_cycles = dma_transfer_cycles + op_cycles
-    return total_cycles
+    return dma_transfer_cycles, op_cycles, total_cycles
 
 # Estimate the number of cycles for a given logistic operation
 def estimate_logistic_cycles(model: Graph, opid: int) -> int:
@@ -104,7 +104,7 @@ def estimate_logistic_cycles(model: Graph, opid: int) -> int:
     op_cycles = ofm_elems * cycle_per_elem
 
     total_cycles = dma_transfer_cycles + op_cycles
-    return total_cycles
+    return dma_transfer_cycles, op_cycles, total_cycles
 
 # Estimate the number of cycles for a given convolution operation
 def estimate_conv_cycles(model: Graph, opid: int) -> int:
@@ -166,7 +166,7 @@ def estimate_conv_cycles(model: Graph, opid: int) -> int:
     op_cycles = MACs * cycle_per_elem
 
     total_cycles = dma_transfer_cycles + op_cycles
-    return total_cycles
+    return (dma_transfer_cycles, op_cycles, total_cycles)
 
 # Estimate the number of cycles for a given depthwise convolution operation
 def estimate_depthwise_conv_cycles(model: Graph, opid: int) -> int:
@@ -228,7 +228,7 @@ def estimate_depthwise_conv_cycles(model: Graph, opid: int) -> int:
     op_cycles = MACs * cycle_per_elem
 
     total_cycles = dma_transfer_cycles + op_cycles
-    return total_cycles
+    return (dma_transfer_cycles, op_cycles, total_cycles)
 
 # Estimate the number of cycles for memory to memory transfer
 def estimate_mem2mem_cycles(src_tensor_mem_area, dst_tensor_mem_area, transfer_size) -> int:
@@ -246,31 +246,53 @@ def estimate_op_cycles(model: Graph, opid: int) -> int:
     opcode_index = op.info.get("opcode_index")
     opcode_type = model.opcodes[opcode_index].get("builtin_code")
     if opcode_type == "ADD":
-        op_cycles = estimate_add_cycles(model, opid)
-        op.estimated_cycles = op_cycles
+        dma_cycles, op_cycles, total_cycles = estimate_add_cycles(model, opid)
+        op.estimated_DMA_cycles = dma_cycles
+        op.estimated_op_cycles = op_cycles
+        op.estimated_total_cycles = total_cycles
     elif opcode_type == "MUL":
-        op_cycles = estimate_mul_cycles(model, opid)
-        op.estimated_cycles = op_cycles
+        dma_cycles, op_cycles, total_cycles = estimate_mul_cycles(model, opid)
+        op.estimated_DMA_cycles = dma_cycles
+        op.estimated_op_cycles = op_cycles
+        op.estimated_total_cycles = total_cycles
     elif opcode_type == "LOGISTIC":
-        op_cycles = estimate_logistic_cycles(model, opid)
-        op.estimated_cycles = op_cycles
+        dma_cycles, op_cycles, total_cycles = estimate_logistic_cycles(model, opid)
+        op.estimated_DMA_cycles = dma_cycles
+        op.estimated_op_cycles = op_cycles
+        op.estimated_total_cycles = total_cycles
     elif opcode_type == "CONV_2D":
-        op_cycles = estimate_conv_cycles(model, opid)
-        op.estimated_cycles = op_cycles
+        dma_cycles, op_cycles, total_cycles = estimate_conv_cycles(model, opid)
+        op.estimated_DMA_cycles = dma_cycles
+        op.estimated_op_cycles = op_cycles
+        op.estimated_total_cycles = total_cycles
     elif opcode_type == "DEPTHWISE_CONV_2D":
-        op_cycles = estimate_depthwise_conv_cycles(model, opid)
-        op.estimated_cycles = op_cycles
+        dma_cycles, op_cycles, total_cycles = estimate_depthwise_conv_cycles(model, opid)
+        op.estimated_DMA_cycles = dma_cycles
+        op.estimated_op_cycles = op_cycles
+        op.estimated_total_cycles = total_cycles
     else:
-        op_cycles = 0
-        op.estimated_cycles = 0
+        total_cycles = 0
         print(f"Not yet supported {opcode_type}'s cycle estimation, its opcode_index is {opcode_index}")
-    return op_cycles
+    return total_cycles
 
-def estimate_model(model: Graph) -> int:
+def estimate_model(model: Graph, pipeline: bool) -> int:
     total_cycles = 0
-    for opid in model.ordered_opid:
-        total_cycles += estimate_op_cycles(model, opid)
-    print_performance(model)
+    # Assume pipeline always happen after the model is splitted
+    if pipeline:
+        matched_ops = model.matched_ops
+        for opid in model.ordered_opid:
+            total_cycles += model.ops[opid].estimated_total_cycles
+        # Even MAC and elem-wise engines can run in parallel, but it can't release the transfer cycles
+        for matched_op in matched_ops:
+            op1 = model.ops[matched_op[0]]
+            op2 = model.ops[matched_op[1]]
+            if op1.estimated_op_cycles > op2.estimated_op_cycles:
+                total_cycles -= op2.estimated_op_cycles
+            else:
+                total_cycles -= op1.estimated_op_cycles
+    else:
+        for opid in model.ordered_opid:
+            total_cycles += estimate_op_cycles(model, opid)
     return total_cycles
 
 def print_performance(model: Graph):
@@ -278,5 +300,5 @@ def print_performance(model: Graph):
         op = model.ops[opid]
         opcode_index = op.info.get("opcode_index")
         opcode_type = model.opcodes[opcode_index].get("builtin_code")
-        op_cycles = op.estimated_cycles
+        op_cycles = op.estimated_total_cycles
         print(f"opcode_type: {opcode_type}, cycles: {op_cycles}")

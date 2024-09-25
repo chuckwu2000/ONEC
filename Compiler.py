@@ -7,6 +7,7 @@ from AutoSplit import Splitter
 import tempfile
 from pipeline_schedule import pipeline_schedule
 from performance import estimate_model
+from performance import print_performance
 
 parser = argparse.ArgumentParser()
 parser.add_argument("model_path")
@@ -92,10 +93,14 @@ if args.pad_fusion:
 
 new_graph = splitter.perform_split()
 if args.verbose_performance:
-    print(f"Before pipeline schedule: total cycles = {estimate_model(new_graph)}")
+    before_pipeline_cycles = estimate_model(new_graph, pipeline = False)
+    print_performance(new_graph)
+    print(f"Before pipeline schedule: total cycles = {before_pipeline_cycles}")
 pipeline_new_graph = pipeline_schedule(new_graph)
 if args.verbose_performance:
-    print(f"After pipeline schedule: total cycles = {estimate_model(pipeline_new_graph)}")
+    after_pipeline_cycles = estimate_model(pipeline_new_graph, pipeline = True)
+    print(f"After pipeline schedule: total cycles = {after_pipeline_cycles}")
+    print(f"speedup = {((before_pipeline_cycles/after_pipeline_cycles) - 1) * 100 :.2f}%")
 new_buffers, new_tensors, new_inputs, new_outputs, new_operators, new_opcodes = pipeline_new_graph.export()
 
 new_model['buffers'] = new_buffers
