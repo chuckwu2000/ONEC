@@ -15,6 +15,7 @@ parser.add_argument("--out_path")
 parser.add_argument("--exec_order", nargs='?', default="DF")
 parser.add_argument("--split_height", nargs='?', type=int, default=2)
 parser.add_argument("--pad_fusion", action='store_true')
+parser.add_argument("--verbose_performance", action='store_true')
 
 args = parser.parse_args()
 filename = os.path.basename(args.model_path)
@@ -40,6 +41,17 @@ buffers = model['buffers']
 subgraphs = model["subgraphs"]
 tensors = subgraphs[0]["tensors"]
 operators = subgraphs[0]["operators"]
+
+# Don't know why ADD's info is missing, so add it back
+for opcode in opcodes:
+    if opcode.get('deprecated_builtin_code',0) == 0:
+        opcode['deprecated_builtin_code'] = 0
+        opcode['builtin_code'] = "ADD"
+
+# Don't know why opcode_index 0 is missing, so add it back
+for operator in operators:
+    if 'opcode_index' not in operator:
+        operator['opcode_index'] = 0
 
 new_opcodes = copy.deepcopy(opcodes)
 
@@ -79,8 +91,11 @@ if args.pad_fusion:
     splitter.PaddingFusion()
 
 new_graph = splitter.perform_split()
+if args.verbose_performance:
+    print(f"Before pipeline schedule: total cycles = {estimate_model(new_graph)}")
 pipeline_new_graph = pipeline_schedule(new_graph)
-estimate_model(pipeline_new_graph)
+if args.verbose_performance:
+    print(f"After pipeline schedule: total cycles = {estimate_model(pipeline_new_graph)}")
 new_buffers, new_tensors, new_inputs, new_outputs, new_operators, new_opcodes = pipeline_new_graph.export()
 
 new_model['buffers'] = new_buffers

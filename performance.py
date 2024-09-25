@@ -2,7 +2,7 @@ from MyGraph import Graph
 from Architecture_feature import Mem_area
 from Architecture_feature import ArchitectureFeatures
 
-# Estimate the number of cycles for a given add operation (reference to _estimate_add_cycles)
+# Estimate the number of cycles for a given add operation
 def estimate_add_cycles(model: Graph, opid: int) -> int:
     tensors = model.tensors
     info = model.ops[opid].info
@@ -38,7 +38,75 @@ def estimate_add_cycles(model: Graph, opid: int) -> int:
     total_cycles = dma_transfer_cycles + op_cycles
     return total_cycles
 
-# Estimate the number of cycles for a given convolution operation (reference to _estimate_conv_cycles)
+# Estimate the number of cycles for a given mul operation
+def estimate_mul_cycles(model: Graph, opid: int) -> int:
+    tensors = model.tensors
+    info = model.ops[opid].info
+    inputs = info.get("inputs")
+    outputs = info.get("outputs")
+
+    if len(inputs) != 2 or len(outputs) != 1:
+        raise "Mul operation should have 2 inputs and 1 output"
+    ifm1 = tensors[inputs[0]]
+    ifm2 = tensors[inputs[1]]
+    ofm = tensors[outputs[0]]
+    ifm1_shape = ifm1.get("shape")
+    ifm2_shape = ifm2.get("shape")
+    ofm_shape = ofm.get("shape")
+    if ifm1.get("type") == "INT8" and ifm2.get("type") == "INT8":
+        ifm1_elem_size = 8
+        ifm2_elem_size = 8
+    else:
+        raise "Only support INT8 data type"
+    
+    # ifm's size (bytes)
+    ifm1_storge_size = ifm1_shape[0] * ifm1_shape[1] * ifm1_shape[2] * ifm1_shape[3] * (ifm1_elem_size / 8)
+    ifm2_storge_size = ifm2_shape[0] * ifm2_shape[1] * ifm2_shape[2] * ifm2_shape[3] * (ifm2_elem_size / 8)
+
+    # DMA transfer cycles
+    dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm1_storge_size + ifm2_storge_size)
+
+    # Computations cycles
+    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["MUL"]
+    ofm_elems = ofm_shape[0] * ofm_shape[1] * ofm_shape[2] * ofm_shape[3]
+    op_cycles = ofm_elems * cycle_per_elem
+
+    total_cycles = dma_transfer_cycles + op_cycles
+    return total_cycles
+
+# Estimate the number of cycles for a given logistic operation
+def estimate_logistic_cycles(model: Graph, opid: int) -> int:
+    tensors = model.tensors
+    info = model.ops[opid].info
+    inputs = info.get("inputs")
+    outputs = info.get("outputs")
+
+    if len(inputs) != 1 or len(outputs) != 1:
+        raise "Logistic operation should have 1 inputs and 1 output"
+    ifm = tensors[inputs[0]]
+    ofm = tensors[outputs[0]]
+    ifm_shape = ifm.get("shape")
+    ofm_shape = ofm.get("shape")
+    if ifm.get("type") == "INT8":
+        ifm_elem_size = 8
+    else:
+        raise "Only support INT8 data type"
+    
+    # ifm's size (bytes)
+    ifm_storge_size = ifm_shape[0] * ifm_shape[1] * ifm_shape[2] * ifm_shape[3] * (ifm_elem_size / 8)
+
+    # DMA transfer cycles
+    dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size + ifm_storge_size)
+
+    # Computations cycles
+    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["LOGISTIC"]
+    ofm_elems = ofm_shape[0] * ofm_shape[1] * ofm_shape[2] * ofm_shape[3]
+    op_cycles = ofm_elems * cycle_per_elem
+
+    total_cycles = dma_transfer_cycles + op_cycles
+    return total_cycles
+
+# Estimate the number of cycles for a given convolution operation
 def estimate_conv_cycles(model: Graph, opid: int) -> int:
     tensors = model.tensors
     info = model.ops[opid].info
@@ -100,7 +168,7 @@ def estimate_conv_cycles(model: Graph, opid: int) -> int:
     total_cycles = dma_transfer_cycles + op_cycles
     return total_cycles
 
-# Estimate the number of cycles for a given depthwise convolution operation (reference to _estimate_depthwise_conv_cycles)
+# Estimate the number of cycles for a given depthwise convolution operation
 def estimate_depthwise_conv_cycles(model: Graph, opid: int) -> int:
     tensors = model.tensors
     info = model.ops[opid].info
@@ -162,7 +230,7 @@ def estimate_depthwise_conv_cycles(model: Graph, opid: int) -> int:
     total_cycles = dma_transfer_cycles + op_cycles
     return total_cycles
 
-# Estimate the number of cycles for memory to memory transfer (reference to measure_mem2mem_cycles)
+# Estimate the number of cycles for memory to memory transfer
 def estimate_mem2mem_cycles(src_tensor_mem_area, dst_tensor_mem_area, transfer_size) -> int:
     if src_tensor_mem_area == Mem_area.OffChipFlash and dst_tensor_mem_area == Mem_area.SRAM:
         bws_per_cycle = (ArchitectureFeatures.axi_bit_width / 8) * ArchitectureFeatures.OffChipFlash_clock_scale
@@ -172,23 +240,30 @@ def estimate_mem2mem_cycles(src_tensor_mem_area, dst_tensor_mem_area, transfer_s
         transfer_cycles = transfer_size / bws_per_cycle
     return transfer_cycles
 
-# Estimate the number of cycles for a given operation (reference to estimate_full_op_performance)
+# Estimate the number of cycles for a given operation
 def estimate_op_cycles(model: Graph, opid: int) -> int:
     op = model.ops[opid]
-    opcode_type = op.info.get("builtin_options_type")
-    if opcode_type == "AddOptions":
+    opcode_index = op.info.get("opcode_index")
+    opcode_type = model.opcodes[opcode_index].get("builtin_code")
+    if opcode_type == "ADD":
         op_cycles = estimate_add_cycles(model, opid)
         op.estimated_cycles = op_cycles
-    elif opcode_type == "Conv2DOptions":
+    elif opcode_type == "MUL":
+        op_cycles = estimate_mul_cycles(model, opid)
+        op.estimated_cycles = op_cycles
+    elif opcode_type == "LOGISTIC":
+        op_cycles = estimate_logistic_cycles(model, opid)
+        op.estimated_cycles = op_cycles
+    elif opcode_type == "CONV_2D":
         op_cycles = estimate_conv_cycles(model, opid)
         op.estimated_cycles = op_cycles
-    elif opcode_type == "DepthwiseConv2DOptions":
+    elif opcode_type == "DEPTHWISE_CONV_2D":
         op_cycles = estimate_depthwise_conv_cycles(model, opid)
         op.estimated_cycles = op_cycles
     else:
         op_cycles = 0
         op.estimated_cycles = 0
-        print(f"Not yet supported {opcode_type}'s cycle estimation")
+        print(f"Not yet supported {opcode_type}'s cycle estimation, its opcode_index is {opcode_index}")
     return op_cycles
 
 def estimate_model(model: Graph) -> int:
@@ -201,6 +276,7 @@ def estimate_model(model: Graph) -> int:
 def print_performance(model: Graph):
     for opid in model.ordered_opid:
         op = model.ops[opid]
-        opcode_type = op.info.get("builtin_options_type")
+        opcode_index = op.info.get("opcode_index")
+        opcode_type = model.opcodes[opcode_index].get("builtin_code")
         op_cycles = op.estimated_cycles
         print(f"opcode_type: {opcode_type}, cycles: {op_cycles}")

@@ -19,7 +19,7 @@ class Splitter:
         self.nodes = [SplitterNode(n) for n in self.ori_graph.ops]
         self.splittable_opcode_idxes = {}
         for i, opcode in enumerate(self.opcodes):
-            if opcode.get("deprecated_builtin_code", 0) in [0, 34, 3, 4]:
+            if opcode.get("deprecated_builtin_code", 0) in [0, 34, 3, 4, 18, 14]:
                 self.splittable_opcode_idxes[opcode.get("deprecated_builtin_code", 0)] = i
 
     def re_init(self, ori_graph):
@@ -31,7 +31,7 @@ class Splitter:
         self.nodes = [SplitterNode(n) for n in self.ori_graph.ops]
         self.splittable_opcode_idxes = {}
         for i, opcode in enumerate(self.opcodes):
-            if opcode.get("deprecated_builtin_code", 0) in [0, 34, 3, 4]:
+            if opcode.get("deprecated_builtin_code", 0) in [0, 34, 3, 4, 18, 14]:
                 self.splittable_opcode_idxes[opcode.get("deprecated_builtin_code", 0)] = i
 
     def perform_split(self)->Graph:
@@ -168,6 +168,10 @@ class Splitter:
             self.split_conv(opid, input_split, output_split)
         elif opcode_idx == self.splittable_opcode_idxes.get(4 , -1):
             self.split_dwconv(opid, input_split, output_split)
+        elif opcode_idx == self.splittable_opcode_idxes.get(14, -1):
+            self.split_logistic(opid, output_split)
+        elif opcode_idx == self.splittable_opcode_idxes.get(18, -1):
+            self.split_mul(opid, output_split)
         elif opcode_idx == self.splittable_opcode_idxes.get(34, -1):
             self.split_pad(opid, output_split)
 
@@ -386,7 +390,7 @@ class Splitter:
             split_op_id = len(self.nodes)
             for a,b,c in zip(self.split_tensor_table[inputs[0]],
                             self.split_tensor_table[inputs[1]],
-                             self.split_tensor_table[outputs[0]]):
+                            self.split_tensor_table[outputs[0]]):
                 new_op_info = copy.deepcopy(info)
                 new_op_info['inputs'] = [a,b]
                 new_op_info['outputs'] = [c]
@@ -395,6 +399,57 @@ class Splitter:
                 self.new_operators.append(new_op_info)
                 self.nodes[opid].split_id.append(split_op_id)
                 split_op_id+=1
+
+    def split_mul(self, opid, output_split):
+        info = self.nodes[opid].node.info
+        self.split_tensor_by_n(info['outputs'][0], output_split)
+
+        inputs = info['inputs']
+        outputs = info['outputs']
+
+        if len(inputs) != 2:
+            raise "wrong input number"
+        elif len(outputs) != 1:
+            raise "wrong output number"
+        elif len(self.split_tensor_table[inputs[0]]) != len(self.split_tensor_table[inputs[1]]):
+            raise BaseException("split number of two operand is not equal")
+        else:
+            split_op_id = len(self.nodes)
+            for a,b,c in zip(self.split_tensor_table[inputs[0]],
+                            self.split_tensor_table[inputs[1]],
+                            self.split_tensor_table[outputs[0]]):
+                new_op_info = copy.deepcopy(info)
+                new_op_info['inputs'] = [a,b]
+                new_op_info['outputs'] = [c]
+                op = Node(new_op_info,split_op_id)
+                self.nodes.append(SplitterNode(op))
+                self.new_operators.append(new_op_info)
+                self.nodes[opid].split_id.append(split_op_id)
+                split_op_id+=1
+
+    def split_logistic(self, opid, output_split):
+            info = self.nodes[opid].node.info
+            self.split_tensor_by_n(info['outputs'][0], output_split)
+
+            inputs = info['inputs']
+            outputs = info['outputs']
+
+            if len(inputs) != 1:
+                raise "wrong input number"
+            elif len(outputs) != 1:
+                raise "wrong output number"
+            else:
+                split_op_id = len(self.nodes)
+                for a,b in zip(self.split_tensor_table[inputs[0]],
+                                self.split_tensor_table[outputs[0]]):
+                    new_op_info = copy.deepcopy(info)
+                    new_op_info['inputs'] = [a]
+                    new_op_info['outputs'] = [b]
+                    op = Node(new_op_info,split_op_id)
+                    self.nodes.append(SplitterNode(op))
+                    self.new_operators.append(new_op_info)
+                    self.nodes[opid].split_id.append(split_op_id)
+                    split_op_id+=1
 
     def split_block_input(self, start_opid, input_split):
         info = self.nodes[start_opid].node.info

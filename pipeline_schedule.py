@@ -22,14 +22,21 @@ def pipeline_schedule(split_graph: Graph):
     def set_active_engine(split_graph: Graph):
         new_operators = split_graph.ordered_opid
         for opid in new_operators:
-            opcode_type = split_graph.ops[opid].info.get("builtin_options_type")
-            if opcode_type == "AddOptions":
+            opcode_index = split_graph.ops[opid].info.get("opcode_index")
+            opcode_type = split_graph.opcodes[opcode_index].get("builtin_code")
+            if opcode_type == "ADD":
                 split_graph.ops[opid].is_mac_main_op = False
                 split_graph.ops[opid].is_elem_wise_main_op = True
-            elif opcode_type == "Conv2DOptions":
+            elif opcode_type == "MUL":
+                split_graph.ops[opid].is_mac_main_op = False
+                split_graph.ops[opid].is_elem_wise_main_op = True
+            elif opcode_type == "LOGISTIC":
+                split_graph.ops[opid].is_mac_main_op = False
+                split_graph.ops[opid].is_elem_wise_main_op = True
+            elif opcode_type == "CONV_2D":
                 split_graph.ops[opid].is_mac_main_op = True
                 split_graph.ops[opid].is_elem_wise_main_op = False
-            elif opcode_type == "DepthwiseConv2DOptions":
+            elif opcode_type == "DEPTHWISE_CONV_2D":
                 split_graph.ops[opid].is_mac_main_op = True
                 split_graph.ops[opid].is_elem_wise_main_op = False
             else:
