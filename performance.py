@@ -271,34 +271,49 @@ def estimate_op_cycles(model: Graph, opid: int) -> int:
         op.estimated_op_cycles = op_cycles
         op.estimated_total_cycles = total_cycles
     else:
+        dma_cycles = 0
+        op_cycles = 0
         total_cycles = 0
         print(f"Not yet supported {opcode_type}'s cycle estimation, its opcode_index is {opcode_index}")
-    return total_cycles
+    return dma_cycles, op_cycles, total_cycles
 
 def estimate_model(model: Graph, pipeline: bool) -> int:
+    total_dma_cycles = 0
+    total_op_cycles = 0
     total_cycles = 0
     # Assume pipeline always happen after the model is splitted
     if pipeline:
         matched_ops = model.matched_ops
         for opid in model.ordered_opid:
+            total_dma_cycles += model.ops[opid].estimated_DMA_cycles
+            total_op_cycles += model.ops[opid].estimated_op_cycles
             total_cycles += model.ops[opid].estimated_total_cycles
-        # Even MAC and elem-wise engines can run in parallel, but it can't release the transfer cycles
+        # For now, assume the two op parallel execution will take the longer one
         for matched_op in matched_ops:
             op1 = model.ops[matched_op[0]]
             op2 = model.ops[matched_op[1]]
-            if op1.estimated_op_cycles > op2.estimated_op_cycles:
-                total_cycles -= op2.estimated_op_cycles
+            if op1.estimated_total_cycles > op2.estimated_total_cycles:
+                total_dma_cycles -= op2.estimated_DMA_cycles
+                total_op_cycles -= op2.estimated_op_cycles
+                total_cycles -= op2.estimated_total_cycles
             else:
-                total_cycles -= op1.estimated_op_cycles
+                total_dma_cycles -= op1.estimated_DMA_cycles
+                total_op_cycles -= op1.estimated_op_cycles
+                total_cycles -= op1.estimated_total_cycles
     else:
         for opid in model.ordered_opid:
-            total_cycles += estimate_op_cycles(model, opid)
-    return total_cycles
+            dma_cycles, op_cycles, op_total_cycles = estimate_op_cycles(model, opid)
+            total_dma_cycles += dma_cycles
+            total_op_cycles += op_cycles
+            total_cycles += op_total_cycles
+    return total_dma_cycles, total_op_cycles, total_cycles
 
 def print_performance(model: Graph):
-    for opid in model.ordered_opid:
+    for order, opid in enumerate(model.ordered_opid):
         op = model.ops[opid]
         opcode_index = op.info.get("opcode_index")
         opcode_type = model.opcodes[opcode_index].get("builtin_code")
-        op_cycles = op.estimated_total_cycles
-        print(f"opcode_type: {opcode_type}, cycles: {op_cycles}")
+        dma_cycles = op.estimated_DMA_cycles
+        op_cycles = op.estimated_op_cycles
+        op_total_cycles = op.estimated_total_cycles
+        print(f"opcode_index: {opid}, order: {order}, opcode_type: {opcode_type}, DMA cycles: {dma_cycles}, OP cycles: {op_cycles}, Total cycles: {op_total_cycles}")

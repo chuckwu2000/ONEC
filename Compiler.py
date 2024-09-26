@@ -93,14 +93,15 @@ if args.pad_fusion:
 
 new_graph = splitter.perform_split()
 if args.verbose_performance:
-    before_pipeline_cycles = estimate_model(new_graph, pipeline = False)
+    split_dma_cycles, split_op_cycles, split_total_cycles = estimate_model(new_graph, pipeline = False)
     print_performance(new_graph)
-    print(f"Before pipeline schedule: total cycles = {before_pipeline_cycles}")
+    print(f"Before pipeline schedule: dma cycles = {split_dma_cycles}, op cycles = {split_op_cycles}, total cycles = {split_total_cycles}")
 pipeline_new_graph = pipeline_schedule(new_graph)
 if args.verbose_performance:
-    after_pipeline_cycles = estimate_model(pipeline_new_graph, pipeline = True)
-    print(f"After pipeline schedule: total cycles = {after_pipeline_cycles}")
-    print(f"speedup = {((before_pipeline_cycles/after_pipeline_cycles) - 1) * 100 :.2f}%")
+    pipeline_dma_cycles, pipeline_op_cycles, pipeline_total_cycles = estimate_model(pipeline_new_graph, pipeline = True)
+    print(f"match ops = {pipeline_new_graph.matched_ops}")
+    print(f"After pipeline schedule: dma cycles = {pipeline_dma_cycles}, op cycles = {pipeline_op_cycles}, total cycles = {pipeline_total_cycles}")
+    print(f"speedup = {((split_total_cycles/pipeline_total_cycles) - 1) * 100 :.2f}%")
 new_buffers, new_tensors, new_inputs, new_outputs, new_operators, new_opcodes = pipeline_new_graph.export()
 
 new_model['buffers'] = new_buffers

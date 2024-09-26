@@ -17,5 +17,5 @@ class ArchitectureFeatures:
     OffChipFlash_burst_length = 32
 
     # Output cycles per element (MAC main op, mul, add/sub)
-    # Now assune we have 128 MACs
-    output_cycles_per_elem = {"MAC": 1 / 128, "MUL": 2, "ADD/SUB": 1, "LOGISTIC": 1}
+    # Now assune we have 64 MACs
+    output_cycles_per_elem = {"MAC": 1 / 64, "MUL": 2, "ADD/SUB": 1, "LOGISTIC": 1}

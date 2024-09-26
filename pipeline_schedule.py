@@ -34,27 +34,49 @@ def pipeline_schedule(split_graph: Graph):
         for opid in new_operators:
             # Before re-schedule this op, update its hoidt_min_schedule_order, since their parents may have been re-scheduled
             split_graph.ops[opid].hoist_min_schedule_order = -1
+            parent_status = []
             for parent in split_graph.ops[opid].parents:
-                split_graph.ops[opid].hoist_min_schedule_order = max(split_graph.ops[opid].hoist_min_schedule_order, round(split_graph.ops[parent].schedule_order)) + 1
+                parent_status.append(split_graph.ops[parent].schedule_order)
+                split_graph.ops[opid].hoist_min_schedule_order = max(split_graph.ops[opid].hoist_min_schedule_order, round(split_graph.ops[parent].schedule_order))
 
             # Check whether this op can be hoisted
             if split_graph.ops[opid].is_mac_main_op:
                 # Find the insert position
                 for insert_pos in range(split_graph.ops[opid].hoist_min_schedule_order, split_graph.ops[opid].schedule_order):
+                    # We don't plus one on op's hoist_min_schedule_order, since it will loss some optimize opportunity
+                    # But we need to check that op won't run concurrently with its parents
+                    illegal = False
+                    for parent in split_graph.ops[opid].parents:
+                        if split_graph.ops[parent].schedule_order == insert_pos:
+                            illegal = True
+                    if illegal:
+                        continue
+
                     insert_pos_opid = split_graph.ordered_opid[insert_pos]
                     if split_graph.ops[insert_pos_opid].is_elem_wise_main_op and split_graph.ops[insert_pos_opid].have_matched is False:
                         split_graph.ops[insert_pos_opid].have_matched = True
                         split_graph.ops[opid].have_matched = True
-                        split_graph.ops[opid].schedule_order = insert_pos + 0.5
+                        # To differnetiate the schedule order between original op and its next op
+                        split_graph.ops[opid].schedule_order = insert_pos + 0.6
                         split_graph.matched_ops.append((insert_pos_opid, opid))
                         break
             elif split_graph.ops[opid].is_elem_wise_main_op:
                 for insert_pos in range(split_graph.ops[opid].hoist_min_schedule_order, split_graph.ops[opid].schedule_order):
+                    # We don't plus one on op's hoist_min_schedule_order, since it will loss some optimize opportunity
+                    # But we need to check that op won't run concurrently with its parents
+                    illegal = False
+                    for parent in split_graph.ops[opid].parents:
+                        if split_graph.ops[parent].schedule_order == insert_pos:
+                            illegal = True
+                    if illegal:
+                        continue
+
                     insert_pos_opid = split_graph.ordered_opid[insert_pos]
                     if split_graph.ops[insert_pos_opid].is_mac_main_op and split_graph.ops[insert_pos_opid].have_matched is False:
                         split_graph.ops[insert_pos_opid].have_matched = True
                         split_graph.ops[opid].have_matched = True
-                        split_graph.ops[opid].schedule_order = insert_pos + 0.5
+                        # To differnetiate the schedule order between original op and its next op
+                        split_graph.ops[opid].schedule_order = insert_pos + 0.6
                         split_graph.matched_ops.append((insert_pos_opid, opid))
                         break
         # Store the new schedule order into a list, it contain some op have the same schedule order
