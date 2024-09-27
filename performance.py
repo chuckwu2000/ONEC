@@ -291,11 +291,18 @@ def estimate_model(model: Graph, pipeline: bool) -> int:
         # For now, assume the two op parallel execution will take the longer one
         for matched_op in matched_ops:
             op1 = model.ops[matched_op[0]]
-            op2 = model.ops[matched_op[1]]
-            if op1.estimated_total_cycles > op2.estimated_total_cycles:
-                total_dma_cycles -= op2.estimated_DMA_cycles
-                total_op_cycles -= op2.estimated_op_cycles
-                total_cycles -= op2.estimated_total_cycles
+            op2_estimated_DMA_cycles = 0
+            op2_estimated_op_cycles = 0
+            op2_estimated_total_cycles = 0
+            for op_id in range(1, len(matched_op)):
+                op2 = model.ops[matched_op[op_id]]
+                op2_estimated_DMA_cycles += op2.estimated_DMA_cycles
+                op2_estimated_op_cycles += op2.estimated_op_cycles
+                op2_estimated_total_cycles += op2.estimated_total_cycles
+            if op1.estimated_total_cycles > op2_estimated_total_cycles:
+                total_dma_cycles -= op2_estimated_DMA_cycles
+                total_op_cycles -= op2_estimated_op_cycles
+                total_cycles -= op2_estimated_total_cycles
             else:
                 total_dma_cycles -= op1.estimated_DMA_cycles
                 total_op_cycles -= op1.estimated_op_cycles
