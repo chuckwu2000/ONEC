@@ -24,6 +24,12 @@ def pipeline_schedule(split_graph: Graph):
             elif opcode_type == "DEPTHWISE_CONV_2D":
                 split_graph.ops[opid].is_mac_main_op = True
                 split_graph.ops[opid].is_elem_wise_main_op = False
+            elif opcode_type == "LEAKY_RELU":
+                split_graph.ops[opid].is_mac_main_op = False
+                split_graph.ops[opid].is_elem_wise_main_op = True
+            elif opcode_type == "MAX_POOL_2D":
+                split_graph.ops[opid].is_mac_main_op = True
+                split_graph.ops[opid].is_elem_wise_main_op = False
             else:
                 split_graph.ops[opid].is_mac_main_op = False
                 split_graph.ops[opid].is_elem_wise_main_op = False

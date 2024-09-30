@@ -96,7 +96,7 @@ def estimate_logistic_cycles(model: Graph, opid: int) -> int:
     ifm_storge_size = ifm_shape[0] * ifm_shape[1] * ifm_shape[2] * ifm_shape[3] * (ifm_elem_size / 8)
 
     # DMA transfer cycles
-    dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size + ifm_storge_size)
+    dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size)
 
     # Computations cycles
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["LOGISTIC"]
@@ -230,6 +230,38 @@ def estimate_depthwise_conv_cycles(model: Graph, opid: int) -> int:
     total_cycles = dma_transfer_cycles + op_cycles
     return (dma_transfer_cycles, op_cycles, total_cycles)
 
+# Estimate the number of cycles for a given leaky relu operation
+def estimate_leaky_relu_cycles(model: Graph, opid: int) -> int:
+    tensors = model.tensors
+    info = model.ops[opid].info
+    inputs = info.get("inputs")
+    outputs = info.get("outputs")
+
+    if len(inputs) != 1 or len(outputs) != 1:
+        raise "LeakyRelu operation should have 1 inputs and 1 output"
+    ifm = tensors[inputs[0]]
+    ofm = tensors[outputs[0]]
+    ifm_shape = ifm.get("shape")
+    ofm_shape = ofm.get("shape")
+    if ifm.get("type") == "INT8":
+        ifm_elem_size = 8
+    else:
+        raise "Only support INT8 data type"
+    
+    # ifm's size (bytes)
+    ifm_storge_size = ifm_shape[0] * ifm_shape[1] * ifm_shape[2] * ifm_shape[3] * (ifm_elem_size / 8)
+
+    # DMA transfer cycles
+    dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size)
+
+    # Computations cycles
+    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["LEAKY_RELU"]
+    ofm_elems = ofm_shape[0] * ofm_shape[1] * ofm_shape[2] * ofm_shape[3]
+    op_cycles = ofm_elems * cycle_per_elem
+
+    total_cycles = dma_transfer_cycles + op_cycles
+    return dma_transfer_cycles, op_cycles, total_cycles
+
 # Estimate the number of cycles for memory to memory transfer
 def estimate_mem2mem_cycles(src_tensor_mem_area, dst_tensor_mem_area, transfer_size) -> int:
     if src_tensor_mem_area == Mem_area.OffChipFlash and dst_tensor_mem_area == Mem_area.SRAM:
@@ -267,6 +299,11 @@ def estimate_op_cycles(model: Graph, opid: int) -> int:
         op.estimated_total_cycles = total_cycles
     elif opcode_type == "DEPTHWISE_CONV_2D":
         dma_cycles, op_cycles, total_cycles = estimate_depthwise_conv_cycles(model, opid)
+        op.estimated_DMA_cycles = dma_cycles
+        op.estimated_op_cycles = op_cycles
+        op.estimated_total_cycles = total_cycles
+    elif opcode_type == "LEAKY_RELU":
+        dma_cycles, op_cycles, total_cycles = estimate_leaky_relu_cycles(model, opid)
         op.estimated_DMA_cycles = dma_cycles
         op.estimated_op_cycles = op_cycles
         op.estimated_total_cycles = total_cycles

@@ -18,4 +18,4 @@ class ArchitectureFeatures:
 
     # Output cycles per element (MAC main op, mul, add/sub)
     # Now assune we have 64 MACs
-    output_cycles_per_elem = {"MAC": 1 / 64, "MUL": 2, "ADD/SUB": 1, "LOGISTIC": 1}
+    output_cycles_per_elem = {"MAC": 1 / 64, "MUL": 2, "ADD/SUB": 1, "LOGISTIC": 1, "LEAKY_RELU": 1}
