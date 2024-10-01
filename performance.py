@@ -24,8 +24,14 @@ def estimate_add_cycles(model: Graph, opid: int) -> int:
         raise "Only support INT8 data type"
     
     # ifm's size (bytes)
-    ifm1_storge_size = ifm1_shape[0] * ifm1_shape[1] * ifm1_shape[2] * ifm1_shape[3] * (ifm1_elem_size / 8)
-    ifm2_storge_size = ifm2_shape[0] * ifm2_shape[1] * ifm2_shape[2] * ifm2_shape[3] * (ifm2_elem_size / 8)
+    if ifm1_shape != []:
+        ifm1_storge_size = ifm1_shape[0] * ifm1_shape[1] * ifm1_shape[2] * ifm1_shape[3] * (ifm1_elem_size / 8)
+    else:
+        ifm1_storge_size = 1
+    if ifm2_shape != []:
+        ifm2_storge_size = ifm2_shape[0] * ifm2_shape[1] * ifm2_shape[2] * ifm2_shape[3] * (ifm2_elem_size / 8)
+    else:
+        ifm2_storge_size = 1
 
     # DMA transfer cycles
     dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm1_storge_size + ifm2_storge_size)
@@ -60,8 +66,14 @@ def estimate_mul_cycles(model: Graph, opid: int) -> int:
         raise "Only support INT8 data type"
     
     # ifm's size (bytes)
-    ifm1_storge_size = ifm1_shape[0] * ifm1_shape[1] * ifm1_shape[2] * ifm1_shape[3] * (ifm1_elem_size / 8)
-    ifm2_storge_size = ifm2_shape[0] * ifm2_shape[1] * ifm2_shape[2] * ifm2_shape[3] * (ifm2_elem_size / 8)
+    if ifm1_shape != []:
+        ifm1_storge_size = ifm1_shape[0] * ifm1_shape[1] * ifm1_shape[2] * ifm1_shape[3] * (ifm1_elem_size / 8)
+    else:
+        ifm1_storge_size = 1
+    if ifm2_shape != []:
+        ifm2_storge_size = ifm2_shape[0] * ifm2_shape[1] * ifm2_shape[2] * ifm2_shape[3] * (ifm2_elem_size / 8)
+    else:
+        ifm2_storge_size = 1
 
     # DMA transfer cycles
     dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm1_storge_size + ifm2_storge_size)
@@ -230,6 +242,99 @@ def estimate_depthwise_conv_cycles(model: Graph, opid: int) -> int:
     total_cycles = dma_transfer_cycles + op_cycles
     return (dma_transfer_cycles, op_cycles, total_cycles)
 
+# Estimate the number of cycles for a given transpose convolution operation
+def estimate_trconv_cycles(model: Graph, opid: int) -> int:
+    tensors = model.tensors
+    info = model.ops[opid].info
+    inputs = info.get("inputs")
+    outputs = info.get("outputs")
+
+    # Not constraint the number of inputs, since in TS model, the input tensor is represent the dependence relationship, so it may have more than 1 inputs
+    if len(outputs) != 1:
+        raise "Transpose Conv2D operation should have at least 1 output"
+    
+    ifm_list = []
+    for input_id in range (4, len(inputs)):
+        ifm_list.append(tensors[inputs[input_id]])
+    ifm = tensors[inputs[4]]
+    ofm = tensors[outputs[0]]
+
+    # Only fetch first ifm in the list, since it has checked that all ifm have the same shape in the TS model
+    ifm_shape = ifm.get("shape")
+    ofm_shape = ofm.get("shape")
+    if ifm.get("type") == "INT8":
+        ifm_elem_size = 8
+    else:
+        raise "IFM only support INT8 data type"
+    # ifm's size (bytes)
+    ifm_storge_size = ifm_shape[0] * ifm_shape[1] * ifm_shape[2] * ifm_shape[3] * (ifm_elem_size / 8)
+    
+    # Filter tensor
+    filter = tensors[inputs[1]]
+    filter_shape = filter.get("shape")
+    if filter.get("type") == "INT8":
+        filter_elem_size = 8
+    else:
+        raise "Filter only support INT8 data type"
+    # filter's size (bytes)
+    filter_storge_size = filter_shape[0] * filter_shape[1] * filter_shape[2] * filter_shape[3] * (filter_elem_size / 8)
+
+    # DMA transfer cycles
+    total_ifm_storge_size = ifm_storge_size * len(ifm_list)
+    dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, total_ifm_storge_size)
+    dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.OffChipFlash, Mem_area.SRAM, filter_storge_size)
+
+    # Computations cycles
+    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["MAC"]
+    # Total produce height * width * channel elements, each element need ifm's channel * filtersize * filtersize MACs => filter_shape * ofm_height * ofm_width
+    MACs = filter_shape[0] * filter_shape[1] * filter_shape[2] * filter_shape[3] * ofm_shape[1] * ofm_shape[2]
+    op_cycles = MACs * cycle_per_elem
+
+    total_cycles = dma_transfer_cycles + op_cycles
+    return (dma_transfer_cycles, op_cycles, total_cycles)
+
+# Estimate the number of cycles for a given maxpool operation
+def estimate_maxpool_cycles(model: Graph, opid: int) -> int:
+    tensors = model.tensors
+    info = model.ops[opid].info
+    inputs = info.get("inputs")
+    outputs = info.get("outputs")
+
+    # Not constraint the number of inputs, since in TS model, the input tensor is represent the dependence relationship, so it may have more than 1 inputs
+    if len(outputs) != 1:
+        raise "MaxPool operation should have at least 1 output"
+    
+    ifm_list = []
+    for input_id in range (2, len(inputs)):
+        ifm_list.append(tensors[inputs[input_id]])
+    ifm = tensors[inputs[2]]
+    ofm = tensors[outputs[0]]
+    ifm_shape = ifm.get("shape")
+    ofm_shape = ofm.get("shape")
+    if ifm.get("type") == "INT8":
+        ifm_elem_size = 8
+    else:
+        raise "Only support INT8 data type"
+    
+    # ifm's size (bytes)
+    ifm_storge_size = ifm_shape[0] * ifm_shape[1] * ifm_shape[2] * ifm_shape[3] * (ifm_elem_size / 8)
+
+    # kernel shape
+    ker_shape = (info['builtin_options']['filter_height'], info['builtin_options']['filter_width'])
+
+    # DMA transfer cycles
+    total_ifm_storge_size = ifm_storge_size * len(ifm_list)
+    dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, total_ifm_storge_size)
+
+    # Computations cycles
+    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["MAC"]
+    # Total produce height * width * channel elements, each element need ifm's filtersize * filtersize MACs
+    MACs = ker_shape[0] * ker_shape[1] * ofm_shape[0] * ofm_shape[1] * ofm_shape[2] * ofm_shape[3]
+    op_cycles = MACs * cycle_per_elem
+
+    total_cycles = dma_transfer_cycles + op_cycles
+    return (dma_transfer_cycles, op_cycles, total_cycles)
+
 # Estimate the number of cycles for a given leaky relu operation
 def estimate_leaky_relu_cycles(model: Graph, opid: int) -> int:
     tensors = model.tensors
@@ -302,11 +407,26 @@ def estimate_op_cycles(model: Graph, opid: int) -> int:
         op.estimated_DMA_cycles = dma_cycles
         op.estimated_op_cycles = op_cycles
         op.estimated_total_cycles = total_cycles
+    elif opcode_type == "TRANSPOSE_CONV":
+        dma_cycles, op_cycles, total_cycles = estimate_trconv_cycles(model, opid)
+        op.estimated_DMA_cycles = dma_cycles
+        op.estimated_op_cycles = op_cycles
+        op.estimated_total_cycles = total_cycles
+    elif opcode_type == "MAX_POOL_2D":
+        dma_cycles, op_cycles, total_cycles = estimate_maxpool_cycles(model, opid)
+        op.estimated_DMA_cycles = dma_cycles
+        op.estimated_op_cycles = op_cycles
+        op.estimated_total_cycles = total_cycles
     elif opcode_type == "LEAKY_RELU":
         dma_cycles, op_cycles, total_cycles = estimate_leaky_relu_cycles(model, opid)
         op.estimated_DMA_cycles = dma_cycles
         op.estimated_op_cycles = op_cycles
         op.estimated_total_cycles = total_cycles
+    elif opcode_type == "CONCATENATION":
+        # NPU won't do concatenation, so just set the cycles to 0
+        dma_cycles = 0
+        op_cycles = 0
+        total_cycles = 0
     else:
         dma_cycles = 0
         op_cycles = 0
