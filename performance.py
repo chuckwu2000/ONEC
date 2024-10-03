@@ -168,8 +168,8 @@ def estimate_conv_cycles(model: Graph, opid: int) -> int:
     # DMA transfer cycles
     total_ifm_storge_size = ifm_storge_size * len(ifm_list)
     dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, total_ifm_storge_size)
-    dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.OffChipFlash, Mem_area.SRAM, filter_storge_size)
-    dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.OffChipFlash, Mem_area.SRAM, bias_storge_size)
+    dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, filter_storge_size)
+    dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, bias_storge_size)
 
     # Computations cycles
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["MAC"]
@@ -230,8 +230,8 @@ def estimate_depthwise_conv_cycles(model: Graph, opid: int) -> int:
     # DMA transfer cycles
     total_ifm_storge_size = ifm_storge_size * len(ifm_list)
     dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, total_ifm_storge_size)
-    dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.OffChipFlash, Mem_area.SRAM, weight_storge_size)
-    dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.OffChipFlash, Mem_area.SRAM, bias_storge_size)
+    dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, weight_storge_size)
+    dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, bias_storge_size)
 
     # Computations cycles
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["MAC"]
@@ -282,7 +282,7 @@ def estimate_trconv_cycles(model: Graph, opid: int) -> int:
     # DMA transfer cycles
     total_ifm_storge_size = ifm_storge_size * len(ifm_list)
     dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, total_ifm_storge_size)
-    dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.OffChipFlash, Mem_area.SRAM, filter_storge_size)
+    dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, filter_storge_size)
 
     # Computations cycles
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["MAC"]
