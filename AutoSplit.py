@@ -35,7 +35,7 @@ class Splitter:
             # 67: TRANSPOSE_CONV
             # 98: LEAKY_RELU
             # 126: BATCH_MATMUL
-            if opcode.get("deprecated_builtin_code", 0) in [0, 2, 3, 4, 9, 14, 17, 18, 22, 25, 34, 39, 49, 67, 98, 126]:
+            if opcode.get("deprecated_builtin_code", 0) in [0, 2, 3, 4, 9, 14, 17, 18, 22, 34, 39, 49, 67, 98, 126]:
                 self.splittable_opcode_idxes[opcode.get("deprecated_builtin_code", 0)] = i
         self.split_dim = 1
 
@@ -64,7 +64,7 @@ class Splitter:
             # 67: TRANSPOSE_CONV
             # 98: LEAKY_RELU
             # 126: BATCH_MATMUL
-            if opcode.get("deprecated_builtin_code", 0) in [0, 2, 3, 4, 9, 14, 17, 18, 22, 25, 34, 39, 49, 67, 98, 126]:
+            if opcode.get("deprecated_builtin_code", 0) in [0, 2, 3, 4, 9, 14, 17, 18, 22, 34, 39, 49, 67, 98, 126]:
                 self.splittable_opcode_idxes[opcode.get("deprecated_builtin_code", 0)] = i
         self.split_dim = 1
 
@@ -83,6 +83,8 @@ class Splitter:
 
             input_tile_size = self.split_height
             output_tile_size = self.split_height
+            input_tile_size = 64
+            output_tile_size = 64
 
             # TODO split block input
             self.split_block_input(start_id, input_tile_size)
@@ -101,7 +103,8 @@ class Splitter:
         new_graph = Graph ( self.new_operators, self.tensors, self.buffers,
                             self.opcodes, [self.ori_graph.in_tensor_id], self.ori_graph.outputs, self.ori_graph.exec_order)
 
-        new_graph.recycle_tensors_buffers()
+        # TODO: it will failed in self-attention model
+        # new_graph.recycle_tensors_buffers()
 
         return new_graph
 
@@ -166,6 +169,8 @@ class Splitter:
                 return (child, splittables)
         # To avoid the model with zero splittable op
         if len(self.nodes[current_opid].node.children) == 0:
+            # Last op no need to split
+            splittables = splittables[: len(splittables) - 1]
             return (current_opid, splittables)
         return None
 
@@ -308,7 +313,7 @@ class Splitter:
         if reshape_shape['shape'][0] == 2:
             self.split_tensor_by_n(info['outputs'][0], output_split, 0)
         elif reshape_shape['shape'][0] == 4:
-            self.split_tensor_by_n(info['outputs'][0], output_split, 1)
+            self.split_tensor_by_n(info['outputs'][0], output_split, 2)
 
         inputs = info['inputs']
         outputs = info['outputs']
@@ -392,7 +397,6 @@ class Splitter:
                 split_op_id+=1
 
     def split_split(self, opid, output_split):
-        print("start split_split")
         info = self.nodes[opid].node.info
         inputs = info['inputs']
         outputs = info['outputs']
@@ -424,23 +428,19 @@ class Splitter:
                 self.new_operators.append(new_op_info)
                 self.nodes[opid].split_id.append(split_op_id)
                 split_op_id+=1
-        print("end split_split")
 
     def split_batch_matmul(self, opid, output_split):
-        print("start split_batch_matmul")
         info = self.nodes[opid].node.info
         inputs = info['inputs']
         outputs = info['outputs']
 
         self.split_tensor_by_nxn(info['outputs'][0], output_split, 2, 3)
 
-
         if len(inputs) != 2:
             raise "wrong input number"
         elif len(outputs) != 1:
             raise "wrong output number"
         else:
-            count = 0
             split_op_id = len(self.nodes)
             new_op_input = []
             for a in self.split_tensor_table[inputs[0]]:
@@ -448,18 +448,24 @@ class Splitter:
                     new_op_input.append(b)
                 new_op_input.append(a)
             
+            # Need to order the batch matmul's input tensor
+            a_step = self.tensors[info['outputs'][0]]['shape'][2] / output_split
+            b_step = self.tensors[info['outputs'][0]]['shape'][3] / output_split
+            count = 0
             for c in self.split_tensor_table[outputs[0]]:
+                a_offset = int(count // a_step)
+                a = self.split_tensor_table[inputs[0]][a_offset]
+                b_offset = int(count % b_step)
+                b = self.split_tensor_table[inputs[1]][b_offset]
                 new_op_info = copy.deepcopy(info)
-                new_op_info['inputs'] = new_op_input
+                new_op_info['inputs'] = [a, b]
                 new_op_info['outputs'] = [c]
                 op = Node(new_op_info, split_op_id)
                 self.nodes.append(SplitterNode(op))
                 self.new_operators.append(new_op_info)
                 self.nodes[opid].split_id.append(split_op_id)
-                split_op_id+=1
-                print(count)
+                split_op_id += 1
                 count += 1
-        print("end split_batch_matmul")
 
     def split_conv(self, opid, input_split, output_split):
         info = self.nodes[opid].node.info
@@ -819,7 +825,6 @@ class Splitter:
         self.split_tensor_by_n(info['outputs'][0], output_split, 1)
         # Mul with constant value, constant value also need to be splitted
         if len(self.split_tensor_table[info['inputs'][1]]) == 0:
-            print(self.tensors[info['inputs'][1]])
             self.split_tensor_by_n(info['inputs'][1], output_split, 1)
 
         inputs = info['inputs']
@@ -830,7 +835,6 @@ class Splitter:
         elif len(outputs) != 1:
             raise "wrong output number"
         elif len(self.split_tensor_table[inputs[0]]) != len(self.split_tensor_table[inputs[1]]):
-            print(f"in1: {len(self.split_tensor_table[inputs[0]])}, in2: {len(self.split_tensor_table[inputs[1]])}")
             raise BaseException("split number of two operand is not equal")
         else:
             split_op_id = len(self.nodes)
@@ -896,7 +900,6 @@ class Splitter:
 
     # For now, assume concat's input only have two tensors
     def split_concatenation(self, opid, output_split):
-        print(f"start split concat")
         info = self.nodes[opid].node.info
         self.split_tensor_by_n(info['outputs'][0], output_split, 1)
 
