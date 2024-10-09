@@ -35,9 +35,10 @@ class Splitter:
             # 67: TRANSPOSE_CONV
             # 98: LEAKY_RELU
             # 126: BATCH_MATMUL
-            if opcode.get("deprecated_builtin_code", 0) in [0, 2, 3, 4, 9, 14, 17, 18, 22, 34, 39, 49, 67, 98, 126]:
+            if opcode.get("deprecated_builtin_code", 0) in [0, 2, 3, 4, 9, 14, 17, 18, 22, 25, 34, 39, 49, 67, 98, 126]:
                 self.splittable_opcode_idxes[opcode.get("deprecated_builtin_code", 0)] = i
         self.split_dim = 1
+        self.split_dim_value = 1
 
     def re_init(self, ori_graph):
         self.ori_graph = ori_graph
@@ -64,15 +65,17 @@ class Splitter:
             # 67: TRANSPOSE_CONV
             # 98: LEAKY_RELU
             # 126: BATCH_MATMUL
-            if opcode.get("deprecated_builtin_code", 0) in [0, 2, 3, 4, 9, 14, 17, 18, 22, 34, 39, 49, 67, 98, 126]:
+            if opcode.get("deprecated_builtin_code", 0) in [0, 2, 3, 4, 9, 14, 17, 18, 22, 25, 34, 39, 49, 67, 98, 126]:
                 self.splittable_opcode_idxes[opcode.get("deprecated_builtin_code", 0)] = i
         self.split_dim = 1
+        self.split_dim_value = 1
 
     def perform_split(self)->Graph:
         # vars init
         self.split_info = []
         self.split_tensors = []
-        self.split_tensor_table = [list() for _ in range(len(self.tensors))]
+        # There may be some manipulation will create new tensors
+        self.split_tensor_table = [list() for _ in range(len(self.tensors) + 1000)]
         self.new_operators = []
 
         # Currently assume it's splittable from the root of the graph
@@ -125,16 +128,7 @@ class Splitter:
 
     def traverse_til_splittable(self,current_opid):
         if self.nodes[current_opid].node.info.get("opcode_index",0) in self.splittable_opcode_idxes.values():
-            # Check that splittable op can divide input tensor (>1)
-            info = self.nodes[current_opid].node.info
-            inputs = info['inputs'][0]
-            input_shape = self.tensors[inputs]['shape']
-            if len(input_shape) == 2:
-                if input_shape[0] > 1:
-                    return current_opid
-            elif len(input_shape) == 4:
-                if input_shape[1] > 1:
-                    return current_opid
+            return current_opid
         for parent in self.nodes[current_opid].node.parents:
             if self.nodes[parent].visited == False:
                 return None
@@ -309,11 +303,13 @@ class Splitter:
 
     def split_reshape(self, opid, output_split):
         info = self.nodes[opid].node.info
-        reshape_shape = self.tensors[info['inputs'][1]]
-        if reshape_shape['shape'][0] == 2:
-            self.split_tensor_by_n(info['outputs'][0], output_split, 0)
-        elif reshape_shape['shape'][0] == 4:
-            self.split_tensor_by_n(info['outputs'][0], output_split, 2)
+        output = info['outputs'][0]
+        output_shape = self.tensors[output]['shape']
+        for dim, dim_value in enumerate(output_shape):
+            if dim_value == self.split_dim_value:
+                self.split_tensor_by_n(info['outputs'][0], output_split, dim)
+                self.split_dim = dim
+                break
 
         inputs = info['inputs']
         outputs = info['outputs']
@@ -374,7 +370,7 @@ class Splitter:
 
     def split_softmax(self, opid, output_split):
         info = self.nodes[opid].node.info
-        self.split_tensor_by_n(info['outputs'][0], output_split, 1)
+        self.split_tensor_by_n(info['outputs'][0], output_split, self.split_dim)
 
         inputs = info['inputs']
         outputs = info['outputs']
@@ -434,7 +430,7 @@ class Splitter:
         inputs = info['inputs']
         outputs = info['outputs']
 
-        self.split_tensor_by_nxn(info['outputs'][0], output_split, 2, 3)
+        self.split_tensor_by_nxn(info['outputs'][0], output_split, self.split_dim, self.split_dim + 1)
 
         if len(inputs) != 2:
             raise "wrong input number"
@@ -466,6 +462,10 @@ class Splitter:
                 self.nodes[opid].split_id.append(split_op_id)
                 split_op_id += 1
                 count += 1
+
+        # Concate the split output tensor & split again from here
+        next_opid = self.nodes[opid].node.children[0]
+        self.concat_than_split(next_opid, output_split)
 
     def split_conv(self, opid, input_split, output_split):
         info = self.nodes[opid].node.info
@@ -792,10 +792,10 @@ class Splitter:
 
     def split_add(self, opid, output_split):
         info = self.nodes[opid].node.info
-        self.split_tensor_by_n(info['outputs'][0], output_split, 1)
+        self.split_tensor_by_n(info['outputs'][0], output_split, self.split_dim)
         # Add with constant value, constant value also need to be splitted
         if len(self.split_tensor_table[info['inputs'][1]]) == 0:
-            self.split_tensor_by_n(info['inputs'][1], output_split, 1)
+            self.split_tensor_by_n(info['inputs'][1], output_split, self.split_dim)
 
         inputs = info['inputs']
         outputs = info['outputs']
@@ -822,10 +822,20 @@ class Splitter:
 
     def split_mul(self, opid, output_split):
         info = self.nodes[opid].node.info
-        self.split_tensor_by_n(info['outputs'][0], output_split, 1)
+        output_shape = self.tensors[info['outputs'][0]]['shape']
+        for dim, dim_value in enumerate(output_shape):
+            if dim_value == self.split_dim_value:
+                self.split_tensor_by_n(info['outputs'][0], output_split, dim)
+                self.split_dim = dim
+                break
         # Mul with constant value, constant value also need to be splitted
         if len(self.split_tensor_table[info['inputs'][1]]) == 0:
-            self.split_tensor_by_n(info['inputs'][1], output_split, 1)
+            # Since tensorflow's optimizer will remove some reshape op, we need to check the input shape
+            input_shape = self.tensors[info['inputs'][1]]['shape']
+            for dim, dim_value in enumerate(input_shape):
+                if dim_value == self.split_dim_value:
+                    self.split_tensor_by_n(info['inputs'][1], output_split, dim)
+                    break
 
         inputs = info['inputs']
         outputs = info['outputs']
@@ -925,17 +935,19 @@ class Splitter:
                 self.new_operators.append(new_op_info)
                 self.nodes[opid].split_id.append(split_op_id)
                 split_op_id+=1
-        print(f"end split concat")
 
     def split_block_input(self, start_opid, input_split):
         info = self.nodes[start_opid].node.info
         # Depend on the input shape, split the input tensor
         inputs = info['inputs'][0]
         input_shape = self.tensors[inputs]['shape']
-        if len(input_shape) == 2:
-            self.split_tensor_by_n(inputs, input_split, 0)
-        elif len(input_shape) == 4:
-            self.split_tensor_by_n(inputs, input_split, 1)
+        # Split from te first dim that larger than 1
+        for dim, dim_value in enumerate(input_shape):
+            if dim_value > 1:
+                self.split_tensor_by_n(inputs, input_split, dim)
+                self.split_dim = dim
+                self.split_dim_value = dim_value
+                break
         axis_tensor = {
             "shape": [
 
@@ -981,6 +993,62 @@ class Splitter:
             }
         }
         self.new_operators.append(new_op_info)
+
+    def concat_than_split(self, start_opid, output_split):
+        info = self.nodes[start_opid].node.info
+
+        # First, create a concate node
+        immediate_tensor = copy.deepcopy(self.tensors[info['inputs'][0]])
+        self.tensors.append(immediate_tensor)
+        immediate_tensor_id = len(self.tensors) - 1
+        concate_op_info = {
+            "opcode_index": self.get_opcode_index(2),
+            "inputs": copy.deepcopy(self.split_tensor_table[info['inputs'][0]]),
+            "outputs": [immediate_tensor_id],
+            "builtin_options_type": "ConcatenationOptions",
+            "builtin_options": {
+                'axis': 1
+            }
+        }
+        self.new_operators.append(concate_op_info)
+        
+        # Second, create a split node
+        inputs = immediate_tensor_id
+        input_shape = self.tensors[inputs]['shape']
+        for dim, dim_value in enumerate(input_shape):
+            if dim_value > 1:
+                self.split_tensor_by_n(inputs, output_split, dim)
+                self.split_dim = dim
+                self.split_dim_value = dim_value
+                break
+        
+        axis_tensor = {
+            "shape": [],
+            "type": "INT32",
+            "buffer": len(self.buffers),
+            "name": self.tensors[immediate_tensor_id]['name']+"_split_axis_tensor",
+            "quantization": {},
+          }
+        axis_buffer = {
+            "data": self.int_list_to_byte_list([1])
+        }
+        self.tensors.append(axis_tensor)
+        self.buffers.append(axis_buffer)
+
+        outputs = copy.deepcopy(self.split_tensor_table[immediate_tensor_id])
+        split_op_info = {
+            "opcode_index": self.get_opcode_index(49),
+            "inputs": [immediate_tensor_id],
+            "outputs": outputs,
+            "builtin_options_type": "SplitOptions",
+            "builtin_options": {
+                "num_splits" : len(outputs)
+            }
+        }
+        self.new_operators.append(split_op_info)
+
+        # Final, update start_op's input
+        info['inputs'][0] = immediate_tensor_id
 
     def get_opcode_index(self, deprecated_builtin_code):
         for i, code in enumerate(self.opcodes):
