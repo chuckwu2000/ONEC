@@ -24,21 +24,25 @@ def estimate_add_cycles(model: Graph, opid: int) -> int:
         raise "Only support INT8 data type"
     
     # ifm's size (bytes)
+    ifm1_storge_size = 1
     if ifm1_shape != []:
-        ifm1_storge_size = ifm1_shape[0] * ifm1_shape[1] * ifm1_shape[2] * ifm1_shape[3] * (ifm1_elem_size / 8)
-    else:
-        ifm1_storge_size = 1
+        for dim in ifm1_shape:
+            ifm1_storge_size *= dim
+        ifm1_storge_size *= (ifm1_elem_size / 8)
+    ifm2_storge_size = 1
     if ifm2_shape != []:
-        ifm2_storge_size = ifm2_shape[0] * ifm2_shape[1] * ifm2_shape[2] * ifm2_shape[3] * (ifm2_elem_size / 8)
-    else:
-        ifm2_storge_size = 1
+        for dim in ifm2_shape:
+            ifm2_storge_size *= dim
+        ifm2_storge_size *= (ifm2_elem_size / 8)
 
     # DMA transfer cycles
     dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm1_storge_size + ifm2_storge_size)
 
     # Computations cycles
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["ADD/SUB"]
-    ofm_elems = ofm_shape[0] * ofm_shape[1] * ofm_shape[2] * ofm_shape[3]
+    ofm_elems = 1
+    for dim in ofm_shape:
+        ofm_elems *= dim
     op_cycles = ofm_elems * cycle_per_elem
 
     total_cycles = dma_transfer_cycles + op_cycles
@@ -66,21 +70,25 @@ def estimate_mul_cycles(model: Graph, opid: int) -> int:
         raise "Only support INT8 data type"
     
     # ifm's size (bytes)
+    ifm1_storge_size = 1
     if ifm1_shape != []:
-        ifm1_storge_size = ifm1_shape[0] * ifm1_shape[1] * ifm1_shape[2] * ifm1_shape[3] * (ifm1_elem_size / 8)
-    else:
-        ifm1_storge_size = 1
+        for dim in ifm1_shape:
+            ifm1_storge_size *= dim
+        ifm1_storge_size *= (ifm1_elem_size / 8)
+    ifm2_storge_size = 1
     if ifm2_shape != []:
-        ifm2_storge_size = ifm2_shape[0] * ifm2_shape[1] * ifm2_shape[2] * ifm2_shape[3] * (ifm2_elem_size / 8)
-    else:
-        ifm2_storge_size = 1
+        for dim in ifm2_shape:
+            ifm2_storge_size *= dim
+        ifm2_storge_size *= (ifm2_elem_size / 8)
 
     # DMA transfer cycles
     dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm1_storge_size + ifm2_storge_size)
 
     # Computations cycles
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["MUL"]
-    ofm_elems = ofm_shape[0] * ofm_shape[1] * ofm_shape[2] * ofm_shape[3]
+    ofm_elems = 1
+    for dim in ofm_shape:
+        ofm_elems *= dim
     op_cycles = ofm_elems * cycle_per_elem
 
     total_cycles = dma_transfer_cycles + op_cycles
@@ -105,14 +113,20 @@ def estimate_logistic_cycles(model: Graph, opid: int) -> int:
         raise "Only support INT8 data type"
     
     # ifm's size (bytes)
-    ifm_storge_size = ifm_shape[0] * ifm_shape[1] * ifm_shape[2] * ifm_shape[3] * (ifm_elem_size / 8)
+    ifm_storge_size = 1
+    if ifm_shape != []:
+        for dim in ifm_shape:
+            ifm_storge_size *= dim
+        ifm_storge_size *= (ifm_elem_size / 8)
 
     # DMA transfer cycles
     dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size)
 
     # Computations cycles
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["LOGISTIC"]
-    ofm_elems = ofm_shape[0] * ofm_shape[1] * ofm_shape[2] * ofm_shape[3]
+    ofm_elems = 1
+    for dim in ofm_shape:
+        ofm_elems *= dim
     op_cycles = ofm_elems * cycle_per_elem
 
     total_cycles = dma_transfer_cycles + op_cycles
@@ -143,7 +157,11 @@ def estimate_conv_cycles(model: Graph, opid: int) -> int:
     else:
         raise "IFM only support INT8 data type"
     # ifm's size (bytes)
-    ifm_storge_size = ifm_shape[0] * ifm_shape[1] * ifm_shape[2] * ifm_shape[3] * (ifm_elem_size / 8)
+    ifm_storge_size = 1
+    if ifm_shape != []:
+        for dim in ifm_shape:
+            ifm_storge_size *= dim
+        ifm_storge_size *= (ifm_elem_size / 8)
     
     # Filter tensor
     filter = tensors[inputs[1]]
@@ -205,7 +223,11 @@ def estimate_depthwise_conv_cycles(model: Graph, opid: int) -> int:
     else:
         raise "IFM only support INT8 data type"
     # ifm's size (bytes)
-    ifm_storge_size = ifm_shape[0] * ifm_shape[1] * ifm_shape[2] * ifm_shape[3] * (ifm_elem_size / 8)
+    ifm_storge_size = 1
+    if ifm_shape != []:
+        for dim in ifm_shape:
+            ifm_storge_size *= dim
+        ifm_storge_size *= (ifm_elem_size / 8)
     
     # Weight tensor
     weight = tensors[inputs[1]]
@@ -267,7 +289,11 @@ def estimate_trconv_cycles(model: Graph, opid: int) -> int:
     else:
         raise "IFM only support INT8 data type"
     # ifm's size (bytes)
-    ifm_storge_size = ifm_shape[0] * ifm_shape[1] * ifm_shape[2] * ifm_shape[3] * (ifm_elem_size / 8)
+    ifm_storge_size = 1
+    if ifm_shape != []:
+        for dim in ifm_shape:
+            ifm_storge_size *= dim
+        ifm_storge_size *= (ifm_elem_size / 8)
     
     # Filter tensor
     filter = tensors[inputs[1]]
@@ -317,7 +343,11 @@ def estimate_maxpool_cycles(model: Graph, opid: int) -> int:
         raise "Only support INT8 data type"
     
     # ifm's size (bytes)
-    ifm_storge_size = ifm_shape[0] * ifm_shape[1] * ifm_shape[2] * ifm_shape[3] * (ifm_elem_size / 8)
+    ifm_storge_size = 1
+    if ifm_shape != []:
+        for dim in ifm_shape:
+            ifm_storge_size *= dim
+        ifm_storge_size *= (ifm_elem_size / 8)
 
     # kernel shape
     ker_shape = (info['builtin_options']['filter_height'], info['builtin_options']['filter_width'])
@@ -354,15 +384,155 @@ def estimate_leaky_relu_cycles(model: Graph, opid: int) -> int:
         raise "Only support INT8 data type"
     
     # ifm's size (bytes)
-    ifm_storge_size = ifm_shape[0] * ifm_shape[1] * ifm_shape[2] * ifm_shape[3] * (ifm_elem_size / 8)
+    ifm_storge_size = 1
+    if ifm_shape != []:
+        for dim in ifm_shape:
+            ifm1_storge_size *= dim
+        ifm_storge_size *= (ifm_elem_size / 8)
 
     # DMA transfer cycles
     dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size)
 
     # Computations cycles
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["LEAKY_RELU"]
-    ofm_elems = ofm_shape[0] * ofm_shape[1] * ofm_shape[2] * ofm_shape[3]
+    ofm_elems = 1
+    for dim in ofm_shape:
+        ofm_elems *= dim
     op_cycles = ofm_elems * cycle_per_elem
+
+    total_cycles = dma_transfer_cycles + op_cycles
+    return dma_transfer_cycles, op_cycles, total_cycles
+
+# Estimate the number of cycles for a given fully connected operation
+def estimate_fully_connected_cycles(model: Graph, opid: int) -> int:
+    tensors = model.tensors
+    info = model.ops[opid].info
+    inputs = info.get("inputs")
+    outputs = info.get("outputs")
+
+    if len(inputs) != 3 or len(outputs) != 1:
+        raise "FullyConnected operation should have 3 inputs and 1 output"
+    ifm = tensors[inputs[0]]
+    ofm = tensors[outputs[0]]
+    ifm_shape = ifm.get("shape")
+    ofm_shape = ofm.get("shape")
+    if ifm.get("type") == "INT8":
+        ifm_elem_size = 8
+    else:
+        raise "Only support INT8 data type"
+    
+    # ifm's size (bytes)
+    ifm_storge_size = 1
+    if ifm_shape != []:
+        for dim in ifm_shape:
+            ifm_storge_size *= dim
+        ifm_storge_size *= (ifm_elem_size / 8)
+
+    # weight tensor
+    weight = tensors[inputs[1]]
+    weight_shape = weight.get("shape")
+    if weight.get("type") == "INT8":
+        weight_elem_size = 8
+    else:
+        raise "Weight only support INT8 data type"
+    # weight's size (bytes)
+    weight_storge_size = weight_shape[0] * weight_shape[1] * (weight_elem_size / 8)
+
+    # bias tensor
+    # Assume bias tensor is None
+
+    # DMA transfer cycles
+    dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size)
+    dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, weight_storge_size)
+
+    # Computations cycles
+    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["MAC"]
+    # Total produce #token * #feature elements, each element need weight's #feature MACs
+    MACs = ofm_shape[0] * ofm_shape[1] * weight_shape[1]
+    op_cycles = MACs * cycle_per_elem
+
+    total_cycles = dma_transfer_cycles + op_cycles
+    return dma_transfer_cycles, op_cycles, total_cycles
+
+# Estimate the number of cycles for a given softmax operation
+def estimate_softmax_cycles(model: Graph, opid: int) -> int:
+    tensors = model.tensors
+    info = model.ops[opid].info
+    inputs = info.get("inputs")
+    outputs = info.get("outputs")
+
+    if len(inputs) != 1 or len(outputs) != 1:
+        raise "Softmax operation should have 1 inputs and 1 output"
+    ifm = tensors[inputs[0]]
+    ofm = tensors[outputs[0]]
+    ifm_shape = ifm.get("shape")
+    ofm_shape = ofm.get("shape")
+    if ifm.get("type") == "INT8":
+        ifm_elem_size = 8
+    else:
+        raise "Only support INT8 data type"
+    
+    # ifm's size (bytes)
+    ifm_storge_size = 1
+    if ifm_shape != []:
+        for dim in ifm_shape:
+            ifm_storge_size *= dim
+        ifm_storge_size *= (ifm_elem_size / 8)
+
+    # DMA transfer cycles
+    dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size)
+
+    # Computations cycles
+    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["SOFTMAX"]
+    ofm_elems = 1
+    for dim in ofm_shape:
+        ofm_elems *= dim
+    op_cycles = ofm_elems * cycle_per_elem
+
+    total_cycles = dma_transfer_cycles + op_cycles
+    return dma_transfer_cycles, op_cycles, total_cycles
+
+# Estimate the number of cycles for a given batch matmul operation
+def estimate_batch_matmul_cycles(model: Graph, opid: int) -> int:
+    tensors = model.tensors
+    info = model.ops[opid].info
+    inputs = info.get("inputs")
+    outputs = info.get("outputs")
+
+    if len(inputs) != 2 or len(outputs) != 1:
+        raise "BatchMatmul operation should have 2 inputs and 1 output"
+    ifm1 = tensors[inputs[0]]
+    ifm2 = tensors[inputs[1]]
+    ofm = tensors[outputs[0]]
+    ifm1_shape = ifm1.get("shape")
+    ifm2_shape = ifm2.get("shape")
+    ofm_shape = ofm.get("shape")
+    if ifm1.get("type") == "INT8" and ifm2.get("type") == "INT8":
+        ifm1_elem_size = 8
+        ifm2_elem_size = 8
+    else:
+        raise "Only support INT8 data type"
+    
+    # ifm's size (bytes)
+    ifm1_storge_size = 1
+    if ifm1_shape != []:
+        for dim in ifm1_shape:
+            ifm1_storge_size *= dim
+        ifm1_storge_size *= (ifm1_elem_size / 8)
+    ifm2_storge_size = 1
+    if ifm2_shape != []:
+        for dim in ifm2_shape:
+            ifm2_storge_size *= dim
+        ifm2_storge_size *= (ifm2_elem_size / 8)
+
+    # DMA transfer cycles
+    dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm1_storge_size + ifm2_storge_size)
+
+    # Computations cycles
+    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["MAC"]
+    # Total produce height * width * channel elements, each element need ifm1's channel MACs
+    MACs = ofm_shape[0] * ofm_shape[1] * ofm_shape[2] * ofm_shape[3] * ifm1_shape[3]
+    op_cycles = MACs * cycle_per_elem
 
     total_cycles = dma_transfer_cycles + op_cycles
     return dma_transfer_cycles, op_cycles, total_cycles
@@ -407,6 +577,16 @@ def estimate_op_cycles(model: Graph, opid: int) -> int:
         op.estimated_DMA_cycles = dma_cycles
         op.estimated_op_cycles = op_cycles
         op.estimated_total_cycles = total_cycles
+    elif opcode_type == "FULLY_CONNECTED":
+        dma_cycles, op_cycles, total_cycles = estimate_fully_connected_cycles(model, opid)
+        op.estimated_DMA_cycles = dma_cycles
+        op.estimated_op_cycles = op_cycles
+        op.estimated_total_cycles = total_cycles
+    elif opcode_type == "SOFTMAX":
+        dma_cycles, op_cycles, total_cycles = estimate_softmax_cycles(model, opid)
+        op.estimated_DMA_cycles = dma_cycles
+        op.estimated_op_cycles = op_cycles
+        op.estimated_total_cycles = total_cycles
     elif opcode_type == "TRANSPOSE_CONV":
         dma_cycles, op_cycles, total_cycles = estimate_trconv_cycles(model, opid)
         op.estimated_DMA_cycles = dma_cycles
@@ -419,6 +599,11 @@ def estimate_op_cycles(model: Graph, opid: int) -> int:
         op.estimated_total_cycles = total_cycles
     elif opcode_type == "LEAKY_RELU":
         dma_cycles, op_cycles, total_cycles = estimate_leaky_relu_cycles(model, opid)
+        op.estimated_DMA_cycles = dma_cycles
+        op.estimated_op_cycles = op_cycles
+        op.estimated_total_cycles = total_cycles
+    elif opcode_type == "BATCH_MATMUL":
+        dma_cycles, op_cycles, total_cycles = estimate_batch_matmul_cycles(model, opid)
         op.estimated_DMA_cycles = dma_cycles
         op.estimated_op_cycles = op_cycles
         op.estimated_total_cycles = total_cycles

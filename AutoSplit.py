@@ -158,8 +158,6 @@ class Splitter:
                 if result is not None:
                     return result
             else:
-                if child not in splittables:
-                    splittables.append(child)
                 return (child, splittables)
         # To avoid the model with zero splittable op
         if len(self.nodes[current_opid].node.children) == 0:
@@ -792,10 +790,20 @@ class Splitter:
 
     def split_add(self, opid, output_split):
         info = self.nodes[opid].node.info
-        self.split_tensor_by_n(info['outputs'][0], output_split, self.split_dim)
+        output_shape = self.tensors[info['outputs'][0]]['shape']
+        for dim, dim_value in enumerate(output_shape):
+            if dim_value == self.split_dim_value:
+                self.split_tensor_by_n(info['outputs'][0], output_split, dim)
+                self.split_dim = dim
+                break
         # Add with constant value, constant value also need to be splitted
         if len(self.split_tensor_table[info['inputs'][1]]) == 0:
-            self.split_tensor_by_n(info['inputs'][1], output_split, self.split_dim)
+            # Since tensorflow's optimizer will remove some reshape op, we need to check the input shape
+            input_shape = self.tensors[info['inputs'][1]]['shape']
+            for dim, dim_value in enumerate(input_shape):
+                if dim_value == self.split_dim_value:
+                    self.split_tensor_by_n(info['inputs'][1], output_split, dim)
+                    break
 
         inputs = info['inputs']
         outputs = info['outputs']
