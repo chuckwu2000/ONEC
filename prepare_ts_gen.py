@@ -19,7 +19,7 @@ models_dir = str(args.models_dir)
 # for tflite_path in sorted(tflite_list):
 tflite_path = models_dir
 model_name = os.path.splitext(os.path.basename(tflite_path))[0]
-out_path = f"{os.path.dirname(tflite_path)}/{model_name}_splitted_DP_1.txt"
+out_path = f"{os.path.dirname(tflite_path)}/{model_name}.txt"
 cmd =   f"python {codegen_path} {tflite_path} --schema_path {schema_path}" \
         f" --out_path {out_path}"
 subprocess.run(cmd.split(' '))

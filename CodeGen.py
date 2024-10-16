@@ -2,7 +2,7 @@ import json
 import argparse
 import os
 import tempfile
-from OPGen import op_codegen
+from OPGen import OPGen
 
 parser = argparse.ArgumentParser()
 parser.add_argument("model_path")
@@ -45,8 +45,12 @@ for operator in operators:
         operator['opcode_index'] = 0
         operator['builtin_options_type'] = 'ReshapeOptions'
 
+npu_code = ""
+opgen = OPGen(tensors, buffers, npu_code)
 for operator in operators:
-    op_codegen(operator)
+    opgen.op_codegen(operator)
 
-# os.system(f'mv {os.path.join(tmp_dir_path, filename)} {args.out_path}')
+with open(args.out_path, 'w') as f:
+    f.write(opgen.npu_code)
+
 tmp_dir.cleanup()
