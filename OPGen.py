@@ -1,15 +1,27 @@
 import numpy as np
+import math
 class OPGen:
     def __init__(self, tensors, buffers, npu_code):
         self.tensor = tensors
         self.buffers = buffers
         self.npu_code = npu_code
 
-    def QuantizeMultiplier(self, multiplier):
-        if multiplier == 0:
+    def QuantizeMultiplier(self, scale):
+        if scale == 0.0:
             return 0, 0
-        import math
-        q, shift = math.frexp(multiplier)
+        # q: [0.5, 1]
+        q, shift = math.frexp(scale)
+        q_fixed = np.int32(round(q * (1 << 31)))
+
+        if q_fixed == (1 << 31):
+            q_fixed /= 2
+            shift += 1
+
+        # If the shift is smaller than -31, all bits are shifted out, so the quantized value is 0
+        if shift < -31:
+            shift = 0
+            q_fixed = 0
+        return q_fixed, shift
 
     def Compute_tensor_size(self, tensor):
         shape = tensor['shape']
@@ -72,6 +84,7 @@ class OPGen:
         weight_quant_scale = np.int32(weight_tensor['quantization']['scale'][0]).view('float32')
         output_qunat_scale = np.int32(output_tensor['quantization']['scale'][0]).view('float32')
         scale = input_quant_scale * weight_quant_scale / output_qunat_scale
+        multiplier, shift = self.QuantizeMultiplier(scale)
 
         input_quant_zp = input_tensor['quantization']['zero_point'][0]
         weight_quant_zp = weight_tensor['quantization']['zero_point'][0]
@@ -86,8 +99,9 @@ class OPGen:
         code += self.CodeGen_Set_weight_tensor(weight_tensor, 80000, weight_quant_zp)
         # Set output tensor
         code += self.CodeGen_Set_output_tensor(output_tensor, 160000, output_quant_zp)
-        # Set sclae
-        code += f"SET_SCALE {scale}\n"
+        # Set scale
+        code += f"SET_MULTIPLIER {multiplier}\n"
+        code += f"SET_SHIFT {shift}\n"
         code += self.CodeGen_DMA_wait()
         code += "FULLY_CONNECTED\n"
         self.npu_code += code
