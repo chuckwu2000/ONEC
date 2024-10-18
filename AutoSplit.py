@@ -832,7 +832,6 @@ class Splitter:
             for dim in input2_shape:
                 size2 *= dim
             if size1 != size2:
-                print(f"add broadcast: {size1} != {size2}")
                 need_broadcast = True
             # Since tensorflow's optimizer will remove some reshape op, we need to check the input shape
             input_shape = self.tensors[info['inputs'][1]]['shape']
@@ -899,7 +898,6 @@ class Splitter:
             for dim in input2_shape:
                 size2 *= dim
             if size1 != size2:
-                print(f"sub broadcast: {size1} != {size2}")
                 need_broadcast = True
             # Since tensorflow's optimizer will remove some reshape op, we need to check the input shape
             input_shape = self.tensors[info['inputs'][1]]['shape']
@@ -966,7 +964,6 @@ class Splitter:
             for dim in input2_shape:
                 size2 *= dim
             if size1 != size2:
-                print(f"mul broadcast: {size1} != {size2}")
                 need_broadcast = True
             # Since tensorflow's optimizer will remove some reshape op, we need to check the input shape
             input_shape = self.tensors[info['inputs'][1]]['shape']

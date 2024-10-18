@@ -23,5 +23,6 @@ class ArchitectureFeatures:
         "ADD/SUB": 3,
         "LOGISTIC": 3,
         "LEAKY_RELU": 3,
-        "SOFTMAX": 10
+        "SOFTMAX": 10,
+        "LUT": 1
     }

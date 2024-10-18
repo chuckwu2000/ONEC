@@ -12,10 +12,22 @@ def pipeline_schedule(split_graph: Graph):
             if opcode_type == "ADD":
                 split_graph.ops[opid].is_mac_main_op = False
                 split_graph.ops[opid].is_elem_wise_main_op = True
+            elif opcode_type == "SUB":
+                split_graph.ops[opid].is_mac_main_op = False
+                split_graph.ops[opid].is_elem_wise_main_op = True
             elif opcode_type == "MUL":
                 split_graph.ops[opid].is_mac_main_op = False
                 split_graph.ops[opid].is_elem_wise_main_op = True
             elif opcode_type == "LOGISTIC":
+                split_graph.ops[opid].is_mac_main_op = False
+                split_graph.ops[opid].is_elem_wise_main_op = True
+            elif opcode_type == "MEAN":
+                split_graph.ops[opid].is_mac_main_op = True
+                split_graph.ops[opid].is_elem_wise_main_op = False
+            elif opcode_type == "RSQRT":    # Use LUT
+                split_graph.ops[opid].is_mac_main_op = False
+                split_graph.ops[opid].is_elem_wise_main_op = False
+            elif opcode_type == "SQUARED_DIFFERENCE":
                 split_graph.ops[opid].is_mac_main_op = False
                 split_graph.ops[opid].is_elem_wise_main_op = True
             elif opcode_type == "CONV_2D":
@@ -33,6 +45,9 @@ def pipeline_schedule(split_graph: Graph):
             elif opcode_type == "TRANSPOSE_CONV":
                 split_graph.ops[opid].is_mac_main_op = True
                 split_graph.ops[opid].is_elem_wise_main_op = False
+            elif opcode_type == "GELU":
+                split_graph.ops[opid].is_mac_main_op = False
+                split_graph.ops[opid].is_elem_wise_main_op = True
             elif opcode_type == "LEAKY_RELU":
                 split_graph.ops[opid].is_mac_main_op = False
                 split_graph.ops[opid].is_elem_wise_main_op = True
