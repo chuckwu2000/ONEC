@@ -24,5 +24,6 @@ class ArchitectureFeatures:
         "LOGISTIC": 3,
         "LEAKY_RELU": 3,
         "SOFTMAX": 10,
+        "RSQRT": 9,
         "LUT": 1
     }

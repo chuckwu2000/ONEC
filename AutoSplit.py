@@ -98,8 +98,8 @@ class Splitter:
 
             input_tile_size = self.split_height
             output_tile_size = self.split_height
-            input_tile_size = 10
-            output_tile_size = 10
+            input_tile_size = 64
+            output_tile_size = 64
 
             # TODO split block input
             self.split_block_input(start_id, input_tile_size)
@@ -720,8 +720,12 @@ class Splitter:
 
     def split_fullyconnected(self, opid, output_split):
         info = self.nodes[opid].node.info
-        # FullyConnected's input/output is 2D tensor
-        self.split_tensor_by_n(info['outputs'][0], output_split, 0)
+        output_shape = self.tensors[info['outputs'][0]]['shape']
+        for dim, dim_value in enumerate(output_shape):
+            if dim_value == self.split_dim_value:
+                self.split_tensor_by_n(info['outputs'][0], output_split, dim)
+                self.split_dim = dim
+                break
 
         inputs = info['inputs']
         outputs = info['outputs']

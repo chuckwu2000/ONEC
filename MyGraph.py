@@ -82,6 +82,7 @@ class Graph:
         self.DFS_ordered = False
         self.BFS_ordered = False
         self.matched_ops = []
+        self.pipeline_schedule = False
         self.build_graph_from_ops(copy.deepcopy(ops))
 
     def build_DFS(self, current_id, op_lookup_input):

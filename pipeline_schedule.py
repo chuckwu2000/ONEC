@@ -24,9 +24,9 @@ def pipeline_schedule(split_graph: Graph):
             elif opcode_type == "MEAN":
                 split_graph.ops[opid].is_mac_main_op = True
                 split_graph.ops[opid].is_elem_wise_main_op = False
-            elif opcode_type == "RSQRT":    # Use LUT
+            elif opcode_type == "RSQRT":
                 split_graph.ops[opid].is_mac_main_op = False
-                split_graph.ops[opid].is_elem_wise_main_op = False
+                split_graph.ops[opid].is_elem_wise_main_op = True
             elif opcode_type == "SQUARED_DIFFERENCE":
                 split_graph.ops[opid].is_mac_main_op = False
                 split_graph.ops[opid].is_elem_wise_main_op = True
@@ -188,4 +188,5 @@ def pipeline_schedule(split_graph: Graph):
     re_schedule(split_graph)
     
     #return pipeline_split_graph
+    split_graph.pipeline_schedule = True
     return split_graph
