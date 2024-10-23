@@ -95,12 +95,12 @@ new_graph = splitter.perform_split()
 if args.verbose_performance:
     split_dma_cycles, split_op_cycles, split_total_cycles = estimate_model(new_graph, pipeline = False)
     print_performance(new_graph)
-    print(f"Before pipeline schedule: dma cycles = {split_dma_cycles}, op cycles = {split_op_cycles}, total cycles = {split_total_cycles}")
+    print(f"Before pipeline schedule: dma cycles = {split_dma_cycles :.1f}, op cycles = {split_op_cycles :.1f}, total cycles = {split_total_cycles :.1f}")
 pipeline_new_graph = pipeline_schedule(new_graph)
 if args.verbose_performance:
     pipeline_dma_cycles, pipeline_op_cycles, pipeline_total_cycles = estimate_model(pipeline_new_graph, pipeline = True)
     print(f"match ops = {pipeline_new_graph.matched_ops}")
-    print(f"After pipeline schedule: dma cycles = {pipeline_dma_cycles}, op cycles = {pipeline_op_cycles}, total cycles = {pipeline_total_cycles}")
+    print(f"After pipeline schedule: dma cycles = {pipeline_dma_cycles :.1f}, op cycles = {pipeline_op_cycles :.1f}, total cycles = {pipeline_total_cycles :.1f}")
     print(f"speedup = {((split_total_cycles/pipeline_total_cycles) - 1) * 100 :.2f}%")
 new_buffers, new_tensors, new_inputs, new_outputs, new_operators, new_opcodes = pipeline_new_graph.export()
 

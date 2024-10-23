@@ -98,8 +98,8 @@ class Splitter:
 
             input_tile_size = self.split_height
             output_tile_size = self.split_height
-            input_tile_size = 64
-            output_tile_size = 64
+            input_tile_size = 10
+            output_tile_size = 10
 
             # TODO split block input
             self.split_block_input(start_id, input_tile_size)

@@ -2,6 +2,7 @@ import json
 import argparse
 import os
 import tempfile
+from memory_allocation import memory_allocator
 from OPGen import OPGen
 
 parser = argparse.ArgumentParser()
@@ -45,8 +46,10 @@ for operator in operators:
         operator['opcode_index'] = 0
         operator['builtin_options_type'] = 'ReshapeOptions'
 
+memory_allocator(model)
+
 npu_code = ""
-opgen = OPGen(tensors, buffers, npu_code)
+opgen = OPGen(model, npu_code)
 for operator in operators:
     opgen.op_codegen(operator)
 

@@ -1,9 +1,11 @@
 import numpy as np
 import math
 class OPGen:
-    def __init__(self, tensors, buffers, npu_code):
-        self.tensor = tensors
-        self.buffers = buffers
+    def __init__(self, model, npu_code):
+        self.model = model
+        self.opcodes = model['operator_codes']
+        self.tensor = model['subgraphs'][0]['tensors']
+        self.buffers = model['buffers']
         self.npu_code = npu_code
 
     def QuantizeMultiplier(self, scale):
@@ -125,19 +127,21 @@ class OPGen:
         print(f"SPLIT: {operator['inputs']}, {operator['outputs']}")
 
     def op_codegen(self, operator):
-        if operator['builtin_options_type'] == 'FullyConnectedOptions':
+        opcode_index = operator['opcode_index']
+        opcode_type = self.opcodes[opcode_index].get("builtin_code")
+        if opcode_type == 'FULLY_CONNECTED':
             self.fully_connected_codegen(operator)
-        elif operator['builtin_options_type'] == 'BatchMatMulOptions':
+        elif opcode_type == 'BATCH_MATMUL':
             self.batch_matmul_codegen(operator)
-        elif operator['builtin_options_type'] == 'MulOptions':
+        elif opcode_type == 'MUL':
             self.mul_codegen(operator)
-        elif operator['builtin_options_type'] == 'AddOptions':
+        elif opcode_type == 'ADD':
             self.add_codegen(operator)
-        elif operator['builtin_options_type'] == 'SoftmaxOptions':
+        elif opcode_type == 'SOFTMAX':
             self.softmax_codegen(operator)
-        elif operator['builtin_options_type'] == 'ConcatenationOptions':
+        elif opcode_type == 'CONCATENATION':
             self.concat_codegen(operator)
-        elif operator['builtin_options_type'] == 'SplitOptions':
+        elif opcode_type == 'SPLIT':
             self.split_codegen(operator)
         else:
-            print(f"[CODE_GEN] Unknown operator: {operator['builtin_options_type']}")
+            print(f"[CODE_GEN] Unknown operator: {opcode_type}")
