@@ -10,6 +10,7 @@ class Node:
         self.schedule_order = -1
         self.is_mac_main_op = False
         self.is_elem_wise_main_op = False
+        self.is_mem_main_op = False
         # This represent this op only can hoist to the opid larger than this value.
         self.hoist_min_schedule_order = -1
         # This represent that this op is matched with another op run currently in each of MAC/ELE engine.

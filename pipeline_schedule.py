@@ -57,6 +57,8 @@ def pipeline_schedule(split_graph: Graph):
             elif opcode_type == "BATCH_MATMUL":
                 split_graph.ops[opid].is_mac_main_op = True
                 split_graph.ops[opid].is_elem_wise_main_op = False
+            elif opcode_type == "RESHAPE":
+                split_graph.ops[opid].is_mem_main_op = True
             else:
                 split_graph.ops[opid].is_mac_main_op = False
                 split_graph.ops[opid].is_elem_wise_main_op = False
@@ -67,9 +69,10 @@ def pipeline_schedule(split_graph: Graph):
         for opid in new_operators:
             # Before re-schedule this op, update its hoidt_min_schedule_order, since their parents may have been re-scheduled
             split_graph.ops[opid].hoist_min_schedule_order = -1
-            parent_status = []
             for parent in split_graph.ops[opid].parents:
-                parent_status.append(split_graph.ops[parent].schedule_order)
+                # Consider that the parent may be a mem_main_op, it won't be executed in the MAC/Elem-wise engine
+                if split_graph.ops[parent].is_mem_main_op:
+                    parent = split_graph.ops[parent].parents[0]
                 split_graph.ops[opid].hoist_min_schedule_order = max(split_graph.ops[opid].hoist_min_schedule_order, round(split_graph.ops[parent].schedule_order))
 
             # Check whether this op can be hoisted

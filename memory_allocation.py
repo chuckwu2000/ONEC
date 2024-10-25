@@ -13,7 +13,7 @@ class memory_allocator:
         self.SRAM_MAX_SIZE = 1 << 63
         self.need_allocate_tensor_id = set()
         self.live_range = defaultdict(dict)
-        self.memory_allocate()
+        self.allocated_tensor = self.memory_allocate()
 
     def compute_tensor_live_range(self):
         operators = self.model['subgraphs'][0]['operators']
@@ -49,7 +49,8 @@ class memory_allocator:
         for tensor_id in sorted_tensor_id:
             need_allocate_tensors.append(tenosr_memory(tensor_id, tensor_size[tensor_id]))
         total_consumed_size = 0
-        allocated_tensors = []
+        size_non_inc_allocated_tensors = []
+        allocated_tensors = defaultdict(tenosr_memory)
 
         # Step 3: Allocate memory (greedy by size)
         for tensor in need_allocate_tensors:
@@ -57,7 +58,7 @@ class memory_allocator:
             best_start = None
             smallest_gap = self.SRAM_MAX_SIZE
 
-            for allocated_tensor in allocated_tensors:
+            for allocated_tensor in size_non_inc_allocated_tensors:
                 max_first_op = max(self.live_range[tensor.tensor_id]['first_time_used'], self.live_range[allocated_tensor.tensor_id]['first_time_used'])
                 min_last_op = min(self.live_range[tensor.tensor_id]['last_time_used'], self.live_range[allocated_tensor.tensor_id]['last_time_used'])
                 if max_first_op <= min_last_op:
@@ -71,10 +72,13 @@ class memory_allocator:
             tensor.start_address = best_start
             tensor.end_address = best_start + tensor.size
             total_consumed_size = max(total_consumed_size, tensor.end_address)
-            allocated_tensors.append(tensor)
+            
+            size_non_inc_allocated_tensors.append(tensor)
+            allocated_tensors[tensor.tensor_id] = tensor
 
         return allocated_tensors
 
     def memory_allocate(self):
         self.compute_tensor_live_range()
         allocated_tensor = self.greedy_by_size()
+        return allocated_tensor

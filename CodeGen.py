@@ -46,10 +46,11 @@ for operator in operators:
         operator['opcode_index'] = 0
         operator['builtin_options_type'] = 'ReshapeOptions'
 
-memory_allocator(model)
+memory_allocator = memory_allocator(model)
+allocated_tensor = memory_allocator.allocated_tensor
 
 npu_code = ""
-opgen = OPGen(model, npu_code)
+opgen = OPGen(model, allocated_tensor, npu_code)
 for operator in operators:
     opgen.op_codegen(operator)
 

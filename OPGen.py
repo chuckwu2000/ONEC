@@ -1,11 +1,12 @@
 import numpy as np
 import math
 class OPGen:
-    def __init__(self, model, npu_code):
+    def __init__(self, model, allocated_tensor, npu_code):
         self.model = model
         self.opcodes = model['operator_codes']
         self.tensor = model['subgraphs'][0]['tensors']
         self.buffers = model['buffers']
+        self.allocated_tensor = allocated_tensor
         self.npu_code = npu_code
 
     def QuantizeMultiplier(self, scale):
@@ -78,9 +79,13 @@ class OPGen:
         return buffer
 
     def fully_connected_codegen(self, operator):
-        input_tensor = self.tensor[operator['inputs'][0]]
-        weight_tensor = self.tensor[operator['inputs'][1]]
-        output_tensor = self.tensor[operator['outputs'][0]]
+        input_tensor_id = operator['inputs'][0]
+        weight_tensor_id = operator['inputs'][1]
+        output_tensor_id = operator['outputs'][0]
+
+        input_tensor = self.tensor[input_tensor_id]
+        weight_tensor = self.tensor[weight_tensor_id]
+        output_tensor = self.tensor[output_tensor_id]
 
         input_quant_scale = np.int32(input_tensor['quantization']['scale'][0]).view('float32')
         weight_quant_scale = np.int32(weight_tensor['quantization']['scale'][0]).view('float32')
@@ -94,13 +99,13 @@ class OPGen:
 
         code = ""
         # Start to load weights
-        code += self.CodeGen_DMA_start(80000, self.Compute_tensor_size(weight_tensor))
+        code += self.CodeGen_DMA_start(self.allocated_tensor[weight_tensor_id].start_address, self.Compute_tensor_size(weight_tensor))
         # Set input tensor
-        code += self.CodeGen_Set_input_tensor(input_tensor, 0, input_quant_zp)
+        code += self.CodeGen_Set_input_tensor(input_tensor, self.allocated_tensor[input_tensor_id].start_address, input_quant_zp)
         # Set weight tensor
-        code += self.CodeGen_Set_weight_tensor(weight_tensor, 80000, weight_quant_zp)
+        code += self.CodeGen_Set_weight_tensor(weight_tensor, self.allocated_tensor[weight_tensor_id].start_address, weight_quant_zp)
         # Set output tensor
-        code += self.CodeGen_Set_output_tensor(output_tensor, 160000, output_quant_zp)
+        code += self.CodeGen_Set_output_tensor(output_tensor, self.allocated_tensor[output_tensor_id].start_address, output_quant_zp)
         # Set scale
         code += f"SET_MULTIPLIER {multiplier}\n"
         code += f"SET_SHIFT {shift}\n"
