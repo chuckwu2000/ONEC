@@ -84,6 +84,8 @@ def pipeline_schedule(split_graph: Graph):
                     # But we need to check that op won't run concurrently with its parents
                     illegal = False
                     for parent in split_graph.ops[opid].parents:
+                        if split_graph.ops[parent].is_mem_main_op:
+                            parent = split_graph.ops[parent].parents[0]
                         if split_graph.ops[parent].schedule_order == insert_pos:
                             illegal = True
                     if illegal:
@@ -131,6 +133,8 @@ def pipeline_schedule(split_graph: Graph):
                     # But we need to check that op won't run concurrently with its parents
                     illegal = False
                     for parent in split_graph.ops[opid].parents:
+                        if split_graph.ops[parent].is_mem_main_op:
+                            parent = split_graph.ops[parent].parents[0]
                         if split_graph.ops[parent].schedule_order == insert_pos:
                             illegal = True
                     if illegal:
