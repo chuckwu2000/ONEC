@@ -92,8 +92,8 @@ if args.pad_fusion:
     splitter.PaddingFusion()
 
 new_graph = splitter.perform_split()
+split_dma_cycles, split_op_cycles, split_total_cycles = estimate_model(new_graph, pipeline = False)
 if args.verbose_performance:
-    split_dma_cycles, split_op_cycles, split_total_cycles = estimate_model(new_graph, pipeline = False)
     print_performance(new_graph)
     print(f"Before pipeline schedule: dma cycles = {split_dma_cycles :.1f}, op cycles = {split_op_cycles :.1f}, total cycles = {split_total_cycles :.1f}")
 pipeline_new_graph = pipeline_schedule(new_graph)

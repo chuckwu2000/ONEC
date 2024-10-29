@@ -15,7 +15,8 @@ class Node:
         self.hoist_min_schedule_order = -1
         # This represent that this op is matched with another op run currently in each of MAC/ELE engine.
         # But depend on its computation ratio, it can overlap more than one op.
-        self.have_matched = False
+        self.have_fully_matched = False
+        self.non_overlap_cycles = 0
         self.estimated_DMA_cycles = 0
         self.estimated_op_cycles = 0
         self.estimated_total_cycles = 0

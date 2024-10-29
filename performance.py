@@ -916,11 +916,12 @@ def estimate_op_cycles(model: Graph, opid: int) -> int:
         op.estimated_DMA_cycles = dma_cycles
         op.estimated_op_cycles = op_cycles
         op.estimated_total_cycles = total_cycles
-    elif opcode_type == "CONCATENATION":
+    elif opcode_type == "CONCATENATION" or opcode_type == "SPLIT" or opcode_type == "RESHAPE":
         # NPU won't do concatenation, so just set the cycles to 0
-        dma_cycles = 0
-        op_cycles = 0
-        total_cycles = 0
+        dma_cycles, op_cycles, total_cycles = 0, 0, 0
+        op.estimated_DMA_cycles = dma_cycles
+        op.estimated_op_cycles = op_cycles
+        op.estimated_total_cycles = total_cycles
     else:
         dma_cycles = 0
         op_cycles = 0
@@ -934,10 +935,14 @@ def estimate_model(model: Graph, pipeline: bool) -> int:
     total_cycles = 0
 
     for opid in model.ordered_opid:
+        # w/wo pipeline schedule, the estimated total cycles will be different, since we consider the memory footprint between DRAM and SRAM
         dma_cycles, op_cycles, op_total_cycles = estimate_op_cycles(model, opid)
-        total_dma_cycles += model.ops[opid].estimated_DMA_cycles
-        total_op_cycles += model.ops[opid].estimated_op_cycles
-        total_cycles += model.ops[opid].estimated_total_cycles
+        # For later pipeline schedule, op_total_cycles will be used to determine the overlap range
+        if not pipeline:
+            model.ops[opid].non_overlap_cycles = op_total_cycles
+        total_dma_cycles += dma_cycles
+        total_op_cycles += op_cycles
+        total_cycles += op_total_cycles
     if pipeline:
         matched_ops = model.matched_ops
         # For now, assume the two op parallel execution will take the longer one

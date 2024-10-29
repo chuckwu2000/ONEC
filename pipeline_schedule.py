@@ -67,7 +67,11 @@ def pipeline_schedule(split_graph: Graph):
         new_operators = split_graph.ordered_opid
         # Check each op whether can hoist and modify its order in DF-1 schedule
         for opid in new_operators:
-            # Before re-schedule this op, update its hoidt_min_schedule_order, since their parents may have been re-scheduled
+            # Skip the op that has been matched
+            if split_graph.ops[opid].have_fully_matched:
+                continue
+
+            # Before re-schedule this op, update its hoist_min_schedule_order, since their parents may have been re-scheduled
             split_graph.ops[opid].hoist_min_schedule_order = -1
             for parent in split_graph.ops[opid].parents:
                 # Consider that the parent may be a mem_main_op, it won't be executed in the MAC/Elem-wise engine
@@ -77,7 +81,6 @@ def pipeline_schedule(split_graph: Graph):
 
             # Check whether this op can be hoisted
             if split_graph.ops[opid].is_mac_main_op:
-                left_cycles = split_graph.ops[opid].estimated_total_cycles
                 # Find the insert position
                 for insert_pos in range(split_graph.ops[opid].hoist_min_schedule_order, split_graph.ops[opid].schedule_order):
                     # We don't plus one on op's hoist_min_schedule_order, since it will loss some optimize opportunity
@@ -92,41 +95,74 @@ def pipeline_schedule(split_graph: Graph):
                         continue
 
                     insert_pos_opid = split_graph.ordered_opid[insert_pos]
-                    if split_graph.ops[insert_pos_opid].is_elem_wise_main_op and split_graph.ops[insert_pos_opid].have_matched is False:
-                        split_graph.ops[insert_pos_opid].have_matched = True
-                        split_graph.ops[opid].have_matched = True
-                        # To differentiate the schedule order between original op and its next op
-                        split_graph.ops[opid].schedule_order = insert_pos + 0.6
-                        matched_ops = [opid]
-                        matched_ops.append(insert_pos_opid)
-                        left_cycles -= split_graph.ops[insert_pos_opid].estimated_total_cycles
+                    if split_graph.ops[insert_pos_opid].is_elem_wise_main_op and split_graph.ops[insert_pos_opid].have_fully_matched is False:
+                        # node[opid] can fully cover node[insert_pos_opid]
+                        if split_graph.ops[insert_pos_opid].estimated_total_cycles <= split_graph.ops[opid].estimated_total_cycles:
+                            split_graph.ops[insert_pos_opid].have_fully_matched = True
+                            split_graph.ops[insert_pos_opid].non_overlap_cycles = 0
+                            # To differentiate the schedule order between original op and its next op
+                            split_graph.ops[opid].schedule_order = insert_pos + 0.6
+                            split_graph.ops[opid].non_overlap_cycles -= split_graph.ops[insert_pos_opid].estimated_total_cycles
+                            matched_ops = [opid]
+                            matched_ops.append(insert_pos_opid)
+                            # Find more node[insert_pos + n] that can be covered by node[opid]
+                            while True:
+                                # Find the node[insert_pos + 1]
+                                if insert_pos + 1 < len(split_graph.ordered_opid):
+                                    insert_pos_child_id = split_graph.ordered_opid[insert_pos + 1]
 
-                        # Check whether the left cycles is enough to cover next op(and need to be elem_wise_main_op)'s cycles
-                        while True:
-                            child_id = -1
-                            for child in split_graph.ops[insert_pos_opid].children:
-                                if split_graph.ops[child].schedule_order == insert_pos + 1:
-                                    child_id = child
-                            if child_id == -1:
+                                if split_graph.ops[insert_pos_child_id].is_elem_wise_main_op and split_graph.ops[insert_pos_child_id].have_fully_matched is False:
+                                    # Ensure that won't take another longer op to cover this mac_main op
+                                    # 1.7 is just a default threshold
+                                    if split_graph.ops[insert_pos_child_id].estimated_total_cycles <= 1.7 * split_graph.ops[opid].non_overlap_cycles:
+                                        split_graph.ops[insert_pos_child_id].have_fully_matched = True
+                                        split_graph.ops[insert_pos_child_id].non_overlap_cycles = 0
+                                        split_graph.ops[opid].non_overlap_cycles -= split_graph.ops[insert_pos_child_id].estimated_total_cycles
+                                        matched_ops.append(insert_pos_child_id)
+                                        # Upadte the insert_pos
+                                        insert_pos += 1
+                                        continue
                                 break
-                            if split_graph.ops[child_id].is_elem_wise_main_op and split_graph.ops[child_id].have_matched is False:
-                                # Ensure that won't take another longer op to cover this mac_0main op
-                                # 1.5 is just a default threshold
-                                if left_cycles * 1.5 >= split_graph.ops[child_id].estimated_total_cycles:
-                                    split_graph.ops[child_id].have_matched = True
-                                    matched_ops.append(child_id)
-                                    left_cycles -= split_graph.ops[child_id].estimated_total_cycles
-                                    insert_pos_opid = child_id
-                                    insert_pos = split_graph.ops[child_id].schedule_order
-                                else:
-                                    break
-                            else:
+                            split_graph.ops[opid].have_fully_matched = True
+                            split_graph.ops[opid].non_overlap_cycles = 0
+                            split_graph.matched_ops.append(matched_ops)
+                            break
+                        # node[insert_pos_opid] can fully cover node[opid]
+                        else:
+                            split_graph.ops[opid].have_fully_matched = True
+                            split_graph.ops[opid].non_overlap_cycles = 0
+                            opid_pos = split_graph.ops[opid].schedule_order
+                            # To differentiate the schedule order between original op and its next op
+                            split_graph.ops[opid].schedule_order = insert_pos + 0.6
+                            split_graph.ops[insert_pos_opid].non_overlap_cycles -= split_graph.ops[opid].estimated_total_cycles
+                            matched_ops = [insert_pos_opid]
+                            matched_ops.append(opid)
+                            seq_offset = 0.01
+                            # Find more node[opid + n] that can be covered by node[insert_pos_opid]
+                            while True:
+                                # Find the node[opid + 1]
+                                if opid_pos + 1 < len(split_graph.ordered_opid):
+                                    opid_child_id = split_graph.ordered_opid[opid_pos + 1]
+
+                                if split_graph.ops[opid_child_id].is_mac_main_op and split_graph.ops[opid_child_id].have_fully_matched is False:
+                                    # Ensure that won't take another longer op to cover this elem_wise_main op
+                                    # 1.7 is just a default threshold
+                                    if split_graph.ops[opid_child_id].estimated_total_cycles <= 1.7 * split_graph.ops[insert_pos_opid].non_overlap_cycles:
+                                        split_graph.ops[opid_child_id].have_fully_matched = True
+                                        split_graph.ops[opid_child_id].non_overlap_cycles = 0
+                                        split_graph.ops[opid_child_id].schedule_order = insert_pos + 0.6 + seq_offset
+                                        seq_offset += 0.01
+                                        split_graph.ops[insert_pos_opid].non_overlap_cycles -= split_graph.ops[opid_child_id].estimated_total_cycles
+                                        matched_ops.append(opid_child_id)
+                                        # Upadte the ori_opid_pos
+                                        opid_pos += 1
+                                        continue
                                 break
-                        split_graph.matched_ops.append(matched_ops)
-                        break
-                        
+                            split_graph.ops[insert_pos_opid].have_fully_matched = True
+                            split_graph.ops[insert_pos_opid].non_overlap_cycles = 0
+                            split_graph.matched_ops.append(matched_ops)
+                            break
             elif split_graph.ops[opid].is_elem_wise_main_op:
-                left_cycles = split_graph.ops[opid].estimated_total_cycles
                 # Find the insert position
                 for insert_pos in range(split_graph.ops[opid].hoist_min_schedule_order, split_graph.ops[opid].schedule_order):
                     # We don't plus one on op's hoist_min_schedule_order, since it will loss some optimize opportunity
@@ -141,38 +177,73 @@ def pipeline_schedule(split_graph: Graph):
                         continue
 
                     insert_pos_opid = split_graph.ordered_opid[insert_pos]
-                    if split_graph.ops[insert_pos_opid].is_mac_main_op and split_graph.ops[insert_pos_opid].have_matched is False:
-                        split_graph.ops[insert_pos_opid].have_matched = True
-                        split_graph.ops[opid].have_matched = True
-                        # To differnetiate the schedule order between original op and its next op
-                        split_graph.ops[opid].schedule_order = insert_pos + 0.6
-                        matched_ops = [opid]
-                        matched_ops.append(insert_pos_opid)
-                        left_cycles -= split_graph.ops[insert_pos_opid].estimated_total_cycles
+                    if split_graph.ops[insert_pos_opid].is_mac_main_op and split_graph.ops[insert_pos_opid].have_fully_matched is False:
+                        # node[opid] can fully cover node[insert_pos_opid]
+                        if split_graph.ops[insert_pos_opid].estimated_total_cycles <= split_graph.ops[opid].estimated_total_cycles:
+                            split_graph.ops[insert_pos_opid].have_fully_matched = True
+                            split_graph.ops[insert_pos_opid].non_overlap_cycles = 0
+                            # To differentiate the schedule order between original op and its next op
+                            split_graph.ops[opid].schedule_order = insert_pos + 0.6
+                            split_graph.ops[opid].non_overlap_cycles -= split_graph.ops[insert_pos_opid].estimated_total_cycles
+                            matched_ops = [opid]
+                            matched_ops.append(insert_pos_opid)
+                            # Find more node[insert_pos + n] that can be covered by node[opid]
+                            while True:
+                                # Find the node[insert_pos + 1]
+                                if insert_pos + 1 < len(split_graph.ordered_opid):
+                                    insert_pos_child_id = split_graph.ordered_opid[insert_pos + 1]
 
-                        # Check whether the left cycles is enough to cover next op(and need to be elem_wise_main_op)'s cycles
-                        while True:
-                            child_id = -1
-                            for child in split_graph.ops[insert_pos_opid].children:
-                                if split_graph.ops[child].schedule_order == insert_pos + 1:
-                                    child_id = child
-                            if child_id == -1:
+                                if split_graph.ops[insert_pos_child_id].is_mac_main_op and split_graph.ops[insert_pos_child_id].have_fully_matched is False:
+                                    # Ensure that won't take another longer op to cover this mac_main op
+                                    # 1.7 is just a default threshold
+                                    if split_graph.ops[insert_pos_child_id].estimated_total_cycles <= 1.7 * split_graph.ops[opid].non_overlap_cycles:
+                                        split_graph.ops[insert_pos_child_id].have_fully_matched = True
+                                        split_graph.ops[insert_pos_child_id].non_overlap_cycles = 0
+                                        split_graph.ops[opid].non_overlap_cycles -= split_graph.ops[insert_pos_child_id].estimated_total_cycles
+                                        matched_ops.append(insert_pos_child_id)
+                                        # Upadte the insert_pos
+                                        insert_pos += 1
+                                        continue
                                 break
-                            if split_graph.ops[child_id].is_mac_main_op and split_graph.ops[child_id].have_matched is False:
-                                # Ensure that won't take another longer op to cover this elem_wise_main op
-                                # 1.5 is just a default threshold
-                                if left_cycles * 1.5 >= split_graph.ops[child_id].estimated_total_cycles:
-                                    split_graph.ops[child_id].have_matched = True
-                                    matched_ops.append(child_id)
-                                    left_cycles -= split_graph.ops[child_id].estimated_total_cycles
-                                    insert_pos_opid = child_id
-                                    insert_pos = split_graph.ops[child_id].schedule_order
-                                else:
-                                    break
-                            else:
+                            split_graph.ops[opid].have_fully_matched = True
+                            split_graph.ops[opid].non_overlap_cycles = 0
+                            split_graph.matched_ops.append(matched_ops)
+                            break
+                        # node[insert_pos_opid] can fully cover node[opid]
+                        else:
+                            split_graph.ops[opid].have_fully_matched = True
+                            split_graph.ops[opid].non_overlap_cycles = 0
+                            opid_pos = split_graph.ops[opid].schedule_order
+                            # To differentiate the schedule order between original op and its next op
+                            split_graph.ops[opid].schedule_order = insert_pos + 0.6
+                            split_graph.ops[insert_pos_opid].non_overlap_cycles -= split_graph.ops[opid].estimated_total_cycles
+                            matched_ops = [insert_pos_opid]
+                            matched_ops.append(opid)
+                            seq_offset = 0.01
+                            # Find more node[opid + n] that can be covered by node[insert_pos_opid]
+                            while True:
+                                # Find the node[opid + 1]
+                                if opid_pos + 1 < len(split_graph.ordered_opid):
+                                    opid_child_id = split_graph.ordered_opid[opid_pos + 1]
+
+                                if split_graph.ops[opid_child_id].is_elem_wise_main_op and split_graph.ops[opid_child_id].have_fully_matched is False:
+                                    # Ensure that won't take another longer op to cover this elem_wise_main op
+                                    # 1.7 is just a default threshold
+                                    if split_graph.ops[opid_child_id].estimated_total_cycles <= 1.7 * split_graph.ops[insert_pos_opid].non_overlap_cycles:
+                                        split_graph.ops[opid_child_id].have_fully_matched = True
+                                        split_graph.ops[opid_child_id].non_overlap_cycles = 0
+                                        split_graph.ops[opid_child_id].schedule_order = insert_pos + 0.6 + seq_offset
+                                        seq_offset += 0.01
+                                        split_graph.ops[insert_pos_opid].non_overlap_cycles -= split_graph.ops[opid_child_id].estimated_total_cycles
+                                        matched_ops.append(opid_child_id)
+                                        # Upadte the ori_opid_pos
+                                        opid_pos += 1
+                                        continue
                                 break
-                        split_graph.matched_ops.append(matched_ops)
-                        break
+                            split_graph.ops[insert_pos_opid].have_fully_matched = True
+                            split_graph.ops[insert_pos_opid].non_overlap_cycles = 0
+                            split_graph.matched_ops.append(matched_ops)
+                            break
         # Store the new schedule order into a list, it contain some op have the same schedule order
         split_graph.operators = []
         split_graph.ordered_opid = []
