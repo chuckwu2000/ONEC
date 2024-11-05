@@ -88,8 +88,8 @@ tensor_id_mapping = [ x for x in range(len(tensors))]
 ori_graph = Graph(operators, tensors, buffers, new_opcodes, subgraphs[0]['inputs'], subgraphs[0]['outputs'], args.exec_order)
 
 splitter = Splitter(ori_graph, args.split_height)
-if args.pad_fusion:
-    splitter.PaddingFusion()
+# if args.pad_fusion:
+#     splitter.PaddingFusion()
 
 new_graph = splitter.perform_split()
 split_dma_cycles, split_op_cycles, split_total_cycles = estimate_model(new_graph, pipeline = False)

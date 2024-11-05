@@ -71,16 +71,14 @@ class Node:
 
 class Graph:
     def __init__(self, ops, tensors, buffers, opcodes, inputs, outputs, exec_order):
-        if len(inputs) > 1:
-            raise "unsupported graph: 1 input tensor only."
         self.tensors = tensors
         self.buffers = buffers
         self.opcodes = opcodes
         self.inputs = copy.copy(inputs)
         self.outputs = copy.copy(outputs)
         self.exec_order = exec_order
-        self.in_tensor_id = inputs[0]
-        self.root_op_id = -1
+        # We consider the model have multiple roots
+        self.root_op_id = []
         self.ops = None
         self.DFS_ordered = False
         self.BFS_ordered = False
@@ -116,15 +114,16 @@ class Graph:
                 op_lookup_input[in_id].append(opid)
         self.op_lookup_input = op_lookup_input
 
-        # find root
-        self.root_op_id = op_lookup_input[self.in_tensor_id][0]
+        # find root (it may have multiple roots)
+        for in_tensor_id in self.inputs:
+            self.root_op_id.append(op_lookup_input[in_tensor_id][0])
 
         # build the remainder
-        self.build_DFS(self.root_op_id, op_lookup_input)
+        for root_op_id in self.root_op_id:
+            self.build_DFS(root_op_id, op_lookup_input)
 
         # reorder execution ordering to the input exec_order
         self.ensure_order()
-
 
     def ensure_DFS_order(self):
         def DFS_ordering(current_id, DFS_orderred_operators:list):
@@ -140,10 +139,11 @@ class Graph:
             self.DFS_ordered = True
             self.BFS_ordered = False
             new_operators = []
-            for i, op in enumerate(self.ops):
-                if self.in_tensor_id in op.info['inputs']:
-                    start_id = i
-            DFS_ordering(start_id, new_operators)
+            for root_op_id in self.root_op_id:
+                for i, op in enumerate(self.ops):
+                    if root_op_id in op.info['inputs']:
+                        start_id = i
+                DFS_ordering(start_id, new_operators)
             self.operators = []
             # For pipeline schedule, we need to record the order of each op.
             self.ordered_opid = new_operators
