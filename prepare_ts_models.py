@@ -11,6 +11,7 @@ parser.add_argument("--schema_path", nargs='?', type=str,
 parser.add_argument("--models_dir", nargs='?', type=str,
                     default="models/")
 parser.add_argument("--verbose_performance", action='store_true')
+parser.add_argument("--block_based", action='store_true')
 args = parser.parse_args()
 rewriter_path = str(args.rewriter_path)
 schema_path = str(args.schema_path)
@@ -33,4 +34,6 @@ for split_height in [1]:
                 f" --out_path {out_path}"
         if args.verbose_performance:
             cmd += " --verbose_performance"
+        if args.block_based:
+            cmd += " --block_based"
         subprocess.run(cmd.split(' '))

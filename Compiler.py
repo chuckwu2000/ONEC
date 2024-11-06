@@ -3,6 +3,7 @@ import copy
 import argparse
 import os
 from MyGraph import Graph
+from Block import Block
 from AutoSplit import Splitter
 import tempfile
 from pipeline_schedule import pipeline_schedule
@@ -17,6 +18,7 @@ parser.add_argument("--exec_order", nargs='?', default="DF")
 parser.add_argument("--split_height", nargs='?', type=int, default=2)
 parser.add_argument("--pad_fusion", action='store_true')
 parser.add_argument("--verbose_performance", action='store_true')
+parser.add_argument("--block_based", action='store_true')
 
 args = parser.parse_args()
 filename = os.path.basename(args.model_path)
@@ -86,6 +88,11 @@ new_model['operator_codes'] = new_opcodes
 tensor_id_mapping = [ x for x in range(len(tensors))]
 
 ori_graph = Graph(operators, tensors, buffers, new_opcodes, subgraphs[0]['inputs'], subgraphs[0]['outputs'], args.exec_order)
+
+# Decide each block's range from ori_graph
+if args.block_based:
+    graph_to_blocks = Block(ori_graph)
+    blocks = graph_to_blocks.blocks
 
 splitter = Splitter(ori_graph, args.split_height)
 # if args.pad_fusion:

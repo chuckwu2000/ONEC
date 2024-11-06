@@ -726,7 +726,10 @@ def estimate_fully_connected_cycles(model: Graph, opid: int) -> int:
     # Computations cycles
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["MAC"]
     # Total produce #token * #feature elements, each element need weight's #feature MACs
-    MACs = ofm_shape[0] * ofm_shape[1] * weight_shape[1]
+    ofm_elems = 1
+    for dim in ofm_shape:
+        ofm_elems *= dim
+    MACs = ofm_elems * weight_shape[1]
     op_cycles = MACs * cycle_per_elem
 
     total_cycles = dma_transfer_cycles + op_cycles

@@ -1,5 +1,4 @@
 from MyGraph import Graph
-import queue
 
 def pipeline_schedule(split_graph: Graph):
     # TODO: Implement pipeline scheduling
