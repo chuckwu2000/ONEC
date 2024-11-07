@@ -93,12 +93,14 @@ ori_graph = Graph(operators, tensors, buffers, new_opcodes, subgraphs[0]['inputs
 if args.block_based:
     graph_to_blocks = Block(ori_graph)
     blocks = graph_to_blocks.blocks
+else:
+    blocks = []
 
 splitter = Splitter(ori_graph, args.split_height)
 # if args.pad_fusion:
 #     splitter.PaddingFusion()
 
-new_graph = splitter.perform_split()
+new_graph = splitter.perform_split(blocks)
 split_dma_cycles, split_op_cycles, split_total_cycles = estimate_model(new_graph, pipeline = False)
 if args.verbose_performance:
     print_performance(new_graph)

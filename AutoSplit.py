@@ -84,10 +84,7 @@ class Splitter:
         self.split_dim = 1
         self.split_dim_value = 1
 
-    def perform_split(self)->Graph:
-        # vars init
-        self.split_info = []
-        self.split_tensors = []
+    def perform_split(self, blocks = []) -> Graph:
         # There may be some manipulation will create new tensors
         self.split_tensor_table = [list() for _ in range(len(self.tensors) + 10000)]
         self.new_operators = []
@@ -99,28 +96,70 @@ class Splitter:
 
         # Currently assume it's splittable from the root of the graph
         splittables = []
-        # Fisrt, traverse from the multi inputs
+        # Fisrt, traverse from the multi inputs (Except the last input)
         if len(self.ori_graph.root_op_id) > 1:
             for root_op_id in self.ori_graph.root_op_id[: -1]:
                 start_id = self.traverse_til_splittable(root_op_id)
                 if start_id is not None:
                     self.split_block_input(start_id, input_tile_size)
-                    self.traverse_til_not_splittable(root_op_id, splittables)
+                    self.traverse_til_not_splittable(start_id, splittables)
         
-        start_id = self.traverse_til_splittable(self.ori_graph.root_op_id[-1])
+        if len(blocks) == 0:
+            # Then, traverse from the last input
+            start_id = self.traverse_til_splittable(self.ori_graph.root_op_id[-1])
+            # get splittable block
+            end_id = self.traverse_til_not_splittable(start_id, splittables)
+            # split block input
+            self.split_block_input(start_id, input_tile_size)
+            # start split
+            for op in splittables:
+                self.split_one_node(op, input_tile_size, output_tile_size)
+            # concat block output
+            self.concat_block_output(end_id)
+        else:
+            # Split the prologue
+            for op in splittables:
+                self.split_one_node(op, input_tile_size, output_tile_size)
 
-        # get splittable block
-        end_id = self.traverse_til_not_splittable(start_id, splittables)
+            first_block = True
+            epilogue_start_id = None
+            # Perform TS on each block
+            for block in blocks:
+                start_id = block[0]
+                end_id = block[1]
+                splittables = []
+                self.traverse_til_not_splittable_with_end_id(start_id, splittables, end_id)
+                # Only first block need to split block input
+                if first_block:
+                    self.split_block_input(start_id, input_tile_size)
+                    first_block = False
+                else:
+                    # Last block had splitted this block's input
+                    splittables.pop(0)
+                # start split block
+                for op in splittables:
+                    self.split_one_node(op, input_tile_size, output_tile_size)
+                # concat than split block output
+                outputs = self.nodes[end_id].node.info['outputs']
+                for output in outputs:
+                    output_name = self.tensors[output]['name']
+                    for next_opid in self.nodes[end_id].node.children:
+                        for i, input in enumerate(self.nodes[next_opid].node.info['inputs']):
+                            # Need to match the next op's input tensor name to the output tensor name
+                            if self.tensors[input]['name'] == output_name:
+                                self.concat_than_split(next_opid, output_tile_size, input_idx = i)
+                                break
+                epilogue_start_id = end_id
 
-        # split block input
-        self.split_block_input(start_id, input_tile_size)
-
-        # start split
-        for op in splittables:
-            self.split_one_node(op, input_tile_size, output_tile_size)
-
-        # concat block output
-        self.concat_block_output(end_id)
+            # Split the epilogue
+            splittables = []
+            start_id = epilogue_start_id
+            end_id = self.traverse_til_not_splittable(start_id, splittables)
+            splittables.pop(0)
+            # Perform TS on the rest of the graph
+            for op in splittables:
+                self.split_one_node(op, input_tile_size, output_tile_size)
+            self.concat_block_output(end_id)
         
         new_graph = Graph ( self.new_operators, self.tensors, self.buffers,
                             self.opcodes, self.ori_graph.inputs, self.ori_graph.outputs, self.ori_graph.exec_order)
@@ -183,6 +222,30 @@ class Splitter:
             # Last op no need to split
             splittables.pop(-1)
             return current_opid
+        return None
+    
+    def traverse_til_not_splittable_with_end_id(self, current_opid, splittables, end_id):
+        for parent in self.nodes[current_opid].node.parents:
+            if self.nodes[parent].visited == False:
+                return None
+            
+        self.nodes[current_opid].visited = True
+        if current_opid not in splittables:
+            splittables.append(current_opid)
+
+        # Traverse to the end_id
+        if current_opid == end_id:
+            # Different to the traverse_til_not_splittable, it keep the end_id in splittables
+            return end_id        
+        
+        for child in self.nodes[current_opid].node.children:
+            # check if it is splittable op
+            if self.nodes[child].node.info.get("opcode_index",0) in self.splittable_opcode_idxes.values():
+                result = self.traverse_til_not_splittable_with_end_id(child, splittables, end_id)
+                if result is not None:
+                    return result
+            else:
+                return None
         return None
 
     def split_tensor(self, tensor_id_in):
@@ -731,7 +794,10 @@ class Splitter:
         # Check fc's two origin inputs whether need splitted (by experience, it has the number in the name's last character)
         need_split_nxn = True
         for input in inputs:
-            input_name = self.ori_graph.tensors[input]['name']
+            # If the input is none, skip it
+            if input == -1:
+                continue
+            input_name = self.tensors[input]['name']
             if not input_name[-1].isdigit():
                 need_split_nxn = False
                 break
@@ -1331,9 +1397,7 @@ class Splitter:
         new_op_info = {
             "opcode_index": self.get_opcode_index(2),
             "inputs": copy.deepcopy(self.split_tensor_table[info['inputs'][0]]),
-            "outputs": [
-                info['inputs'][0]
-            ],
+            "outputs": info['outputs'],
             "builtin_options_type": "ConcatenationOptions",
             "builtin_options": {
                 'axis': 1
