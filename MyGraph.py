@@ -140,10 +140,7 @@ class Graph:
             self.BFS_ordered = False
             new_operators = []
             for root_op_id in self.root_op_id:
-                for i, op in enumerate(self.ops):
-                    if root_op_id in op.info['inputs']:
-                        start_id = i
-                DFS_ordering(start_id, new_operators)
+                DFS_ordering(root_op_id, new_operators)
             self.operators = []
             # For pipeline schedule, we need to record the order of each op.
             self.ordered_opid = new_operators
