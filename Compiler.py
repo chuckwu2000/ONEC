@@ -3,6 +3,7 @@ import copy
 import argparse
 import os
 from MyGraph import Graph
+from GraphOptimizer import Optimizer
 from Block import Block
 from AutoSplit import Splitter
 import tempfile
@@ -30,7 +31,6 @@ tmp_dir_path = tmp_dir.name
 
 if os.path.splitext(filename)[1] != '.tflite':
     raise "input model path doesn't match: .tflite extension is required'"
-
 
 json_model_path = os.path.join(tmp_dir_path, f'{model_name}.json')
 os.system(f'flatc --json -o {tmp_dir_path} --raw-binary {schema_path} -- {args.model_path}')
@@ -88,6 +88,8 @@ new_model['operator_codes'] = new_opcodes
 tensor_id_mapping = [ x for x in range(len(tensors))]
 
 ori_graph = Graph(operators, tensors, buffers, new_opcodes, subgraphs[0]['inputs'], subgraphs[0]['outputs'], args.exec_order)
+
+Optimizer(ori_graph)
 
 # Decide each block's range from ori_graph
 if args.block_based:
