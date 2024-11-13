@@ -89,7 +89,7 @@ tensor_id_mapping = [ x for x in range(len(tensors))]
 
 ori_graph = Graph(operators, tensors, buffers, new_opcodes, subgraphs[0]['inputs'], subgraphs[0]['outputs'], args.exec_order)
 
-Optimizer(ori_graph)
+opt_ori_graph = Optimizer(ori_graph).perform_optimize()
 
 # Decide each block's range from ori_graph
 if args.block_based:
