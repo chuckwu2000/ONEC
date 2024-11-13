@@ -3,7 +3,6 @@ import copy
 import argparse
 import os
 from MyGraph import Graph
-from GraphOptimizer import Optimizer
 from Block import Block
 from AutoSplit import Splitter
 import tempfile
@@ -88,8 +87,6 @@ new_model['operator_codes'] = new_opcodes
 tensor_id_mapping = [ x for x in range(len(tensors))]
 
 ori_graph = Graph(operators, tensors, buffers, new_opcodes, subgraphs[0]['inputs'], subgraphs[0]['outputs'], args.exec_order)
-
-opt_ori_graph = Optimizer(ori_graph).perform_optimize()
 
 # Decide each block's range from ori_graph
 if args.block_based:
