@@ -10,12 +10,15 @@ parser.add_argument("--schema_path", nargs='?', type=str,
                     default="utils/schema.fbs")
 parser.add_argument("--models_dir", nargs='?', type=str,
                     default="models/")
+parser.add_argument("--model_type", nargs='?', type=str, 
+                    default="bert")
 parser.add_argument("--verbose_performance", action='store_true')
 parser.add_argument("--block_based", action='store_true')
 args = parser.parse_args()
 rewriter_path = str(args.rewriter_path)
 schema_path = str(args.schema_path)
 models_dir = str(args.models_dir)
+model_type = str(args.model_type)
 
 # tflite_list = [path for path in glob.glob(f'{models_dir}/*.tflite', recursive=True)]
 # for tflite_path in sorted(tflite_list):
@@ -30,6 +33,7 @@ for split_height in [1]:
         print(out_path)
         cmd =   f"python {rewriter_path} {tflite_path} --schema_path {schema_path}" \
                 f" --exec_order {exec_order} --split_height {split_height}" \
+                f" --model_type {model_type}" \
                 f" --pad_fusion" \
                 f" --out_path {out_path}"
         if args.verbose_performance:

@@ -16,6 +16,7 @@ parser.add_argument("--schema_path", nargs='?', default="utils/schema.fbs")
 parser.add_argument("--out_path")
 parser.add_argument("--exec_order", nargs='?', default="DF")
 parser.add_argument("--split_height", nargs='?', type=int, default=2)
+parser.add_argument("--model_type", nargs='?', type=str, default="bert")
 parser.add_argument("--pad_fusion", action='store_true')
 parser.add_argument("--verbose_performance", action='store_true')
 parser.add_argument("--block_based", action='store_true')
@@ -24,6 +25,11 @@ args = parser.parse_args()
 filename = os.path.basename(args.model_path)
 model_name = os.path.splitext(filename)[0]
 schema_path = args.schema_path
+
+if args.model_type == "bert":
+    model_type = 0
+elif args.model_type == "yolo":
+    model_type = 1
 
 tmp_dir = tempfile.TemporaryDirectory(dir='.')
 tmp_dir_path = tmp_dir.name
@@ -95,7 +101,7 @@ if args.block_based:
 else:
     blocks = []
 
-splitter = Splitter(ori_graph, args.split_height)
+splitter = Splitter(ori_graph, args.split_height, model_type)
 # if args.pad_fusion:
 #     splitter.PaddingFusion()
 

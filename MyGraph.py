@@ -20,6 +20,8 @@ class Node:
         self.estimated_DMA_cycles = 0
         self.estimated_op_cycles = 0
         self.estimated_total_cycles = 0
+        # Represent the split dimention of the output tensors
+        self.split_dim = -1
     def append_children(self, children):
         self.children+=children
 
