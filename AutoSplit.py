@@ -104,8 +104,8 @@ class Splitter:
 
         input_tile_size = self.split_height
         output_tile_size = self.split_height
-        input_tile_size = 50
-        output_tile_size = 50
+        input_tile_size = 40
+        output_tile_size = 40
 
         # Currently assume it's splittable from the root of the graph
         splittables = []
@@ -232,13 +232,32 @@ class Splitter:
         else:
             return None
         for child in self.nodes[current_opid].node.children:
-            # check if it is splittable op
+            # Check if it is the reshape op
+            opcode_index = self.nodes[child].node.info.get("opcode_index")
+            opcode_type = self.ori_graph.opcodes[opcode_index].get("builtin_code")
+            if opcode_type == "RESHAPE":
+                # Check if it is splittable op
+                input_shape = self.tensors[self.nodes[child].node.info['inputs'][0]]['shape']
+                output_shape = self.tensors[self.nodes[child].node.info['outputs'][0]]['shape']
+                # For now, we check whether the input shape have at least two dimentions that equal to the output shape
+                # If not, we assume it is non-splittable op
+                count = 0
+                for i in range(1, len(input_shape)):
+                    for j in range(1, len(output_shape)):
+                        if input_shape[i] == output_shape[j]:
+                            count += 1
+                            output_shape[j] = -1
+                            break
+                if count < 2:
+                    end_ids.append(child)
+                    return None
+
+            # Check if it is splittable op
             if self.nodes[child].node.info.get("opcode_index",0) in self.splittable_opcode_idxes.values():
-                result = self.traverse_til_not_splittable(child, splittables, end_ids)
-                if result is not None:
-                    return result
+                self.traverse_til_not_splittable(child, splittables, end_ids)
             else:
-                return child
+                end_ids.append(child)
+        
         # To avoid the model with zero splittable op
         if len(self.nodes[current_opid].node.children) == 0:
             # Last op no need to split
@@ -444,35 +463,63 @@ class Splitter:
             # Ex: split_dim = 2, output_split = 50, [1x64x100] -> [1x6400] => [1x64x50] -> [1x3200]
             # Ex: split_dim = 2, output_split = 10, [1x320x20x20] -> [1x10x32x20x20] => [1x320x10x20] -> [1x10x32x10x20]
             # Find out what split_dim is compose to output dimension
-            input_split_dim = []
+            split_dim = self.nodes[opid].node.split_dim
+            new_split_dims = []
+            new_shape_size = 1
             if len(input_shape) != len(output_shape):
                 if len(input_shape) > len(output_shape):
-                    input_idx = 0
-                    output_idx = 0
-                    input_sum = 1
-                    while output_idx < len(output_shape):
-                        input_sum *= input_shape[input_idx]
-                        input_split_dim.append(input_idx)
-                        input_idx += 1
-                        if output_shape[output_idx] == input_sum:
-                            if self.split_dim in input_split_dim:
-                                self.split_dim = output_idx
-                                print(f"after reshape: split_dim: {self.split_dim}")
+                    input_shape_idx = 0
+                    output_shape_idx = 0
+                    tmp_sum = 1
+                    while output_shape_idx < len(output_shape):
+                        tmp_sum *= input_shape[input_shape_idx]
+                        new_split_dims.append(input_shape_idx)
+                        input_shape_idx += 1
+                        if output_shape[output_shape_idx] == tmp_sum:
+                            # Find the new split_dim
+                            if split_dim in new_split_dims:
+                                # Compute new shape size
+                                for dim in new_split_dims:
+                                    if split_dim == dim:
+                                        new_shape_size *= output_split
+                                    else:
+                                        new_shape_size *= input_shape[dim]
+                                for child in self.nodes[opid].node.children:
+                                    self.nodes[child].node.split_dim = split_dim                                    
                                 break
-                            output_idx += 1
-                            input_split_dim = []
-                            input_sum = 1
+                        output_shape_idx += 1
+                        new_split_dims = []
+                        tmp_sum = 1
                 else:
-                    split_dim_value = input_shape[self.split_dim]
-                    for dim in range(len(output_shape)):
-                        if output_shape[dim] == split_dim_value:
-                            self.split_dim = dim
-                            break
+                    input_shape_idx = 0
+                    output_shape_idx = 0
+                    tmp_sum = 1
+                    while input_shape_idx < len(input_shape):
+                        tmp_sum *= output_shape[output_shape_idx]
+                        new_split_dims.append(output_shape_idx)
+                        output_shape_idx += 1
+                        if input_shape[input_shape_idx] == tmp_sum:
+                            # Find the new split_dim
+                            if split_dim in new_split_dims:
+                                # Compute new shape size
+                                for dim in new_split_dims:
+                                    if split_dim == dim:
+                                        new_shape_size *= min(output_split, output_shape[dim])
+                                    else:
+                                        new_shape_size *= output_shape[dim]
+                                for child in self.nodes[opid].node.children:
+                                    self.nodes[child].node.split_dim = split_dim                                    
+                                break
+                        input_shape_idx += 1
+                        new_split_dims = []
+                        tmp_sum = 1
+                    if input_shape_idx == len(input_shape):
+                        # Cannot find the split_dim
+                        new_shape_size = output_shape[split_dim]
 
-                    split_dim = idx
-                    self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
-                    for child in self.nodes[opid].node.children:
-                        self.nodes[child].node.split_dim = self.nodes[opid].node.split_dim
+            self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
+            for child in self.nodes[opid].node.children:
+                self.nodes[child].node.split_dim = self.nodes[opid].node.split_dim
 
             # Modify the split_tensor_by_n
             tensor_info = self.tensors[info['outputs'][0]]
@@ -483,14 +530,7 @@ class Splitter:
                 del new_tensor_info_base['shape_signature']
             for i in range(len(self.split_tensor_table[info['inputs'][0]])):
                 new_tensor_info = copy.deepcopy(new_tensor_info_base)
-                if input_split_dim != []:
-                    input_split_tensor_id = self.split_tensor_table[info['inputs'][0]][i]
-                    sum = 1
-                    for dim in input_split_dim:
-                        sum *= self.tensors[input_split_tensor_id]['shape'][dim]
-                    new_tensor_info['shape'][self.split_dim] = sum
-                else:
-                    new_tensor_info['shape'][self.split_dim] = output_split
+                new_tensor_info['shape'][self.split_dim] = new_shape_size
                 new_tensor_info['buffer'] = buffer_id
                 new_tensor_info['name'] += '_split_%d' % (i)
                 self.buffers.append({})
