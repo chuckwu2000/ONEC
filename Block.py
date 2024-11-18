@@ -46,6 +46,6 @@ class Block:
 
     def traverse_graph_from_root(self):
         # Assume the last input is the input_ids
-        root_opid = self.graph.root_op_id[-1]
+        root_opid = self.graph.root_op_ids[-1]
         # Traverse the graph from the root op
         self.DFS_find_ADD(root_opid)

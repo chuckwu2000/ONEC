@@ -102,8 +102,8 @@ else:
     blocks = []
 
 splitter = Splitter(ori_graph, args.split_height, model_type)
-# if args.pad_fusion:
-#     splitter.PaddingFusion()
+if args.pad_fusion and model_type == 1:
+    splitter.PaddingFusion()
 
 new_graph = splitter.perform_split(blocks)
 split_dma_cycles, split_op_cycles, split_total_cycles = estimate_model(new_graph, pipeline = False)

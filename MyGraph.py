@@ -80,7 +80,7 @@ class Graph:
         self.outputs = copy.copy(outputs)
         self.exec_order = exec_order
         # We consider the model have multiple roots
-        self.root_op_id = []
+        self.root_op_ids = []
         self.ops = None
         self.DFS_ordered = False
         self.BFS_ordered = False
@@ -118,10 +118,10 @@ class Graph:
 
         # find root (it may have multiple roots)
         for in_tensor_id in self.inputs:
-            self.root_op_id.append(op_lookup_input[in_tensor_id][0])
+            self.root_op_ids.append(op_lookup_input[in_tensor_id][0])
 
         # build the remainder
-        for root_op_id in self.root_op_id:
+        for root_op_id in self.root_op_ids:
             self.build_DFS(root_op_id, op_lookup_input)
 
         # reorder execution ordering to the input exec_order
@@ -141,7 +141,7 @@ class Graph:
             self.DFS_ordered = True
             self.BFS_ordered = False
             new_operators = []
-            for root_op_id in self.root_op_id:
+            for root_op_id in self.root_op_ids:
                 DFS_ordering(root_op_id, new_operators)
             self.operators = []
             # For pipeline schedule, we need to record the order of each op.
@@ -279,7 +279,8 @@ class Graph:
             else:
                 new_opid.append(id)
                 id += 1
-        self.root_op_id = new_opid[self.root_op_id]
+        for i, root_op_id in enumerate(self.root_op_ids):
+            self.root_op_ids[i] = new_opid[root_op_id]
         for op in self.ops:
             op.opid = new_opid[op.opid]
             for i in range(len(op.parents)):
