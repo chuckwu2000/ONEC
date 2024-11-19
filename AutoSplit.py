@@ -473,14 +473,36 @@ class Splitter:
             # Keep track the split_dim
             # Not support the split_dim decomposed to multiple dimension or composed to one dimension
             split_dim = self.nodes[opid].node.split_dim
-            split_value = input_shape[split_dim]
-            for idx, dim_value in enumerate(output_shape):
-                if dim_value == split_value:
-                    split_dim = idx
-                    for child in self.nodes[opid].node.children:
-                        self.nodes[child].node.split_dim = split_dim
-                    break
+            tmp_value = 1
+            tmp_idx = 0
+            if len(output_shape) > len(input_shape):
+                for idx, dim_value in enumerate(output_shape):
+                    tmp_value *= dim_value
+                    if tmp_idx >= len(input_shape):
+                        raise f"out of range happen in split_reshape, reshape info: {info}"
+                    if tmp_value == input_shape[tmp_idx]:
+                        if tmp_idx == split_dim:
+                            split_dim = idx
+                            for child in self.nodes[opid].node.children:
+                                self.nodes[child].node.split_dim = split_dim
+                            break
+                        tmp_idx += 1
+                        tmp_value = 1
+            elif len(output_shape) < len(input_shape):
+                for idx, dim_value in enumerate(input_shape):
+                    tmp_value *= dim_value
+                    if tmp_idx >= len(output_shape):
+                        raise f"out of range happen in split_reshape, reshape info: {info}"
+                    if tmp_value == output_shape[tmp_idx]:
+                        if idx == split_dim:
+                            split_dim = tmp_idx
+                            for child in self.nodes[opid].node.children:
+                                self.nodes[child].node.split_dim = split_dim
+                            break
+                        tmp_idx += 1
+                        tmp_value = 1
 
+            print(f"reshape info: {info}, split_dim: {split_dim}")
             self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
             for child in self.nodes[opid].node.children:
                 self.nodes[child].node.split_dim = split_dim

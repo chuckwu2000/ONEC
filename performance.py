@@ -919,7 +919,8 @@ def estimate_op_cycles(model: Graph, opid: int) -> int:
         op.estimated_DMA_cycles = dma_cycles
         op.estimated_op_cycles = op_cycles
         op.estimated_total_cycles = total_cycles
-    elif opcode_type == "CONCATENATION" or opcode_type == "SPLIT" or opcode_type == "RESHAPE":
+    elif opcode_type == "CONCATENATION" or opcode_type == "SPLIT" or opcode_type == "RESHAPE" or \
+         opcode_type == "SPLIT_V" or opcode_type == "TRANSPOSE":
         # NPU won't do concatenation, so just set the cycles to 0
         dma_cycles, op_cycles, total_cycles = 0, 0, 0
         op.estimated_DMA_cycles = dma_cycles
