@@ -502,7 +502,6 @@ class Splitter:
                         tmp_idx += 1
                         tmp_value = 1
 
-            print(f"reshape info: {info}, split_dim: {split_dim}")
             self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
             for child in self.nodes[opid].node.children:
                 self.nodes[child].node.split_dim = split_dim
@@ -1587,6 +1586,8 @@ class Splitter:
         axis = axis_buffer['data'][0]
 
         split_dim = self.nodes[opid].node.split_dim
+        if axis == split_dim:
+            raise f"reduce_max can't split on the axis {axis}, it will produces incorrect results"
         if axis < split_dim:
             split_dim -= 1
         

@@ -24,5 +24,7 @@ class ArchitectureFeatures:
         "LEAKY_RELU": 3,
         "SOFTMAX": 10,
         "RSQRT": 9,
+        "REDUCE_MAX": 1,
+        "DE/QUANTIZE": 4,
         "LUT": 1
     }

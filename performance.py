@@ -824,6 +824,136 @@ def estimate_batch_matmul_cycles(model: Graph, opid: int) -> int:
     total_cycles = dma_transfer_cycles + op_cycles
     return dma_transfer_cycles, op_cycles, total_cycles
 
+# Estimate the number of cycles for a given reduce_max operation
+def estimate_reduce_max_cycles(model: Graph, opid: int) -> int:
+    tensors = model.tensors
+    info = model.ops[opid].info
+    inputs = info.get("inputs")
+    outputs = info.get("outputs")
+
+    if len(inputs) != 2 or len(outputs) != 1:
+        raise "ReduceMax operation should have 2 inputs and 1 output"
+    ifm = tensors[inputs[0]]
+    ofm = tensors[outputs[0]]
+    ifm_shape = ifm.get("shape")
+    ofm_shape = ofm.get("shape")
+    if ifm.get("type") == "INT8":
+        ifm_elem_size = 8
+    else:
+        raise "Only support INT8 data type"
+    
+    axis_buffer = model.buffers[model.tensors[info['inputs'][1]]['buffer']]
+    axis = axis_buffer['data'][0]
+    reduce_size = ifm_shape[axis]
+    
+    # ifm's size (bytes)
+    ifm_storge_size = 1
+    if ifm_shape != []:
+        for dim in ifm_shape:
+            ifm_storge_size *= dim
+        ifm_storge_size *= (ifm_elem_size / 8)
+
+    # DMA transfer cycles
+    if model.pipeline_schedule:
+        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.SRAM, ifm_storge_size)
+    else:
+        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size)
+
+    # Computations cycles
+    # Assume each element need reduce_size - 1 cycles to compare
+    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["REDUCE_MAX"] * (reduce_size - 1)
+    ofm_elems = 1
+    for dim in ofm_shape:
+        ofm_elems *= dim
+    op_cycles = ofm_elems * cycle_per_elem
+
+    total_cycles = dma_transfer_cycles + op_cycles
+    return dma_transfer_cycles, op_cycles, total_cycles
+
+# Estimate the number of cycles for a given quantize operation
+def estimate_quantize_cycles(model: Graph, opid: int) -> int:
+    tensors = model.tensors
+    info = model.ops[opid].info
+    inputs = info.get("inputs")
+    outputs = info.get("outputs")
+
+    if len(inputs) != 1 or len(outputs) != 1:
+        raise "Quantize operation should have 1 input and 1 output"
+    ifm = tensors[inputs[0]]
+    ofm = tensors[outputs[0]]
+    ifm_shape = ifm.get("shape")
+    ofm_shape = ofm.get("shape")
+    if ifm.get("type") == "INT8":
+        ifm_elem_size = 8
+    else:
+        # We only support INT8 and float32 data type
+        ifm_elem_size = 32
+    
+    # ifm's size (bytes)
+    ifm_storge_size = 1
+    if ifm_shape != []:
+        for dim in ifm_shape:
+            ifm_storge_size *= dim
+        ifm_storge_size *= (ifm_elem_size / 8)
+
+    # DMA transfer cycles
+    if model.pipeline_schedule:
+        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.SRAM, ifm_storge_size)
+    else:
+        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size)
+
+    # Computations cycles
+    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"]
+    ofm_elems = 1
+    for dim in ofm_shape:
+        ofm_elems *= dim
+    op_cycles = ofm_elems * cycle_per_elem
+
+    total_cycles = dma_transfer_cycles + op_cycles
+    return dma_transfer_cycles, op_cycles, total_cycles
+
+# Estimate the number of cycles for a given dequantize operation
+def estimate_dequantize_cycles(model: Graph, opid: int) -> int:
+    tensors = model.tensors
+    info = model.ops[opid].info
+    inputs = info.get("inputs")
+    outputs = info.get("outputs")
+
+    if len(inputs) != 1 or len(outputs) != 1:
+        raise "Quantize operation should have 1 input and 1 output"
+    ifm = tensors[inputs[0]]
+    ofm = tensors[outputs[0]]
+    ifm_shape = ifm.get("shape")
+    ofm_shape = ofm.get("shape")
+    if ifm.get("type") == "INT8":
+        ifm_elem_size = 8
+    else:
+        # We only support INT8 and float32 data type
+        ifm_elem_size = 32
+    
+    # ifm's size (bytes)
+    ifm_storge_size = 1
+    if ifm_shape != []:
+        for dim in ifm_shape:
+            ifm_storge_size *= dim
+        ifm_storge_size *= (ifm_elem_size / 8)
+
+    # DMA transfer cycles
+    if model.pipeline_schedule:
+        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.SRAM, ifm_storge_size)
+    else:
+        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size)
+
+    # Computations cycles
+    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"]
+    ofm_elems = 1
+    for dim in ofm_shape:
+        ofm_elems *= dim
+    op_cycles = ofm_elems * cycle_per_elem
+
+    total_cycles = dma_transfer_cycles + op_cycles
+    return dma_transfer_cycles, op_cycles, total_cycles
+
 # Estimate the number of cycles for memory to memory transfer
 def estimate_mem2mem_cycles(src_tensor_mem_area, dst_tensor_mem_area, transfer_size) -> int:
     if src_tensor_mem_area == Mem_area.DRAM and dst_tensor_mem_area == Mem_area.SRAM:
@@ -919,8 +1049,23 @@ def estimate_op_cycles(model: Graph, opid: int) -> int:
         op.estimated_DMA_cycles = dma_cycles
         op.estimated_op_cycles = op_cycles
         op.estimated_total_cycles = total_cycles
+    elif opcode_type == "REDUCE_MAX":
+        dma_cycles, op_cycles, total_cycles = estimate_reduce_max_cycles(model, opid)
+        op.estimated_DMA_cycles = dma_cycles
+        op.estimated_op_cycles = op_cycles
+        op.estimated_total_cycles = total_cycles
+    elif opcode_type == "QUANTIZE":
+        dma_cycles, op_cycles, total_cycles = estimate_quantize_cycles(model, opid)
+        op.estimated_DMA_cycles = dma_cycles
+        op.estimated_op_cycles = op_cycles
+        op.estimated_total_cycles = total_cycles
+    elif opcode_type == "DEQUANTIZE":
+        dma_cycles, op_cycles, total_cycles = estimate_dequantize_cycles(model, opid)
+        op.estimated_DMA_cycles = dma_cycles
+        op.estimated_op_cycles = op_cycles
+        op.estimated_total_cycles = total_cycles
     elif opcode_type == "CONCATENATION" or opcode_type == "SPLIT" or opcode_type == "RESHAPE" or \
-         opcode_type == "SPLIT_V" or opcode_type == "TRANSPOSE":
+         opcode_type == "SPLIT_V" or opcode_type == "TRANSPOSE" or opcode_type == "RESIZE_NEAREST_NEIGHBOR":
         # NPU won't do concatenation, so just set the cycles to 0
         dma_cycles, op_cycles, total_cycles = 0, 0, 0
         op.estimated_DMA_cycles = dma_cycles

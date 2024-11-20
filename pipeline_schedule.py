@@ -56,6 +56,15 @@ def pipeline_schedule(split_graph: Graph):
             elif opcode_type == "BATCH_MATMUL":
                 split_graph.ops[opid].is_mac_main_op = True
                 split_graph.ops[opid].is_elem_wise_main_op = False
+            elif opcode_type == "REDUCE_MAX":
+                split_graph.ops[opid].is_mac_main_op = False
+                split_graph.ops[opid].is_elem_wise_main_op = True
+            elif opcode_type == "QUANTIZE":
+                split_graph.ops[opid].is_mac_main_op = False
+                split_graph.ops[opid].is_elem_wise_main_op = True
+            elif opcode_type == "DEQUANTIZE":
+                split_graph.ops[opid].is_mac_main_op = False
+                split_graph.ops[opid].is_elem_wise_main_op = True
             elif opcode_type == "RESHAPE":
                 split_graph.ops[opid].is_mem_main_op = True
             else:
