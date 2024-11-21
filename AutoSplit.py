@@ -121,17 +121,17 @@ class Splitter:
         if len(blocks) == 0:
             # Then, traverse from the last input
             start_id = self.traverse_til_splittable(self.ori_graph.root_op_ids[-1])
-            # get splittable block
+            # Get splittable block
             self.traverse_til_not_splittable(start_id, splittables, end_ids)
+            # Add non-visited op into new_operators
             for end_id in end_ids:
                 self.traverse_til_end(end_id)
-                print(f"end_id info: {self.nodes[end_id].node.info}")
-            # split block input
+            # Split block input
             self.split_block_input(start_id, input_tile_size)
-            # start split
+            # Start split
             for op in splittables:
                 self.split_one_node(op, input_tile_size, output_tile_size)
-            # concat block output
+            # Concat block output
             for end_id in end_ids:
                 self.concat_block_output(end_id)
         else:
@@ -142,22 +142,32 @@ class Splitter:
             first_block = True
             epilogue_start_id = None
             # Perform TS on each block
+            end_ids = set()
             for block in blocks:
                 start_id = block[0]
                 end_id = block[1]
                 splittables = []
-                self.traverse_til_not_splittable_with_end_id(start_id, splittables, end_id)
+                til_block_end = self.traverse_til_not_splittable_with_end_id(start_id, splittables, end_id, end_ids)
                 # Only first block need to split block input
-                if first_block:
-                    self.split_block_input(start_id, input_tile_size)
-                    first_block = False
+                if ModelType == ModelType.BERT:
+                    if first_block:
+                        self.split_block_input(start_id, input_tile_size)
+                        first_block = False
+                    else:
+                        # Last block had splitted this block's input
+                        splittables.pop(0)
                 else:
-                    # Last block had splitted this block's input
-                    splittables.pop(0)
-                # start split block
+                    if first_block:
+                        self.split_block_input(start_id, input_tile_size)
+                        first_block = False
+                
+                # Start split block
                 for op in splittables:
                     self.split_one_node(op, input_tile_size, output_tile_size)
-                # concat than split block output
+                # If block can't split til the end, no need to perform concat_than_split
+                if not til_block_end:
+                    continue
+                # Concat than split block output
                 outputs = self.nodes[end_id].node.info['outputs']
                 for output in outputs:
                     output_name = self.tensors[output]['name']
@@ -170,16 +180,21 @@ class Splitter:
                 epilogue_start_id = end_id
 
             # Split the epilogue
-            splittables = []
-            end_ids = []
-            start_id = epilogue_start_id
-            self.traverse_til_not_splittable(start_id, splittables, end_ids)
-            splittables.pop(0)
-            # Perform TS on the rest of the graph
-            for op in splittables:
-                self.split_one_node(op, input_tile_size, output_tile_size)
-            for end_id in end_ids:
-                self.concat_block_output(end_id)
+            if ModelType == ModelType.BERT:
+                splittables = []
+                start_id = epilogue_start_id
+                self.traverse_til_not_splittable(start_id, splittables, end_ids)
+                splittables.pop(0)
+                for op in splittables:
+                    self.split_one_node(op, input_tile_size, output_tile_size)
+                for end_id in end_ids:
+                    self.concat_block_output(end_id)
+            else:
+                # Add non-visited op into new_operators
+                for end_id in end_ids:
+                    self.traverse_til_end(end_id)
+                for end_id in end_ids:
+                    self.concat_block_output(end_id)  
         
         new_graph = Graph ( self.new_operators, self.tensors, self.buffers,
                             self.opcodes, self.ori_graph.inputs, self.ori_graph.outputs, self.ori_graph.exec_order)
@@ -204,17 +219,7 @@ class Splitter:
 
     def traverse_til_splittable(self, current_opid):
         if self.nodes[current_opid].node.info.get("opcode_index",0) in self.splittable_opcode_idxes.values():
-            opcode_index = self.nodes[current_opid].node.info.get("opcode_index")
-            opcode_type = self.ori_graph.opcodes[opcode_index].get("builtin_code")
-            if opcode_type == "QUANTIZE":
-                # Check if it is splittable op
-                # We only handle the case that input and output are INT8
-                input_type = self.tensors[self.nodes[current_opid].node.info['inputs'][0]].get('type', -1)
-                output_type = self.tensors[self.nodes[current_opid].node.info['outputs'][0]].get('type', -1)
-                if input_type == 'INT8' and output_type == 'INT8':
-                    return current_opid
-            else:
-                return current_opid
+            return current_opid
         for parent in self.nodes[current_opid].node.parents:
             if self.nodes[parent].visited == False:
                 return None
@@ -258,7 +263,7 @@ class Splitter:
                             output_shape[j] = -1
                             break
                 if count < 2:
-                    end_ids.append(child)
+                    end_ids.add(child)
                     return None
 
             # Check if it is splittable op
@@ -274,7 +279,7 @@ class Splitter:
             end_ids.append(current_opid)
         return None
     
-    def traverse_til_not_splittable_with_end_id(self, current_opid, splittables, end_id):
+    def traverse_til_not_splittable_with_end_id(self, current_opid, splittables, end_id, end_ids):
         for parent in self.nodes[current_opid].node.parents:
             if self.nodes[parent].visited == False:
                 return None
@@ -286,17 +291,33 @@ class Splitter:
         # Traverse to the end_id
         if current_opid == end_id:
             # Different to the traverse_til_not_splittable, it keep the end_id in splittables
-            return end_id        
+            return True
         
         for child in self.nodes[current_opid].node.children:
+            # Check if it is the reshape op
+            opcode_index = self.nodes[child].node.info.get("opcode_index")
+            opcode_type = self.ori_graph.opcodes[opcode_index].get("builtin_code")
+            if self.model_type != ModelType.BERT and opcode_type == "RESHAPE":
+                # Check if it is splittable op
+                input_shape = copy.deepcopy(self.tensors[self.nodes[child].node.info['inputs'][0]]['shape'])
+                output_shape = copy.deepcopy(self.tensors[self.nodes[child].node.info['outputs'][0]]['shape'])
+                # For now, we check whether the input shape have at least two dimentions that equal to the output shape
+                # If not, we assume it is non-splittable op
+                count = 0
+                for i in range(1, len(input_shape)):
+                    for j in range(1, len(output_shape)):
+                        if input_shape[i] == output_shape[j]:
+                            count += 1
+                            output_shape[j] = -1
+                            break
+                if count < 2:
+                    end_ids.add(child)
+                    return False
+            
             # check if it is splittable op
             if self.nodes[child].node.info.get("opcode_index",0) in self.splittable_opcode_idxes.values():
-                result = self.traverse_til_not_splittable_with_end_id(child, splittables, end_id)
-                if result is not None:
-                    return result
-            else:
-                return None
-        return None
+                til_block_end = self.traverse_til_not_splittable_with_end_id(child, splittables, end_id, end_ids)
+        return til_block_end
 
     def split_tensor(self, tensor_id_in):
         tensor_info = self.tensors[tensor_id_in]
@@ -1771,17 +1792,16 @@ class Splitter:
         
         # Second, create a split node
         inputs = immediate_tensor_id
-        input_shape = self.tensors[inputs]['shape']
-        for dim, dim_value in enumerate(input_shape):
-            if dim_value > 1:
-                self.split_tensor_by_n(inputs, output_split, dim)
-                break
+        split_dim = self.nodes[start_opid].node.split_dim
+        self.split_tensor_by_n(inputs, output_split, split_dim)
+        for child in self.nodes[start_opid].node.children:
+            self.nodes[child].node.split_dim = split_dim
         
         axis_tensor = {
             "shape": [],
             "type": "INT32",
             "buffer": len(self.buffers),
-            "name": self.tensors[immediate_tensor_id]['name']+"_split_axis_tensor!!",
+            "name": self.tensors[immediate_tensor_id]['name']+"_split_axis_tensor",
             "quantization": {},
           }
         axis_buffer = {

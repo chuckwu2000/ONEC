@@ -94,16 +94,16 @@ tensor_id_mapping = [ x for x in range(len(tensors))]
 
 ori_graph = Graph(operators, tensors, buffers, new_opcodes, subgraphs[0]['inputs'], subgraphs[0]['outputs'], args.exec_order)
 
-# Decide each block's range from ori_graph
-if args.block_based:
-    graph_to_blocks = Block(ori_graph)
-    blocks = graph_to_blocks.blocks
-else:
-    blocks = []
-
 splitter = Splitter(ori_graph, args.split_height, model_type)
 if args.pad_fusion and model_type == 1:
     splitter.PaddingFusion()
+
+# Decide each block's range from ori_graph (Block: one entry point and one exit point)
+if args.block_based:
+    graph_to_blocks = Block(ori_graph, model_type)
+    blocks = graph_to_blocks.blocks
+else:
+    blocks = []
 
 new_graph = splitter.perform_split(blocks)
 split_dma_cycles, split_op_cycles, split_total_cycles = estimate_model(new_graph, pipeline = False)
