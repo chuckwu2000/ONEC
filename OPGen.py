@@ -77,6 +77,17 @@ class OPGen:
             buffer += f"SET_OFM_DEPTH 1\n"
         buffer += f"SET_OFM_ZERO_POINT {zero_point}\n"
         return buffer
+    
+    # TODO: Implement this function
+    def CalculateScratchBufferSize(self, input_tensors, output_tensor, sid):
+        pass
+
+    def RequestScratchBuffer(self, input_tensors, output_tensor, sid):
+        buffer_size = self.CalculateScratchBufferSize(input_tensors, output_tensor, sid)
+        if buffer_size > 0:
+            return buffer_size
+        else:
+            return 0
 
     def fully_connected_codegen(self, operator):
         input_tensor_id = operator['inputs'][0]
@@ -115,6 +126,64 @@ class OPGen:
 
     def batch_matmul_codegen(self, operator):
         print(f"BATCH_MATMUL: {operator['inputs']}, {operator['outputs']}")
+
+    # TODO: Implement this function
+    def conv_codegen(self, operator):
+        # Conv's output tensor may depend on other input tensors
+        input_tensor_ids = []
+        filter_tensor_id = operator['inputs'][1]
+        bias_tensor_id = operator['inputs'][2]
+        for i in range(3, len(operator['inputs'])):
+            input_tensor_ids.append(operator['inputs'][i])
+        output_tensor_id = operator['outputs'][0]
+
+        buffer_size = self.RequestScratchBuffer(input_tensor_ids, output_tensor_id, sid)
+
+        for input_tensor_id in input_tensor_ids:
+            input_tensor = self.tensor[input_tensor_id]
+            input_quant_scale = np.int32(input_tensor['quantization']['scale'][0]).view('float32')
+            input_quant_zp = input_tensor['quantization']['zero_point'][0]
+
+            tokens = input_tensor['name'].split('_split_')
+            name = tokens[0]
+            sid = -1
+            if len(tokens) == 2:
+                if tokens[1].isnumeric():
+                    sid = int(tokens[1])
+            elif len(tokens) > 2:
+                raise(f"Invalid tensor name: {input_tensor['name']}")
+
+            code = self.CodeGen_Set_input_tensor(input_tensor, self.allocated_tensor[input_tensor_id].start_address, input_quant_zp)
+            self.npu_code += code
+        
+        filter_tensor = self.tensor[filter_tensor_id]
+        output_tensor = self.tensor[output_tensor_id]
+
+        input_quant_scale = np.int32(input_tensor['quantization']['scale'][0]).view('float32')
+        weight_quant_scale = np.int32(filter_tensor['quantization']['scale'][0]).view('float32')
+        output_qunat_scale = np.int32(output_tensor['quantization']['scale'][0]).view('float32')
+        scale = input_quant_scale * weight_quant_scale / output_qunat_scale
+        multiplier, shift = self.QuantizeMultiplier(scale)
+
+        input_quant_zp = input_tensor['quantization']['zero_point'][0]
+        filter_quant_zp = filter_tensor['quantization']['zero_point'][0]
+        output_quant_zp = output_tensor['quantization']['zero_point'][0]
+
+        code = ""
+        # Start to load weights
+        code += self.CodeGen_DMA_start(self.allocated_tensor[filter_tensor_id].start_address, self.Compute_tensor_size(filter_tensor))
+        # Set input tensor
+        code += self.CodeGen_Set_input_tensor(input_tensor, self.allocated_tensor[input_tensor_id].start_address, input_quant_zp)
+        # Set weight tensor
+        code += self.CodeGen_Set_weight_tensor(filter_tensor, self.allocated_tensor[filter_tensor_id].start_address, filter_quant_zp)
+        # Set output tensor
+        code += self.CodeGen_Set_output_tensor(output_tensor, self.allocated_tensor[output_tensor_id].start_address, output_quant_zp)
+        # Set scale
+        code += f"SET_MULTIPLIER {multiplier}\n"
+        code += f"SET_SHIFT {shift}\n"
+        code += self.CodeGen_DMA_wait()
+        code += "CONV\n"
+        self.npu_code += code
 
     def mul_codegen(self, operator):
         print(f"MUL: {operator['inputs']}, {operator['outputs']}")

@@ -142,7 +142,7 @@ class Splitter:
             first_block = True
             epilogue_start_id = None
             # Perform TS on each block
-            end_ids = set()
+            end_ids = []
             for block in blocks:
                 start_id = block[0]
                 end_id = block[1]
@@ -263,7 +263,8 @@ class Splitter:
                             output_shape[j] = -1
                             break
                 if count < 2:
-                    end_ids.add(child)
+                    if child not in end_ids:
+                        end_ids.append(child)
                     return None
 
             # Check if it is splittable op
@@ -311,7 +312,8 @@ class Splitter:
                             output_shape[j] = -1
                             break
                 if count < 2:
-                    end_ids.add(child)
+                    if child not in end_ids:
+                        end_ids.append(child)
                     return False
             
             # check if it is splittable op
