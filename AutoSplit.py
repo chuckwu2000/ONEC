@@ -149,7 +149,7 @@ class Splitter:
                 splittables = []
                 til_block_end = self.traverse_til_not_splittable_with_end_id(start_id, splittables, end_id, end_ids)
                 # Only first block need to split block input
-                if ModelType == ModelType.BERT:
+                if self.model_type == ModelType.BERT:
                     if first_block:
                         self.split_block_input(start_id, input_tile_size)
                         first_block = False
@@ -180,13 +180,18 @@ class Splitter:
                 epilogue_start_id = end_id
 
             # Split the epilogue
-            if ModelType == ModelType.BERT:
+            if self.model_type == ModelType.BERT:
                 splittables = []
                 start_id = epilogue_start_id
                 self.traverse_til_not_splittable(start_id, splittables, end_ids)
                 splittables.pop(0)
+                # No need to split end_ids
                 for op in splittables:
+                    if op in end_ids:
+                        continue
                     self.split_one_node(op, input_tile_size, output_tile_size)
+                for end_id in end_ids:
+                    self.traverse_til_end(end_id)
                 for end_id in end_ids:
                     self.concat_block_output(end_id)
             else:
@@ -1144,7 +1149,8 @@ class Splitter:
             for dim, dim_value in enumerate(output_shape):
                 if dim_value == split_dim_value:
                     self.split_tensor_by_n(info['outputs'][0], output_split, dim)
-                    split_dim = dim
+                    for child in self.nodes[opid].node.children:
+                        self.nodes[child].node.split_dim = dim
                     break
         else:
             split_dim = self.nodes[opid].node.split_dim
@@ -1217,7 +1223,8 @@ class Splitter:
             for dim, dim_value in enumerate(output_shape):
                 if dim_value == split_dim_value:
                     self.split_tensor_by_n(info['outputs'][0], output_split, dim)
-                    split_dim = dim
+                    for child in self.nodes[opid].node.children:
+                        self.nodes[child].node.split_dim = dim
                     break
         else:
             split_dim = self.nodes[opid].node.split_dim
@@ -1290,7 +1297,8 @@ class Splitter:
             for dim, dim_value in enumerate(output_shape):
                 if dim_value == split_dim_value:
                     self.split_tensor_by_n(info['outputs'][0], output_split, dim)
-                    split_dim = dim
+                    for child in self.nodes[opid].node.children:
+                        self.nodes[child].node.split_dim = dim
                     break
         else:
             split_dim = self.nodes[opid].node.split_dim
