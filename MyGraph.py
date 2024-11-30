@@ -84,6 +84,7 @@ class Graph:
         self.ops = None
         self.DFS_ordered = False
         self.BFS_ordered = False
+        self.cascade_matched_ops = []
         self.matched_ops = []
         self.pipeline_schedule = False
         self.build_graph_from_ops(copy.deepcopy(ops))

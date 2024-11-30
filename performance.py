@@ -17,9 +17,10 @@ def estimate_add_cycles(model: Graph, opid: int) -> int:
     ifm1_shape = ifm1.get("shape")
     ifm2_shape = ifm2.get("shape")
     ofm_shape = ofm.get("shape")
-    if ifm1.get("type") == "INT8" and ifm2.get("type") == "INT8":
+    if ifm1.get("type") == "INT8" and ifm2.get("type") == "INT8" and ofm.get("type") == "INT8":
         ifm1_elem_size = 8
         ifm2_elem_size = 8
+        ofm_elem_size = 8
     else:
         raise "Only support INT8 data type"
     
@@ -35,18 +36,18 @@ def estimate_add_cycles(model: Graph, opid: int) -> int:
             ifm2_storge_size *= dim
         ifm2_storge_size *= (ifm2_elem_size / 8)
 
-    # DMA transfer cycles
-    split_start = False
-    parent_op = model.ops[model.ops[opid].parents[0]]
-    opcode_index = parent_op.info.get("opcode_index")
-    opcode_type = model.opcodes[opcode_index].get("builtin_code")
-    if opcode_type == "SPLIT":
-        split_start = True
-    # split_start represent the start of TS, so its input is from DRAM
-    if model.pipeline_schedule and not split_start:
-        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.SRAM, ifm1_storge_size + ifm2_storge_size)
+    # ofm's size (bytes)
+    ofm_storge_size = 1
+    for dim in ofm_shape:
+        ofm_storge_size *= dim
+    ofm_storge_size *= (ofm_elem_size / 8)
+
+    # DMA transfer cycles + IFM, OFM read/write cycles
+    if opid in model.cascade_matched_ops:
+        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm1_storge_size + ifm2_storge_size + ofm_storge_size)
     else:
         dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm1_storge_size + ifm2_storge_size)
+        dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm1_storge_size + ifm2_storge_size + ofm_storge_size)
 
     # Computations cycles
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["ADD/SUB"]
@@ -73,9 +74,10 @@ def estimate_sub_cycles(model: Graph, opid: int) -> int:
     ifm1_shape = ifm1.get("shape")
     ifm2_shape = ifm2.get("shape")
     ofm_shape = ofm.get("shape")
-    if ifm1.get("type") == "INT8" and ifm2.get("type") == "INT8":
+    if ifm1.get("type") == "INT8" and ifm2.get("type") == "INT8" and ofm.get("type") == "INT8":
         ifm1_elem_size = 8
         ifm2_elem_size = 8
+        ofm_elem_size = 8
     else:
         raise "Only support INT8 data type"
     
@@ -91,11 +93,18 @@ def estimate_sub_cycles(model: Graph, opid: int) -> int:
             ifm2_storge_size *= dim
         ifm2_storge_size *= (ifm2_elem_size / 8)
 
-    # DMA transfer cycles
-    if model.pipeline_schedule:
-        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.SRAM, ifm1_storge_size + ifm2_storge_size)
+    # ofm's size (bytes)
+    ofm_storge_size = 1
+    for dim in ofm_shape:
+        ofm_storge_size *= dim
+    ofm_storge_size *= (ofm_elem_size / 8)
+
+    # DMA transfer cycles + IFM, OFM read/write cycles
+    if opid in model.cascade_matched_ops:
+        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm1_storge_size + ifm2_storge_size + ofm_storge_size)
     else:
         dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm1_storge_size + ifm2_storge_size)
+        dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm1_storge_size + ifm2_storge_size + ofm_storge_size)
 
     # Computations cycles
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["ADD/SUB"]
@@ -122,9 +131,10 @@ def estimate_mul_cycles(model: Graph, opid: int) -> int:
     ifm1_shape = ifm1.get("shape")
     ifm2_shape = ifm2.get("shape")
     ofm_shape = ofm.get("shape")
-    if ifm1.get("type") == "INT8" and ifm2.get("type") == "INT8":
+    if ifm1.get("type") == "INT8" and ifm2.get("type") == "INT8" and ofm.get("type") == "INT8":
         ifm1_elem_size = 8
         ifm2_elem_size = 8
+        ofm_elem_size = 8
     else:
         raise "Only support INT8 data type"
     
@@ -140,11 +150,18 @@ def estimate_mul_cycles(model: Graph, opid: int) -> int:
             ifm2_storge_size *= dim
         ifm2_storge_size *= (ifm2_elem_size / 8)
 
-    # DMA transfer cycles
-    if model.pipeline_schedule:
-        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.SRAM, ifm1_storge_size + ifm2_storge_size)
+    # ofm's size (bytes)
+    ofm_storge_size = 1
+    for dim in ofm_shape:
+        ofm_storge_size *= dim
+    ofm_storge_size *= (ofm_elem_size / 8)
+
+    # DMA transfer cycles + IFM, OFM read/write cycles
+    if opid in model.cascade_matched_ops:
+        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm1_storge_size + ifm2_storge_size + ofm_storge_size)
     else:
         dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm1_storge_size + ifm2_storge_size)
+        dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm1_storge_size + ifm2_storge_size + ofm_storge_size)
 
     # Computations cycles
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["MUL"]
@@ -169,8 +186,9 @@ def estimate_logistic_cycles(model: Graph, opid: int) -> int:
     ofm = tensors[outputs[0]]
     ifm_shape = ifm.get("shape")
     ofm_shape = ofm.get("shape")
-    if ifm.get("type") == "INT8":
+    if ifm.get("type") == "INT8" and ofm.get("type") == "INT8":
         ifm_elem_size = 8
+        ofm_elem_size = 8
     else:
         raise "Only support INT8 data type"
     
@@ -180,12 +198,19 @@ def estimate_logistic_cycles(model: Graph, opid: int) -> int:
         for dim in ifm_shape:
             ifm_storge_size *= dim
         ifm_storge_size *= (ifm_elem_size / 8)
+    
+    # ofm's size (bytes)
+    ofm_storge_size = 1
+    for dim in ofm_shape:
+        ofm_storge_size *= dim
+    ofm_storge_size *= (ofm_elem_size / 8)
 
-    # DMA transfer cycles
-    if model.pipeline_schedule:
-        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.SRAM, ifm_storge_size)
+    # DMA transfer cycles + IFM, OFM read/write cycles
+    if opid in model.cascade_matched_ops:
+        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm_storge_size + ofm_storge_size)
     else:
         dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size)
+        dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm_storge_size + ofm_storge_size)
 
     # Computations cycles
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["LOGISTIC"]
@@ -208,25 +233,28 @@ def estimate_conv_cycles(model: Graph, opid: int) -> int:
     if len(outputs) != 1:
         raise "Conv2D operation should have at least 1 output"
     
-    ifm_list = []
-    for input_id in range (4, len(inputs)):
-        ifm_list.append(tensors[inputs[input_id]])
-    ifm = tensors[inputs[4]]
+    ifm = tensors[inputs[0]]
     ofm = tensors[outputs[0]]
-
-    # Only fetch first ifm in the list, since it has checked that all ifm have the same shape in the TS model
     ifm_shape = ifm.get("shape")
     ofm_shape = ofm.get("shape")
-    if ifm.get("type") == "INT8":
+    if ifm.get("type") == "INT8" and ofm.get("type") == "INT8":
         ifm_elem_size = 8
+        ofm_elem_size = 8
     else:
         raise "IFM only support INT8 data type"
+    
     # ifm's size (bytes)
     ifm_storge_size = 1
     if ifm_shape != []:
         for dim in ifm_shape:
             ifm_storge_size *= dim
         ifm_storge_size *= (ifm_elem_size / 8)
+
+    # ofm's size (bytes)
+    ofm_storge_size = 1
+    for dim in ofm_shape:
+        ofm_storge_size *= dim
+    ofm_storge_size *= (ofm_elem_size / 8)
     
     # Filter tensor
     filter = tensors[inputs[1]]
@@ -236,7 +264,10 @@ def estimate_conv_cycles(model: Graph, opid: int) -> int:
     else:
         raise "Filter only support INT8 data type"
     # filter's size (bytes)
-    filter_storge_size = filter_shape[0] * filter_shape[1] * filter_shape[2] * filter_shape[3] * (filter_elem_size / 8)
+    filter_storge_size = 1
+    for dim in filter_shape:
+        filter_storge_size *= dim
+    filter_storge_size *= (filter_elem_size / 8)
     
     # Bias tensor
     bias = tensors[inputs[2]]
@@ -249,15 +280,12 @@ def estimate_conv_cycles(model: Graph, opid: int) -> int:
     bias_storge_size = bias_shape[0] * (bias_elem_size / 8)
 
     # DMA transfer cycles
-    total_ifm_storge_size = ifm_storge_size * len(ifm_list)
-    if model.pipeline_schedule:
-        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.SRAM, total_ifm_storge_size)
-        dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.SRAM, filter_storge_size)
-        dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.SRAM, bias_storge_size)
+    # TODO: need to handle the case that ifm, filter, bias are all in SRAM
+    if model.pipeline_schedule and filter_shape[1] == 1 and filter_shape[2] == 1:
+        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm_storge_size + filter_storge_size + bias_storge_size + ofm_storge_size)
     else:
-        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, total_ifm_storge_size)
-        dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, filter_storge_size)
-        dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, bias_storge_size)
+        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size + filter_storge_size + bias_storge_size)
+        dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm_storge_size + filter_storge_size + bias_storge_size + ofm_storge_size)
 
     # Computations cycles
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["MAC"]
@@ -269,6 +297,7 @@ def estimate_conv_cycles(model: Graph, opid: int) -> int:
     return (dma_transfer_cycles, op_cycles, total_cycles)
 
 # Estimate the number of cycles for a given depthwise convolution operation
+# TODO: this estimation is not accurate
 def estimate_depthwise_conv_cycles(model: Graph, opid: int) -> int:
     tensors = model.tensors
     info = model.ops[opid].info
@@ -322,9 +351,9 @@ def estimate_depthwise_conv_cycles(model: Graph, opid: int) -> int:
     # DMA transfer cycles
     total_ifm_storge_size = ifm_storge_size * len(ifm_list)
     if model.pipeline_schedule:
-        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.SRAM, total_ifm_storge_size)
-        dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.SRAM, weight_storge_size)
-        dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.SRAM, bias_storge_size)
+        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, total_ifm_storge_size)
+        dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, weight_storge_size)
+        dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, bias_storge_size)
     else:
         dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, total_ifm_storge_size)
         dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, weight_storge_size)
@@ -341,7 +370,6 @@ def estimate_depthwise_conv_cycles(model: Graph, opid: int) -> int:
 
 # Estimate the number of cycles for a given mean operation
 def estimate_mean_cycles(model: Graph, opid: int) -> int:
-    # TODO
     # Mean op will be converted to depthwise convolution + mul
     tensors = model.tensors
     info = model.ops[opid].info
@@ -357,8 +385,9 @@ def estimate_mean_cycles(model: Graph, opid: int) -> int:
     # Only fetch first ifm in the list, since it has checked that all ifm have the same shape in the TS model
     ifm_shape = ifm.get("shape")
     ofm_shape = ofm.get("shape")
-    if ifm.get("type") == "INT8":
+    if ifm.get("type") == "INT8" and ofm.get("type") == "INT8":
         ifm_elem_size = 8
+        ofm_elem_size = 8
     else:
         raise "IFM only support INT8 data type"
     # ifm's size (bytes)
@@ -368,11 +397,18 @@ def estimate_mean_cycles(model: Graph, opid: int) -> int:
             ifm_storge_size *= dim
         ifm_storge_size *= (ifm_elem_size / 8)
 
+    # ofm's size (bytes)
+    ofm_storge_size = 1
+    for dim in ofm_shape:
+        ofm_storge_size *= dim
+    ofm_storge_size *= (ofm_elem_size / 8)
+
     # DMA transfer cycles
     if model.pipeline_schedule:
-        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.SRAM, ifm_storge_size)
+        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm_storge_size + ofm_storge_size)
     else:
         dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size)
+        dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm_storge_size + ofm_storge_size)
 
     # Computations cycles
     cycle_per_elem = 20
@@ -385,6 +421,7 @@ def estimate_mean_cycles(model: Graph, opid: int) -> int:
     return dma_transfer_cycles, op_cycles, total_cycles
 
 # Estimate the number of cycles for a given transpose convolution operation
+# TODO: this estimation is not accurate
 def estimate_trconv_cycles(model: Graph, opid: int) -> int:
     tensors = model.tensors
     info = model.ops[opid].info
@@ -428,8 +465,8 @@ def estimate_trconv_cycles(model: Graph, opid: int) -> int:
     # DMA transfer cycles
     total_ifm_storge_size = ifm_storge_size * len(ifm_list)
     if model.pipeline_schedule:
-        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.SRAM, total_ifm_storge_size)
-        dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.SRAM, filter_storge_size)
+        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, total_ifm_storge_size)
+        dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, filter_storge_size)
     else:
         dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, total_ifm_storge_size)
         dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, filter_storge_size)
@@ -444,6 +481,7 @@ def estimate_trconv_cycles(model: Graph, opid: int) -> int:
     return (dma_transfer_cycles, op_cycles, total_cycles)
 
 # Estimate the number of cycles for a given maxpool operation
+# TODO: this estimation is not accurate
 def estimate_maxpool_cycles(model: Graph, opid: int) -> int:
     tensors = model.tensors
     info = model.ops[opid].info
@@ -454,15 +492,13 @@ def estimate_maxpool_cycles(model: Graph, opid: int) -> int:
     if len(outputs) != 1:
         raise "MaxPool operation should have at least 1 output"
     
-    ifm_list = []
-    for input_id in range (2, len(inputs)):
-        ifm_list.append(tensors[inputs[input_id]])
-    ifm = tensors[inputs[2]]
+    ifm = tensors[inputs[0]]
     ofm = tensors[outputs[0]]
     ifm_shape = ifm.get("shape")
     ofm_shape = ofm.get("shape")
-    if ifm.get("type") == "INT8":
+    if ifm.get("type") == "INT8" and ofm.get("type") == "INT8":
         ifm_elem_size = 8
+        ofm_elem_size = 8
     else:
         raise "Only support INT8 data type"
     
@@ -473,15 +509,21 @@ def estimate_maxpool_cycles(model: Graph, opid: int) -> int:
             ifm_storge_size *= dim
         ifm_storge_size *= (ifm_elem_size / 8)
 
+    # ofm's size (bytes)
+    ofm_storge_size = 1
+    for dim in ofm_shape:
+        ofm_storge_size *= dim
+    ofm_storge_size *= (ofm_elem_size / 8)
+
     # kernel shape
     ker_shape = (info['builtin_options']['filter_height'], info['builtin_options']['filter_width'])
 
     # DMA transfer cycles
-    total_ifm_storge_size = ifm_storge_size * len(ifm_list)
     if model.pipeline_schedule:
-        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.SRAM, ifm_storge_size)
+        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm_storge_size + ofm_storge_size)
     else:
-        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, total_ifm_storge_size)
+        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size)
+        dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm_storge_size + ofm_storge_size)
 
     # Computations cycles
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["MAC"]
@@ -507,8 +549,9 @@ def estimate_rsqrt_cycles(model: Graph, opid: int) -> int:
     ifm_shape = ifm.get("shape")
     ofm_shape = ofm.get("shape")
 
-    if ifm.get("type") == "INT8":
+    if ifm.get("type") == "INT8" and ofm.get("type") == "INT8":
         ifm_elem_size = 8
+        ofm_elem_size = 8
     else:
         raise "IFM only support INT8 data type"
     
@@ -519,10 +562,18 @@ def estimate_rsqrt_cycles(model: Graph, opid: int) -> int:
             ifm_storge_size *= dim
         ifm_storge_size *= (ifm_elem_size / 8)
 
-    if model.pipeline_schedule:
-        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.SRAM, ifm_storge_size)
+    # ofm's size (bytes)
+    ofm_storge_size = 1
+    for dim in ofm_shape:
+        ofm_storge_size *= dim
+    ofm_storge_size *= (ofm_elem_size / 8)
+
+    # DMA transfer cycles + IFM, OFM read/write cycles
+    if opid in model.cascade_matched_ops:
+        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm_storge_size + ofm_storge_size)
     else:
         dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size)
+        dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm_storge_size + ofm_storge_size)
 
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["RSQRT"]
     ofm_elems = 1
@@ -548,9 +599,10 @@ def estimate_squared_difference_cycles(model: Graph, opid: int) -> int:
     ifm1_shape = ifm1.get("shape")
     ifm2_shape = ifm2.get("shape")
     ofm_shape = ofm.get("shape")
-    if ifm1.get("type") == "INT8" and ifm2.get("type") == "INT8":
+    if ifm1.get("type") == "INT8" and ifm2.get("type") == "INT8" and ofm.get("type") == "INT8":
         ifm1_elem_size = 8
         ifm2_elem_size = 8
+        ofm_elem_size = 8
     else:
         raise "Only support INT8 data type"
     
@@ -565,12 +617,19 @@ def estimate_squared_difference_cycles(model: Graph, opid: int) -> int:
         for dim in ifm2_shape:
             ifm2_storge_size *= dim
         ifm2_storge_size *= (ifm2_elem_size / 8)
+
+    # ofm's size (bytes)
+    ofm_storge_size = 1
+    for dim in ofm_shape:
+        ofm_storge_size *= dim
+    ofm_storge_size *= (ofm_elem_size / 8)
     
-    # DMA transfer cycles
-    if model.pipeline_schedule:
-        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.SRAM, ifm1_storge_size + ifm2_storge_size)
+    # DMA transfer cycles + IFM, OFM read/write cycles
+    if opid in model.cascade_matched_ops:
+        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm1_storge_size + ifm2_storge_size + ofm_storge_size)
     else:
         dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm1_storge_size + ifm2_storge_size)
+        dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm1_storge_size + ifm2_storge_size + ofm_storge_size)
 
     # Computations cycles (x - y)(x - y)
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["ADD/SUB"]
@@ -597,8 +656,9 @@ def estimate_gelu_cycles(model: Graph, opid: int) -> int:
     ofm = tensors[outputs[0]]
     ifm_shape = ifm.get("shape")
     ofm_shape = ofm.get("shape")
-    if ifm.get("type") == "INT8":
+    if ifm.get("type") == "INT8" and ofm.get("type") == "INT8":
         ifm_elem_size = 8
+        ofm_elem_size = 8
     else:
         raise "Only support INT8 data type"
     
@@ -609,11 +669,18 @@ def estimate_gelu_cycles(model: Graph, opid: int) -> int:
             ifm_storge_size *= dim
         ifm_storge_size *= (ifm_elem_size / 8)
 
+    # ofm's size (bytes)
+    ofm_storge_size = 1
+    for dim in ofm_shape:
+        ofm_storge_size *= dim
+    ofm_storge_size *= (ofm_elem_size / 8)
+
     # DMA transfer cycles
-    if model.pipeline_schedule:
-        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.SRAM, ifm_storge_size)
+    if opid in model.cascade_matched_ops:
+        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm_storge_size + ofm_storge_size)
     else:
         dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size)
+        dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm_storge_size + ofm_storge_size)
 
     # Computations cycles gelu(x)  = x * logistic(1.702 * x)
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["MUL"]
@@ -642,8 +709,9 @@ def estimate_leaky_relu_cycles(model: Graph, opid: int) -> int:
     ofm = tensors[outputs[0]]
     ifm_shape = ifm.get("shape")
     ofm_shape = ofm.get("shape")
-    if ifm.get("type") == "INT8":
+    if ifm.get("type") == "INT8" and ofm.get("type") == "INT8":
         ifm_elem_size = 8
+        ofm_elem_size = 8
     else:
         raise "Only support INT8 data type"
     
@@ -654,11 +722,18 @@ def estimate_leaky_relu_cycles(model: Graph, opid: int) -> int:
             ifm1_storge_size *= dim
         ifm_storge_size *= (ifm_elem_size / 8)
 
-    # DMA transfer cycles
-    if model.pipeline_schedule:
-        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.SRAM, ifm_storge_size)
+    # ofm's size (bytes)
+    ofm_storge_size = 1
+    for dim in ofm_shape:
+        ofm_storge_size *= dim
+    ofm_storge_size *= (ofm_elem_size / 8)
+
+    # DMA transfer cycles + IFM, OFM read/write cycles
+    if opid in model.cascade_matched_ops:
+        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm_storge_size + ofm_storge_size)
     else:
         dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size)
+        dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm_storge_size + ofm_storge_size)
 
     # Computations cycles
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["LEAKY_RELU"]
@@ -683,8 +758,9 @@ def estimate_fully_connected_cycles(model: Graph, opid: int) -> int:
     ofm = tensors[outputs[0]]
     ifm_shape = ifm.get("shape")
     ofm_shape = ofm.get("shape")
-    if ifm.get("type") == "INT8":
+    if ifm.get("type") == "INT8" and ofm.get("type") == "INT8":
         ifm_elem_size = 8
+        ofm_elem_size = 8
     else:
         raise "Only support INT8 data type"
     
@@ -694,6 +770,12 @@ def estimate_fully_connected_cycles(model: Graph, opid: int) -> int:
         for dim in ifm_shape:
             ifm_storge_size *= dim
         ifm_storge_size *= (ifm_elem_size / 8)
+
+    # ofm's size (bytes)
+    ofm_storge_size = 1
+    for dim in ofm_shape:
+        ofm_storge_size *= dim
+    ofm_storge_size *= (ofm_elem_size / 8)
 
     # weight tensor
     weight = tensors[inputs[1]]
@@ -717,11 +799,10 @@ def estimate_fully_connected_cycles(model: Graph, opid: int) -> int:
         split_start = True
     # split_start represent the start of TS, so its input is from DRAM
     if model.pipeline_schedule and not split_start:
-        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.SRAM, ifm_storge_size)
-        dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.SRAM, weight_storge_size)
+        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm_storge_size + weight_storge_size + ofm_storge_size)
     else:
-        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size)
-        dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, weight_storge_size)
+        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size + weight_storge_size)
+        dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm_storge_size + weight_storge_size + ofm_storge_size)
 
     # Computations cycles
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["MAC"]
@@ -748,8 +829,9 @@ def estimate_softmax_cycles(model: Graph, opid: int) -> int:
     ofm = tensors[outputs[0]]
     ifm_shape = ifm.get("shape")
     ofm_shape = ofm.get("shape")
-    if ifm.get("type") == "INT8":
+    if ifm.get("type") == "INT8" and ofm.get("type") == "INT8":
         ifm_elem_size = 8
+        ofm_elem_size = 8
     else:
         raise "Only support INT8 data type"
     
@@ -760,11 +842,18 @@ def estimate_softmax_cycles(model: Graph, opid: int) -> int:
             ifm_storge_size *= dim
         ifm_storge_size *= (ifm_elem_size / 8)
 
-    # DMA transfer cycles
-    if model.pipeline_schedule:
-        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.SRAM, ifm_storge_size)
+    # ofm's size (bytes)
+    ofm_storge_size = 1
+    for dim in ofm_shape:
+        ofm_storge_size *= dim
+    ofm_storge_size *= (ofm_elem_size / 8)
+
+    # DMA transfer cycles + IFM, OFM read/write cycles
+    if opid in model.cascade_matched_ops:
+        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm_storge_size + ofm_storge_size)
     else:
         dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size)
+        dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm_storge_size + ofm_storge_size)
 
     # Computations cycles
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["SOFTMAX"]
@@ -791,9 +880,10 @@ def estimate_batch_matmul_cycles(model: Graph, opid: int) -> int:
     ifm1_shape = ifm1.get("shape")
     ifm2_shape = ifm2.get("shape")
     ofm_shape = ofm.get("shape")
-    if ifm1.get("type") == "INT8" and ifm2.get("type") == "INT8":
+    if ifm1.get("type") == "INT8" and ifm2.get("type") == "INT8" and ofm.get("type") == "INT8":
         ifm1_elem_size = 8
         ifm2_elem_size = 8
+        ofm_elem_size = 8
     else:
         raise "Only support INT8 data type"
     
@@ -809,11 +899,18 @@ def estimate_batch_matmul_cycles(model: Graph, opid: int) -> int:
             ifm2_storge_size *= dim
         ifm2_storge_size *= (ifm2_elem_size / 8)
 
+    # ofm's size (bytes)
+    ofm_storge_size = 1
+    for dim in ofm_shape:
+        ofm_storge_size *= dim
+    ofm_storge_size *= (ofm_elem_size / 8)
+
     # DMA transfer cycles
     if model.pipeline_schedule:
-        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.SRAM, ifm1_storge_size + ifm2_storge_size)
+        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm1_storge_size + ifm2_storge_size + ofm_storge_size)
     else:
         dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm1_storge_size + ifm2_storge_size)
+        dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm1_storge_size + ifm2_storge_size + ofm_storge_size)
 
     # Computations cycles
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["MAC"]
@@ -837,8 +934,9 @@ def estimate_reduce_max_cycles(model: Graph, opid: int) -> int:
     ofm = tensors[outputs[0]]
     ifm_shape = ifm.get("shape")
     ofm_shape = ofm.get("shape")
-    if ifm.get("type") == "INT8":
+    if ifm.get("type") == "INT8" and ofm.get("type") == "INT8":
         ifm_elem_size = 8
+        ofm_elem_size = 8
     else:
         raise "Only support INT8 data type"
     
@@ -853,11 +951,18 @@ def estimate_reduce_max_cycles(model: Graph, opid: int) -> int:
             ifm_storge_size *= dim
         ifm_storge_size *= (ifm_elem_size / 8)
 
+    # ofm's size (bytes)
+    ofm_storge_size = 1
+    for dim in ofm_shape:
+        ofm_storge_size *= dim
+    ofm_storge_size *= (ofm_elem_size / 8)
+
     # DMA transfer cycles
-    if model.pipeline_schedule:
-        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.SRAM, ifm_storge_size)
+    if opid in model.cascade_matched_ops:
+        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm_storge_size + ofm_storge_size)
     else:
         dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size)
+        dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm_storge_size + ofm_storge_size)
 
     # Computations cycles
     # Assume each element need reduce_size - 1 cycles to compare
@@ -888,6 +993,11 @@ def estimate_quantize_cycles(model: Graph, opid: int) -> int:
     else:
         # We only support INT8 and float32 data type
         ifm_elem_size = 32
+    if ofm.get("type") == "INT8":
+        ofm_elem_size = 8
+    else:
+        # We only support INT8 and float32 data type
+        ofm_elem_size = 32
     
     # ifm's size (bytes)
     ifm_storge_size = 1
@@ -896,11 +1006,18 @@ def estimate_quantize_cycles(model: Graph, opid: int) -> int:
             ifm_storge_size *= dim
         ifm_storge_size *= (ifm_elem_size / 8)
 
+    # ofm's size (bytes)
+    ofm_storge_size = 1
+    for dim in ofm_shape:
+        ofm_storge_size *= dim
+    ofm_storge_size *= (ofm_elem_size / 8)
+
     # DMA transfer cycles
-    if model.pipeline_schedule:
-        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.SRAM, ifm_storge_size)
+    if opid in model.cascade_matched_ops:
+        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm_storge_size + ofm_storge_size)
     else:
         dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size)
+        dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm_storge_size + ofm_storge_size)
 
     # Computations cycles
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"]
@@ -930,6 +1047,11 @@ def estimate_dequantize_cycles(model: Graph, opid: int) -> int:
     else:
         # We only support INT8 and float32 data type
         ifm_elem_size = 32
+    if ofm.get("type") == "INT8":
+        ofm_elem_size = 8
+    else:
+        # We only support INT8 and float32 data type
+        ofm_elem_size = 32
     
     # ifm's size (bytes)
     ifm_storge_size = 1
@@ -938,11 +1060,18 @@ def estimate_dequantize_cycles(model: Graph, opid: int) -> int:
             ifm_storge_size *= dim
         ifm_storge_size *= (ifm_elem_size / 8)
 
-    # DMA transfer cycles
-    if model.pipeline_schedule:
-        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.SRAM, ifm_storge_size)
+    # ofm's size (bytes)
+    ofm_storge_size = 1
+    for dim in ofm_shape:
+        ofm_storge_size *= dim
+    ofm_storge_size *= (ofm_elem_size / 8)
+
+    # DMA transfer cycles + IFM, OFM read/write cycles
+    if opid in model.cascade_matched_ops:
+        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm_storge_size + ofm_storge_size)
     else:
         dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size)
+        dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm_storge_size + ofm_storge_size)
 
     # Computations cycles
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"]
@@ -959,7 +1088,7 @@ def estimate_mem2mem_cycles(src_tensor_mem_area, dst_tensor_mem_area, transfer_s
     if src_tensor_mem_area == Mem_area.DRAM and dst_tensor_mem_area == Mem_area.SRAM:
         bws_per_cycle = (ArchitectureFeatures.axi_bit_width / 8) * ArchitectureFeatures.Dram_clock_scale
         transfer_cycles = transfer_size / bws_per_cycle
-    elif src_tensor_mem_area == Mem_area.SRAM and dst_tensor_mem_area == Mem_area.SRAM:
+    elif src_tensor_mem_area == Mem_area.SRAM and dst_tensor_mem_area == Mem_area.PE:
         bws_per_cycle = (ArchitectureFeatures.axi_bit_width / 8) * ArchitectureFeatures.Sram_clock_scale
         transfer_cycles = transfer_size / bws_per_cycle
     return transfer_cycles
@@ -1093,6 +1222,26 @@ def estimate_model(model: Graph, pipeline: bool) -> int:
         total_op_cycles += op_cycles
         total_cycles += op_total_cycles
     if pipeline:
+        cascade_matched_ops = model.cascade_matched_ops
+        # For now, assume the two op parallel execution will take the longer one
+        for cascade_matched_op in cascade_matched_ops:
+            op1 = model.ops[cascade_matched_op[0]]
+            op2_estimated_DMA_cycles = 0
+            op2_estimated_op_cycles = 0
+            op2_estimated_total_cycles = 0
+            for op_id in range(1, len(cascade_matched_op)):
+                op2 = model.ops[cascade_matched_op[op_id]]
+                op2_estimated_DMA_cycles += op2.estimated_DMA_cycles
+                op2_estimated_op_cycles += op2.estimated_op_cycles
+                op2_estimated_total_cycles += op2.estimated_total_cycles
+            if op1.estimated_total_cycles > op2_estimated_total_cycles:
+                total_dma_cycles -= op2_estimated_DMA_cycles
+                total_op_cycles -= op2_estimated_op_cycles
+                total_cycles -= op2_estimated_total_cycles
+            else:
+                total_dma_cycles -= op1.estimated_DMA_cycles
+                total_op_cycles -= op1.estimated_op_cycles
+                total_cycles -= op1.estimated_total_cycles
         matched_ops = model.matched_ops
         # For now, assume the two op parallel execution will take the longer one
         for matched_op in matched_ops:

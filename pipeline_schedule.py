@@ -71,7 +71,42 @@ def pipeline_schedule(split_graph: Graph):
                 split_graph.ops[opid].is_mac_main_op = False
                 split_graph.ops[opid].is_elem_wise_main_op = False
 
-    def re_schedule(split_graph: Graph):
+    # First priority schedule:
+    # Try to reuse the output of mac-main-op as the input of elem-wise-main-op & these two ops can be executed concurrently
+    def first_priority_schedule(split_graph: Graph):
+        new_operators = split_graph.ordered_opid
+        # Check each op whether can hoist and modify its order in DF-1 schedule
+        for idx, opid in enumerate(new_operators):
+            # Skip the op that has been matched
+            if split_graph.ops[opid].have_fully_matched:
+                continue
+
+            # We start from the mac-main-op, since its output can directlly be used by elem-wise-main-op
+            # Conversely, elem-wise-main-op's output can't be directly used by mac-main-op (it normally need neighbor elems to be calculated)
+            if split_graph.ops[opid].is_mac_main_op:
+                cascade_matched_ops = [opid]
+                child_idx = idx + 1
+                child_opid = new_operators[child_idx]
+                while child_opid < len(new_operators):
+                    if split_graph.ops[child_opid].is_elem_wise_main_op and split_graph.ops[child_opid].have_fully_matched is False:
+                        # Check whether child_opid is the opid's child
+                        for child in split_graph.ops[opid].children:
+                            if child_opid == child:
+                                cascade_matched_ops.append(child_opid)
+                                split_graph.ops[child_opid].have_fully_matched = True
+                                break
+                        child_idx += 1
+                        child_opid = new_operators[child_idx]
+                    else:
+                        break
+                if len(cascade_matched_ops) > 1:
+                    split_graph.ops[opid].have_fully_matched = True
+                    split_graph.cascade_matched_ops.append(cascade_matched_ops)
+
+    # Second priority schedule:
+    # Try to hoist the elem-wise-main-op to the position that can be executed concurrently with the mac-main-op
+    # Or, hoist the mac-main-op to the position that can be executed concurrently with the elem-wise-main-op
+    def second_priority_schedule(split_graph: Graph):
         new_operators = split_graph.ordered_opid
         # Check each op whether can hoist and modify its order in DF-1 schedule
         for opid in new_operators:
@@ -271,7 +306,8 @@ def pipeline_schedule(split_graph: Graph):
     set_active_engine(split_graph)
 
     # Start to piepline schedule
-    re_schedule(split_graph)
+    first_priority_schedule(split_graph)
+    second_priority_schedule(split_graph)
     
     #return pipeline_split_graph
     split_graph.pipeline_schedule = True

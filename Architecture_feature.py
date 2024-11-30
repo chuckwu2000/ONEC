@@ -1,9 +1,10 @@
 from enum import Enum
 
 class Mem_area(Enum):
-    SRAM = 0
-    DRAM = 1
-    OffChipFlash = 2
+    PE = 0
+    SRAM = 1
+    DRAM = 2
+    OffChipFlash = 3
 
 class ArchitectureFeatures:
     # Assume bandwidth in SRAM (2000 MB/s) and DRAM (200 MB/s)

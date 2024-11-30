@@ -113,6 +113,7 @@ if args.verbose_performance:
 pipeline_new_graph = pipeline_schedule(new_graph)
 if args.verbose_performance:
     pipeline_dma_cycles, pipeline_op_cycles, pipeline_total_cycles = estimate_model(pipeline_new_graph, pipeline = True)
+    print(f"cascade ops = {pipeline_new_graph.cascade_matched_ops}")
     print(f"match ops = {pipeline_new_graph.matched_ops}")
     print(f"After pipeline schedule: dma cycles = {pipeline_dma_cycles :.1f}, op cycles = {pipeline_op_cycles :.1f}, total cycles = {pipeline_total_cycles :.1f}")
     print(f"speedup = {((split_total_cycles/pipeline_total_cycles) - 1) * 100 :.2f}%")
