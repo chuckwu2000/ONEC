@@ -90,11 +90,15 @@ def pipeline_schedule(split_graph: Graph):
                 while child_opid < len(new_operators):
                     if split_graph.ops[child_opid].is_elem_wise_main_op and split_graph.ops[child_opid].have_fully_matched is False:
                         # Check whether child_opid is the opid's child
+                        child_matched = False
                         for child in split_graph.ops[opid].children:
                             if child_opid == child:
                                 cascade_matched_ops.append(child_opid)
                                 split_graph.ops[child_opid].have_fully_matched = True
+                                child_matched = True
                                 break
+                        if not child_matched:
+                            break
                         child_idx += 1
                         child_opid = new_operators[child_idx]
                     else:

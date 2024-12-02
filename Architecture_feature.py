@@ -14,11 +14,12 @@ class ArchitectureFeatures:
     # Sram_burst_length = 32
     Dram_clock_scale = 1
     # Dram_burst_length = 128
+    MAC_PE = 64
 
     # Output cycles per element (MAC main op, mul, add/sub)
     # Now assune we have 64 MACs
     output_cycles_per_elem = {
-        "MAC": 1 / 64,
+        "MAC": 1 / MAC_PE,
         "MUL": 3,
         "ADD/SUB": 3,
         "LOGISTIC": 3,
