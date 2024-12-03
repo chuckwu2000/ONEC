@@ -73,6 +73,7 @@ def pipeline_schedule(split_graph: Graph):
 
     # First priority schedule:
     # Try to reuse the output of mac-main-op as the input of elem-wise-main-op & these two ops can be executed concurrently
+    # TODO: need to check that sequencial elem-wise-main-ops have producer-consumer relationship
     def first_priority_schedule(split_graph: Graph):
         new_operators = split_graph.ordered_opid
         # Check each op whether can hoist and modify its order in DF-1 schedule
@@ -84,6 +85,7 @@ def pipeline_schedule(split_graph: Graph):
             # We start from the mac-main-op, since its output can directlly be used by elem-wise-main-op
             # Conversely, elem-wise-main-op's output can't be directly used by mac-main-op (it normally need neighbor elems to be calculated)
             if split_graph.ops[opid].is_mac_main_op:
+                estimated_total_cycles = split_graph.ops[opid].estimated_total_cycles
                 cascade_matched_ops = [opid]
                 child_idx = idx + 1
                 if child_idx >= len(new_operators):
@@ -92,14 +94,18 @@ def pipeline_schedule(split_graph: Graph):
                 while child_opid < len(new_operators):
                     if split_graph.ops[child_opid].is_elem_wise_main_op and split_graph.ops[child_opid].have_fully_matched is False:
                         # Check whether child_opid is the opid's child
-                        child_matched = False
+                        keep_search = False
                         for child in split_graph.ops[opid].children:
                             if child_opid == child:
+                                if estimated_total_cycles <= split_graph.ops[child_opid].estimated_total_cycles:
+                                    keep_search = False
+                                else:
+                                    estimated_total_cycles -= split_graph.ops[child_opid].estimated_total_cycles
+                                    keep_search = True
                                 cascade_matched_ops.append(child_opid)
                                 split_graph.ops[child_opid].have_fully_matched = True
-                                child_matched = True
                                 break
-                        if not child_matched:
+                        if not keep_search:
                             break
                         child_idx += 1
                         child_opid = new_operators[child_idx]

@@ -354,7 +354,7 @@ def estimate_conv_cycles(model: Graph, opid: int) -> int:
     op_cycles = MACs * cycle_per_elem
 
     # Requantize cycles
-    cycle_per_elem = ofm_elems * ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"]
+    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"]
     op_cycles += ofm_elems * cycle_per_elem
 
     total_cycles = dma_transfer_cycles + op_cycles
