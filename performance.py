@@ -243,8 +243,8 @@ def estimate_logistic_cycles(model: Graph, opid: int) -> int:
         dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size + ofm_storge_size)
         dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm_storge_size + ofm_storge_size)
 
-    # Computations cycles
-    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["LOGISTIC"]
+    # Computations cycles (Dequantize + Logistic + Quantize)
+    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"] * 2 + ArchitectureFeatures.output_cycles_per_elem["LOGISTIC"]
     ofm_elems = 1
     for dim in ofm_shape:
         ofm_elems *= dim
@@ -352,6 +352,10 @@ def estimate_conv_cycles(model: Graph, opid: int) -> int:
     # Total produce height * width * channel elements, each element need ifm's channel * filtersize * filtersize MACs => filter_shape * ofm_height * ofm_width
     MACs = filter_shape[0] * filter_shape[1] * filter_shape[2] * filter_shape[3] * ofm_shape[1] * ofm_shape[2]
     op_cycles = MACs * cycle_per_elem
+
+    # Requantize cycles
+    cycle_per_elem = ofm_elems * ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"]
+    op_cycles += ofm_elems * cycle_per_elem
 
     total_cycles = dma_transfer_cycles + op_cycles
     return (dma_transfer_cycles, op_cycles, total_cycles)
@@ -926,12 +930,13 @@ def estimate_fully_connected_cycles(model: Graph, opid: int) -> int:
             have_data_layout_parent = True
             break
     if model.pipeline_schedule and not have_data_layout_parent:
-        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_storge_size)
+        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, weight_storge_size)
+        dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_storge_size)
         # Assume input tensors can be accessed in parallel, one output element needs inner_product_size MACs
         inner_product_size = ifm_shape[-1]
         one_ifm_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, inner_product_size)
         # Our MAC engine have 64 PEs
-        dma_transfer_cycles += (inner_product_size / ArchitectureFeatures.MAC_PE) * one_ifm_transfer_cycles * ofm_elems
+        dma_transfer_cycles += one_ifm_transfer_cycles * ofm_elems
     else:
         dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size + weight_storge_size + ofm_storge_size)
         dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_storge_size)
@@ -939,7 +944,7 @@ def estimate_fully_connected_cycles(model: Graph, opid: int) -> int:
         inner_product_size = ifm_shape[-1]
         one_ifm_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, inner_product_size)
         # Our MAC engine have 64 PEs
-        dma_transfer_cycles += (inner_product_size / ArchitectureFeatures.MAC_PE) * one_ifm_transfer_cycles * ofm_elems
+        dma_transfer_cycles += one_ifm_transfer_cycles * ofm_elems
 
     # Computations cycles
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["MAC"]
@@ -1060,7 +1065,9 @@ def estimate_batch_matmul_cycles(model: Graph, opid: int) -> int:
             have_data_layout_parent = True
             break
     if model.pipeline_schedule and not have_data_layout_parent:
-        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_storge_size)
+        # The weight tensor is stored in DRAM
+        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm2_storge_size) 
+        dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_storge_size)
         # Assume input tensors can be accessed in parallel, one output element needs inner_product_size MACs
         inner_product_size = ifm1_shape[3]
         one_ifm_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, inner_product_size)
@@ -1378,7 +1385,8 @@ def estimate_op_cycles(model: Graph, opid: int) -> int:
         op.estimated_op_cycles = op_cycles
         op.estimated_total_cycles = total_cycles
     elif opcode_type == "CONCATENATION" or opcode_type == "SPLIT" or opcode_type == "RESHAPE" or \
-         opcode_type == "SPLIT_V" or opcode_type == "TRANSPOSE" or opcode_type == "RESIZE_NEAREST_NEIGHBOR":
+         opcode_type == "SPLIT_V" or opcode_type == "TRANSPOSE" or opcode_type == "RESIZE_NEAREST_NEIGHBOR" or \
+         opcode_type == "PACK":
         # NPU won't do concatenation, so just set the cycles to 0
         dma_cycles, op_cycles, total_cycles = 0, 0, 0
         op.estimated_DMA_cycles = dma_cycles
