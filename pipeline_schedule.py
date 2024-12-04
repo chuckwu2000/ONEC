@@ -1,5 +1,8 @@
 from MyGraph import Graph
 
+# The elementwise main op but contain the reduce behavior
+reduce_ops = ["MEAN", "REDUCE_MAX", "SOFTMAX"]
+
 def pipeline_schedule(split_graph: Graph):
     # TODO: Implement pipeline scheduling
 
@@ -92,6 +95,11 @@ def pipeline_schedule(split_graph: Graph):
                     continue
                 child_opid = new_operators[child_idx]
                 while child_opid < len(new_operators):
+                    opcode_index = split_graph.ops[child_opid].info.get("opcode_index")
+                    opcode_type = split_graph.opcodes[opcode_index].get("builtin_code")
+                    # If the child op need to perform reduce operation, we can't let it directly consume the output of mac-main-op
+                    if opcode_type in reduce_ops:
+                        break
                     if split_graph.ops[child_opid].is_elem_wise_main_op and split_graph.ops[child_opid].have_fully_matched is False:
                         # Check whether child_opid is the opid's child
                         keep_search = False
