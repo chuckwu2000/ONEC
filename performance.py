@@ -54,10 +54,12 @@ def estimate_add_cycles(model: Graph, opid: int) -> int:
             have_data_layout_parent = True
             break
     if model.pipeline_schedule and not have_data_layout_parent:
-        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm1_storge_size + ifm2_storge_size + ofm_storge_size)
+        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, 1)
+        dma_transfer_cycles = (ofm_storge_size) * one_element_transfer_cycles
     else:
         dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm1_storge_size + ifm2_storge_size + ofm_storge_size)
-        dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm1_storge_size + ifm2_storge_size + ofm_storge_size)
+        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, 1)
+        dma_transfer_cycles += (ofm_storge_size) * one_element_transfer_cycles
 
     # Computations cycles
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["ADD/SUB"]
@@ -118,10 +120,12 @@ def estimate_sub_cycles(model: Graph, opid: int) -> int:
             have_data_layout_parent = True
             break
     if model.pipeline_schedule and not have_data_layout_parent:
-        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm1_storge_size + ifm2_storge_size + ofm_storge_size)
+        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, 1)
+        dma_transfer_cycles = (ofm_storge_size) * one_element_transfer_cycles
     else:
         dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm1_storge_size + ifm2_storge_size + ofm_storge_size)
-        dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm1_storge_size + ifm2_storge_size + ofm_storge_size)
+        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, 1)
+        dma_transfer_cycles += (ofm_storge_size) * one_element_transfer_cycles
 
     # Computations cycles
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["ADD/SUB"]
@@ -182,10 +186,12 @@ def estimate_mul_cycles(model: Graph, opid: int) -> int:
             have_data_layout_parent = True
             break
     if model.pipeline_schedule and not have_data_layout_parent:
-        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm1_storge_size + ifm2_storge_size + ofm_storge_size)
+        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, 1)
+        dma_transfer_cycles = (ofm_storge_size) * one_element_transfer_cycles
     else:
         dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm1_storge_size + ifm2_storge_size + ofm_storge_size)
-        dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm1_storge_size + ifm2_storge_size + ofm_storge_size)
+        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, 1)
+        dma_transfer_cycles += (ofm_storge_size) * one_element_transfer_cycles
 
     # Computations cycles
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["MUL"]
@@ -238,13 +244,16 @@ def estimate_logistic_cycles(model: Graph, opid: int) -> int:
             have_data_layout_parent = True
             break
     if model.pipeline_schedule and not have_data_layout_parent:
-        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm_storge_size + ofm_storge_size)
+        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, 1)
+        dma_transfer_cycles = (ofm_storge_size) * one_element_transfer_cycles
     else:
         dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size + ofm_storge_size)
-        dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm_storge_size + ofm_storge_size)
+        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, 1)
+        dma_transfer_cycles += (ofm_storge_size) * one_element_transfer_cycles
 
     # Computations cycles (Dequantize + Logistic + Quantize)
-    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"] * 2 + ArchitectureFeatures.output_cycles_per_elem["LOGISTIC"]
+    # cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"] * 2 + ArchitectureFeatures.output_cycles_per_elem["LOGISTIC"]
+    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["LOGISTIC"]
     ofm_elems = 1
     for dim in ofm_shape:
         ofm_elems *= dim
@@ -353,9 +362,9 @@ def estimate_conv_cycles(model: Graph, opid: int) -> int:
     MACs = filter_shape[0] * filter_shape[1] * filter_shape[2] * filter_shape[3] * ofm_shape[1] * ofm_shape[2]
     op_cycles = MACs * cycle_per_elem
 
-    # Requantize cycles
-    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"]
-    op_cycles += ofm_elems * cycle_per_elem
+    # # Requantize cycles
+    # cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"]
+    # op_cycles += ofm_elems * cycle_per_elem
 
     total_cycles = dma_transfer_cycles + op_cycles
     return (dma_transfer_cycles, op_cycles, total_cycles)
@@ -476,10 +485,14 @@ def estimate_mean_cycles(model: Graph, opid: int) -> int:
             have_data_layout_parent = True
             break
     if model.pipeline_schedule and not have_data_layout_parent:
-        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm_storge_size + ofm_storge_size)
+        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm_storge_size)
+        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, 1)
+        dma_transfer_cycles += (ofm_storge_size) * one_element_transfer_cycles
     else:
         dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size + ofm_storge_size)
-        dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm_storge_size + ofm_storge_size)
+        dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm_storge_size)
+        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, 1)
+        dma_transfer_cycles += (ofm_storge_size) * one_element_transfer_cycles
 
     # Computations cycles
     cycle_per_elem = 20
@@ -675,10 +688,12 @@ def estimate_rsqrt_cycles(model: Graph, opid: int) -> int:
             have_data_layout_parent = True
             break
     if model.pipeline_schedule and not have_data_layout_parent:
-        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm_storge_size + ofm_storge_size)
+        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, 1)
+        dma_transfer_cycles = (ofm_storge_size) * one_element_transfer_cycles
     else:
         dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size + ofm_storge_size)
-        dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm_storge_size + ofm_storge_size)
+        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, 1)
+        dma_transfer_cycles += (ofm_storge_size) * one_element_transfer_cycles
 
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["RSQRT"]
     ofm_elems = 1
@@ -738,10 +753,12 @@ def estimate_squared_difference_cycles(model: Graph, opid: int) -> int:
             have_data_layout_parent = True
             break
     if model.pipeline_schedule and not have_data_layout_parent:
-        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm1_storge_size + ifm2_storge_size + ofm_storge_size)
+        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, 1)
+        dma_transfer_cycles = (ofm_storge_size) * one_element_transfer_cycles
     else:
         dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm1_storge_size + ifm2_storge_size + ofm_storge_size)
-        dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm1_storge_size + ifm2_storge_size + ofm_storge_size)
+        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, 1)
+        dma_transfer_cycles += (ofm_storge_size) * one_element_transfer_cycles
 
     # Computations cycles (x - y)(x - y)
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["ADD/SUB"]
@@ -796,10 +813,12 @@ def estimate_gelu_cycles(model: Graph, opid: int) -> int:
             have_data_layout_parent = True
             break
     if model.pipeline_schedule and not have_data_layout_parent:
-        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm_storge_size + ofm_storge_size)
+        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, 1)
+        dma_transfer_cycles = (ofm_storge_size) * one_element_transfer_cycles
     else:
         dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size + ofm_storge_size)
-        dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm_storge_size + ofm_storge_size)
+        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, 1)
+        dma_transfer_cycles += (ofm_storge_size) * one_element_transfer_cycles
 
     # Computations cycles gelu(x)  = x * logistic(1.702 * x)
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["MUL"]
@@ -856,10 +875,12 @@ def estimate_leaky_relu_cycles(model: Graph, opid: int) -> int:
             have_data_layout_parent = True
             break
     if model.pipeline_schedule and not have_data_layout_parent:
-        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm_storge_size + ofm_storge_size)
+        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, 1)
+        dma_transfer_cycles = (ofm_storge_size) * one_element_transfer_cycles
     else:
         dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size + ofm_storge_size)
-        dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm_storge_size + ofm_storge_size)
+        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, 1)
+        dma_transfer_cycles += (ofm_storge_size) * one_element_transfer_cycles
 
     # Computations cycles
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["LEAKY_RELU"]
@@ -996,10 +1017,14 @@ def estimate_softmax_cycles(model: Graph, opid: int) -> int:
             have_data_layout_parent = True
             break
     if model.pipeline_schedule and not have_data_layout_parent:
-        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm_storge_size + ofm_storge_size)
+        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm_storge_size)
+        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, 1)
+        dma_transfer_cycles += (ofm_storge_size) * one_element_transfer_cycles
     else:
         dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size + ofm_storge_size)
-        dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm_storge_size + ofm_storge_size)
+        dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm_storge_size)
+        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, 1)
+        dma_transfer_cycles += (ofm_storge_size) * one_element_transfer_cycles
 
     # Computations cycles
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["SOFTMAX"]
@@ -1136,10 +1161,14 @@ def estimate_reduce_max_cycles(model: Graph, opid: int) -> int:
             have_data_layout_parent = True
             break
     if model.pipeline_schedule and not have_data_layout_parent:
-        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm_storge_size + ofm_storge_size)
+        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm_storge_size)
+        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, 1)
+        dma_transfer_cycles += (ofm_storge_size) * one_element_transfer_cycles
     else:
         dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size + ofm_storge_size)
-        dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm_storge_size + ofm_storge_size)
+        dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm_storge_size)
+        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, 1)
+        dma_transfer_cycles += (ofm_storge_size) * one_element_transfer_cycles
 
     # Computations cycles
     # Assume each element need reduce_size - 1 cycles to compare
@@ -1198,10 +1227,12 @@ def estimate_quantize_cycles(model: Graph, opid: int) -> int:
             have_data_layout_parent = True
             break
     if model.pipeline_schedule and not have_data_layout_parent:
-        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm_storge_size + ofm_storge_size)
+        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, 1)
+        dma_transfer_cycles = (ofm_storge_size) * one_element_transfer_cycles
     else:
         dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size + ofm_storge_size)
-        dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm_storge_size + ofm_storge_size)
+        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, 1)
+        dma_transfer_cycles += (ofm_storge_size) * one_element_transfer_cycles
 
     # Computations cycles
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"]
@@ -1259,10 +1290,12 @@ def estimate_dequantize_cycles(model: Graph, opid: int) -> int:
             have_data_layout_parent = True
             break
     if model.pipeline_schedule and not have_data_layout_parent:
-        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm_storge_size + ofm_storge_size)
+        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, 1)
+        dma_transfer_cycles = (ofm_storge_size) * one_element_transfer_cycles
     else:
         dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size + ofm_storge_size)
-        dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm_storge_size + ofm_storge_size)
+        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, 1)
+        dma_transfer_cycles += (ofm_storge_size) * one_element_transfer_cycles
 
     # Computations cycles
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"]
@@ -1404,6 +1437,9 @@ def estimate_model(model: Graph, pipeline: bool) -> int:
     total_op_cycles = 0
     total_cycles = 0
 
+    mac_idle_cycles = 0
+    elem_wise_idle_cycles = 0
+
     for opid in model.ordered_opid:
         # w/wo pipeline schedule, the estimated total cycles will be different, since we consider the memory footprint between DRAM and SRAM
         dma_cycles, op_cycles, op_total_cycles = estimate_op_cycles(model, opid)
@@ -1413,6 +1449,12 @@ def estimate_model(model: Graph, pipeline: bool) -> int:
         total_dma_cycles += dma_cycles
         total_op_cycles += op_cycles
         total_cycles += op_total_cycles
+
+        if model.ops[opid].is_mac_main_op == True:
+            elem_wise_idle_cycles += op_cycles
+        elif model.ops[opid].is_elem_wise_main_op == True:
+            mac_idle_cycles += op_cycles
+        
     if pipeline:
         cascade_matched_ops = model.cascade_matched_ops
         # For now, assume the two op parallel execution will take the longer one
@@ -1430,10 +1472,14 @@ def estimate_model(model: Graph, pipeline: bool) -> int:
                 total_dma_cycles -= op2_estimated_DMA_cycles
                 total_op_cycles -= op2_estimated_op_cycles
                 total_cycles -= op2_estimated_total_cycles
+                if op1.is_mac_main_op == True:
+                    elem_wise_idle_cycles -= op2.estimated_op_cycles
             else:
                 total_dma_cycles -= op1.estimated_DMA_cycles
                 total_op_cycles -= op1.estimated_op_cycles
                 total_cycles -= op1.estimated_total_cycles
+                if op1.is_elem_wise_main_op == True:
+                    mac_idle_cycles -= op2.estimated_op_cycles
         matched_ops = model.matched_ops
         # For now, assume the two op parallel execution will take the longer one
         for matched_op in matched_ops:
@@ -1454,7 +1500,8 @@ def estimate_model(model: Graph, pipeline: bool) -> int:
                 total_dma_cycles -= op1.estimated_DMA_cycles
                 total_op_cycles -= op1.estimated_op_cycles
                 total_cycles -= op1.estimated_total_cycles
-    return total_dma_cycles, total_op_cycles, total_cycles
+    print(f"mac_idle_cycles: {mac_idle_cycles}, elem_wise_idle_cycles: {elem_wise_idle_cycles}, total_cycles: {total_op_cycles}")
+    return total_dma_cycles, total_op_cycles, total_cycles, (mac_idle_cycles / total_op_cycles, elem_wise_idle_cycles / total_op_cycles)
 
 def print_performance(model: Graph):
     for order, opid in enumerate(model.ordered_opid):

@@ -6,6 +6,7 @@ from MyGraph import Graph
 from Block import Block
 from AutoSplit import Splitter
 import tempfile
+from pipeline_schedule import set_active_engine
 from pipeline_schedule import pipeline_schedule
 from performance import estimate_model
 from performance import print_performance
@@ -106,17 +107,23 @@ else:
     blocks = []
 
 new_graph = splitter.perform_split(blocks)
-split_dma_cycles, split_op_cycles, split_total_cycles = estimate_model(new_graph, pipeline = False)
+
+# Set each operator's active engine for performance estimation
+set_active_engine(new_graph)
+
+split_dma_cycles, split_op_cycles, split_total_cycles, engine_idle_cycles = estimate_model(new_graph, pipeline = False)
 if args.verbose_performance:
     print_performance(new_graph)
     print(f"Before pipeline schedule: dma cycles = {split_dma_cycles :.1f}, op cycles = {split_op_cycles :.1f}, total cycles = {split_total_cycles :.1f}")
+    print(f"mac engine idle cycles = {engine_idle_cycles[0] :.2f}, elemwise engine idle cycles = {engine_idle_cycles[1] :.2f}")
 pipeline_new_graph = pipeline_schedule(new_graph)
 if args.verbose_performance:
-    pipeline_dma_cycles, pipeline_op_cycles, pipeline_total_cycles = estimate_model(pipeline_new_graph, pipeline = True)
+    pipeline_dma_cycles, pipeline_op_cycles, pipeline_total_cycles, engine_idle_cycles = estimate_model(pipeline_new_graph, pipeline = True)
     print(f"cascade ops = {pipeline_new_graph.cascade_matched_ops}")
     print(f"match ops = {pipeline_new_graph.matched_ops}")
     print(f"After pipeline schedule: dma cycles = {pipeline_dma_cycles :.1f}, op cycles = {pipeline_op_cycles :.1f}, total cycles = {pipeline_total_cycles :.1f}")
     print(f"speedup = {((split_total_cycles/pipeline_total_cycles) - 1) * 100 :.2f}%")
+    print(f"mac engine idle cycles = {engine_idle_cycles[0] :.2f}, elemwise engine idle cycles = {engine_idle_cycles[1] :.2f}")
 new_buffers, new_tensors, new_inputs, new_outputs, new_operators, new_opcodes = pipeline_new_graph.export()
 
 new_model['buffers'] = new_buffers

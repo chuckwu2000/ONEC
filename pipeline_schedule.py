@@ -1,79 +1,32 @@
 from MyGraph import Graph
 
+# The elementwise main op
+elem_wise_ops = ["ADD", "SUB", "MUL", "LOGISTIC", "RSQRT", "SQUARED_DIFFERENCE", "SOFTMAX", "GELU", "LEAKY_RELU", "REDUCE_MAX", "QUANTIZE", "DEQUANTIZE"]
+# The mac main op
+mac_ops = ["MEAN", "CONV_2D", "DEPTHWISE_CONV_2D", "FULLY_CONNECTED", "TRANSPOSE_CONV", "MAX_POOL_2D", "BATCH_MATMUL"]
+# The memory main op
+mem_ops = ["RESHAPE"]
 # The elementwise main op but contain the reduce behavior
 reduce_ops = ["MEAN", "REDUCE_MAX", "SOFTMAX"]
 
+def set_active_engine(graph: Graph):
+    operators = graph.ordered_opid
+    for opid in operators:
+        opcode_index = graph.ops[opid].info.get("opcode_index")
+        opcode_type = graph.opcodes[opcode_index].get("builtin_code")
+        if opcode_type in elem_wise_ops:
+            graph.ops[opid].is_mac_main_op = False
+            graph.ops[opid].is_elem_wise_main_op = True
+        elif opcode_type in mac_ops:
+            graph.ops[opid].is_mac_main_op = True
+            graph.ops[opid].is_elem_wise_main_op = False
+        elif opcode_type in mem_ops:
+            graph.ops[opid].is_mem_main_op = True
+        else:
+            graph.ops[opid].is_mac_main_op = False
+            graph.ops[opid].is_elem_wise_main_op = False
+
 def pipeline_schedule(split_graph: Graph):
-    # TODO: Implement pipeline scheduling
-
-    def set_active_engine(split_graph: Graph):
-        new_operators = split_graph.ordered_opid
-        for opid in new_operators:
-            opcode_index = split_graph.ops[opid].info.get("opcode_index")
-            opcode_type = split_graph.opcodes[opcode_index].get("builtin_code")
-            if opcode_type == "ADD":
-                split_graph.ops[opid].is_mac_main_op = False
-                split_graph.ops[opid].is_elem_wise_main_op = True
-            elif opcode_type == "SUB":
-                split_graph.ops[opid].is_mac_main_op = False
-                split_graph.ops[opid].is_elem_wise_main_op = True
-            elif opcode_type == "MUL":
-                split_graph.ops[opid].is_mac_main_op = False
-                split_graph.ops[opid].is_elem_wise_main_op = True
-            elif opcode_type == "LOGISTIC":
-                split_graph.ops[opid].is_mac_main_op = False
-                split_graph.ops[opid].is_elem_wise_main_op = True
-            elif opcode_type == "MEAN":
-                split_graph.ops[opid].is_mac_main_op = True
-                split_graph.ops[opid].is_elem_wise_main_op = False
-            elif opcode_type == "RSQRT":
-                split_graph.ops[opid].is_mac_main_op = False
-                split_graph.ops[opid].is_elem_wise_main_op = True
-            elif opcode_type == "SQUARED_DIFFERENCE":
-                split_graph.ops[opid].is_mac_main_op = False
-                split_graph.ops[opid].is_elem_wise_main_op = True
-            elif opcode_type == "CONV_2D":
-                split_graph.ops[opid].is_mac_main_op = True
-                split_graph.ops[opid].is_elem_wise_main_op = False
-            elif opcode_type == "DEPTHWISE_CONV_2D":
-                split_graph.ops[opid].is_mac_main_op = True
-                split_graph.ops[opid].is_elem_wise_main_op = False
-            elif opcode_type == "FULLY_CONNECTED":
-                split_graph.ops[opid].is_mac_main_op = True
-                split_graph.ops[opid].is_elem_wise_main_op = False
-            elif opcode_type == "SOFTMAX":
-                split_graph.ops[opid].is_mac_main_op = False
-                split_graph.ops[opid].is_elem_wise_main_op = True
-            elif opcode_type == "TRANSPOSE_CONV":
-                split_graph.ops[opid].is_mac_main_op = True
-                split_graph.ops[opid].is_elem_wise_main_op = False
-            elif opcode_type == "GELU":
-                split_graph.ops[opid].is_mac_main_op = False
-                split_graph.ops[opid].is_elem_wise_main_op = True
-            elif opcode_type == "LEAKY_RELU":
-                split_graph.ops[opid].is_mac_main_op = False
-                split_graph.ops[opid].is_elem_wise_main_op = True
-            elif opcode_type == "MAX_POOL_2D":
-                split_graph.ops[opid].is_mac_main_op = True
-                split_graph.ops[opid].is_elem_wise_main_op = False
-            elif opcode_type == "BATCH_MATMUL":
-                split_graph.ops[opid].is_mac_main_op = True
-                split_graph.ops[opid].is_elem_wise_main_op = False
-            elif opcode_type == "REDUCE_MAX":
-                split_graph.ops[opid].is_mac_main_op = False
-                split_graph.ops[opid].is_elem_wise_main_op = True
-            elif opcode_type == "QUANTIZE":
-                split_graph.ops[opid].is_mac_main_op = False
-                split_graph.ops[opid].is_elem_wise_main_op = True
-            elif opcode_type == "DEQUANTIZE":
-                split_graph.ops[opid].is_mac_main_op = False
-                split_graph.ops[opid].is_elem_wise_main_op = True
-            elif opcode_type == "RESHAPE":
-                split_graph.ops[opid].is_mem_main_op = True
-            else:
-                split_graph.ops[opid].is_mac_main_op = False
-                split_graph.ops[opid].is_elem_wise_main_op = False
-
     # First priority schedule:
     # Try to reuse the output of mac-main-op as the input of elem-wise-main-op & these two ops can be executed concurrently
     # TODO: need to check that sequencial elem-wise-main-ops have producer-consumer relationship
@@ -321,9 +274,6 @@ def pipeline_schedule(split_graph: Graph):
             order += 1
             split_graph.operators.append(op.info)
             split_graph.ordered_opid.append(op.opid)
-
-    # Set active engine
-    set_active_engine(split_graph)
 
     # Start to piepline schedule
     first_priority_schedule(split_graph)

@@ -7,14 +7,15 @@ class Mem_area(Enum):
     OffChipFlash = 3
 
 class ArchitectureFeatures:
-    # Assume bandwidth in SRAM (16 GB/s) and DRAM (1.6 GB/s)
-    axi_bit_width = 128
-    core_clock = 100e6
+    # Assume bandwidth in SRAM (assume 10 times faster) and DRAM (16 GB/s)
+    # DDR4 DRAM always 64-bit wide
+    axi_bit_width = 64
+    core_clock = 2e9
     Sram_clock_scale = 10
     # Sram_burst_length = 32
     Dram_clock_scale = 1
     # Dram_burst_length = 128
-    MAC_PE = 256
+    MAC_PE = 64
 
     # Output cycles per element (MAC main op, mul, add/sub)
     # Now assune we have 64 MACs
