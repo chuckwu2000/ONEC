@@ -39,6 +39,7 @@ if os.path.splitext(filename)[1] != '.tflite':
     raise "input model path doesn't match: .tflite extension is required'"
 
 json_model_path = os.path.join(tmp_dir_path, f'{model_name}.json')
+pattern_path = os.path.join(tmp_dir_path, f'{model_name}_pattern.json')
 os.system(f'flatc --json -o {tmp_dir_path} --raw-binary {schema_path} -- {args.model_path}')
 os.system(r'sed -i "s/\([^ ]*\):/\"\1\":/" ' + json_model_path)
 
@@ -132,10 +133,16 @@ new_model['subgraphs'][0]['inputs'] = new_inputs
 new_model['subgraphs'][0]['outputs'] = new_outputs
 new_model['subgraphs'][0]['operators'] = new_operators
 
+# Record the cascade ops and matched ops for CodeGen use
+with open(pattern_path, 'w') as f:
+    json.dump({'cascade_matched_ops': pipeline_new_graph.cascade_matched_ops, 'matched_ops': pipeline_new_graph.matched_ops}, f)
 with open(json_model_path, 'w') as f:
     json.dump(new_model, f, indent=2)
 
 os.system(f'flatc -o {tmp_dir_path} --binary {schema_path} {json_model_path}')
 os.system(f'mv {os.path.join(tmp_dir_path, filename)} {args.out_path}')
+pattern_txt = os.path.basename(args.out_path).replace('.tflite', '_pattern.json')
+pattern_out_path = f'{os.path.dirname(args.out_path)}/{pattern_txt}'
+os.system(f'mv {pattern_path} {pattern_out_path}')
 
 tmp_dir.cleanup()

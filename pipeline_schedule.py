@@ -260,9 +260,12 @@ def pipeline_schedule(split_graph: Graph):
                             split_graph.ops[insert_pos_opid].non_overlap_cycles = 0
                             split_graph.matched_ops.append(matched_ops)
                             break
+          
+    def set_new_operators(split_graph: Graph):
         # Store the new schedule order into a list, it contain some op have the same schedule order
         split_graph.operators = []
         split_graph.ordered_opid = []
+        # For tmp use
         new_schedule_order_list = []
         for i, op in enumerate(split_graph.ops):
             new_schedule_order_list.append((i, op.schedule_order))
@@ -275,9 +278,28 @@ def pipeline_schedule(split_graph: Graph):
             split_graph.operators.append(op.info)
             split_graph.ordered_opid.append(op.opid)
 
+        # Update the opid in cascade_matched_ops and matched_ops
+        new_cascade_matched_ops = []
+        new_matched_ops = []
+        for cascade_matched_pattern in split_graph.cascade_matched_ops:
+            new_cascade_pattern = []
+            for opid in cascade_matched_pattern:
+                new_cascade_pattern.append(split_graph.ops[opid].schedule_order)
+            new_cascade_matched_ops.append(new_cascade_pattern)
+        for matched_pattern in split_graph.matched_ops:
+            new_matched_pattern = []
+            for opid in matched_pattern:
+                new_matched_pattern.append(split_graph.ops[opid].schedule_order)
+            new_matched_ops.append(new_matched_pattern)
+        split_graph.cascade_matched_ops = new_cascade_matched_ops
+        split_graph.matched_ops = new_matched_ops
+    
     # Start to piepline schedule
     first_priority_schedule(split_graph)
     second_priority_schedule(split_graph)
+
+    # Set model's new operators & update the cascade_matched_ops and matched_ops
+    set_new_operators(split_graph)
     
     #return pipeline_split_graph
     split_graph.pipeline_schedule = True
