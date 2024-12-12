@@ -104,8 +104,6 @@ class Splitter:
 
         input_tile_size = self.split_height
         output_tile_size = self.split_height
-        input_tile_size = 40
-        output_tile_size = 40
 
         # Currently assume it's splittable from the root of the graph
         splittables = []

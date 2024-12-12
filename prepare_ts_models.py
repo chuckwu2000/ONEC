@@ -10,6 +10,7 @@ parser.add_argument("--schema_path", nargs='?', type=str,
                     default="utils/schema.fbs")
 parser.add_argument("--models_dir", nargs='?', type=str,
                     default="models/")
+parser.add_argument("--split_size", nargs='?', type=int, default=50)
 parser.add_argument("--model_type", nargs='?', type=str, 
                     default="bert")
 parser.add_argument("--verbose_performance", action='store_true')
@@ -18,6 +19,7 @@ args = parser.parse_args()
 rewriter_path = str(args.rewriter_path)
 schema_path = str(args.schema_path)
 models_dir = str(args.models_dir)
+split_size = int(args.split_size)
 model_type = str(args.model_type)
 
 # tflite_list = [path for path in glob.glob(f'{models_dir}/*.tflite', recursive=True)]
@@ -25,7 +27,7 @@ model_type = str(args.model_type)
 tflite_path = models_dir
 model_name = os.path.splitext(os.path.basename(tflite_path))[0]
 folder_root = os.path.dirname(tflite_path).replace('tflite/', 'ts_model/')
-for split_height in [1]:
+for split_height in [split_size]:
     for exec_order in ['DF']:
         subfolder_dir = os.path.join(folder_root, f"{exec_order}_{split_height}")
         os.makedirs(subfolder_dir, exist_ok=True)
