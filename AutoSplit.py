@@ -799,8 +799,9 @@ class Splitter:
                 guard_inner_y = min(output_split, out_shape[1] - out_y)
 
                 new_inputs = []
-                split_padding_H = -((out_y) * stride_h - paddings_H)
-                split_padding_H = 0 if split_padding_H < 0 else split_padding_H
+                split_padding_H = paddings_H
+                # split_padding_H = -((out_y) * stride_h - paddings_H)
+                # split_padding_H = 0 if split_padding_H < 0 else split_padding_H
 
                 # inference required in_y from this tile
                 required = []

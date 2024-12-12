@@ -141,8 +141,8 @@ with open(json_model_path, 'w') as f:
 
 os.system(f'flatc -o {tmp_dir_path} --binary {schema_path} {json_model_path}')
 os.system(f'mv {os.path.join(tmp_dir_path, filename)} {args.out_path}')
-pattern_txt = os.path.basename(args.out_path).replace('.tflite', '_pattern.json')
-pattern_out_path = f'{os.path.dirname(args.out_path)}/{pattern_txt}'
+pattern_json = os.path.basename(args.out_path).replace('.tflite', '_pattern.json')
+pattern_out_path = f'{os.path.dirname(args.out_path)}/{pattern_json}'
 os.system(f'mv {pattern_path} {pattern_out_path}')
 
 tmp_dir.cleanup()

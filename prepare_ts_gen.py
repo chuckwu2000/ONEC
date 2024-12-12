@@ -22,7 +22,7 @@ models_dir = str(args.models_dir)
 # for tflite_path in sorted(tflite_list):
 tflite_path = models_dir
 model_name = os.path.splitext(os.path.basename(tflite_path))[0]
-out_path = f"{os.path.dirname(tflite_path)}/{model_name}.txt"
+out_path = f"{os.path.dirname(tflite_path)}/{model_name}_inst.txt"
 cmd =   f"python {codegen_path} {tflite_path} --schema_path {schema_path}" \
         f" --pattern_path {pattern_path}" \
         f" --out_path {out_path}"

@@ -1,5 +1,7 @@
 import numpy as np
 import math
+from collections import defaultdict
+
 class OPGen:
     def __init__(self, model, allocated_tensor, npu_code):
         self.model = model
@@ -77,17 +79,6 @@ class OPGen:
             buffer += f"SET_OFM_DEPTH 1\n"
         buffer += f"SET_OFM_ZERO_POINT {zero_point}\n"
         return buffer
-    
-    # TODO: Implement this function
-    def CalculateScratchBufferSize(self, input_tensors, output_tensor, sid):
-        pass
-
-    def RequestScratchBuffer(self, input_tensors, output_tensor, sid):
-        buffer_size = self.CalculateScratchBufferSize(input_tensors, output_tensor, sid)
-        if buffer_size > 0:
-            return buffer_size
-        else:
-            return 0
 
     def fully_connected_codegen(self, operator):
         input_tensor_id = operator['inputs'][0]
@@ -131,59 +122,101 @@ class OPGen:
     def conv_codegen(self, operator):
         # Conv's output tensor may depend on other input tensors
         input_tensor_ids = []
+        input_tensors = []
+        pad_config = None
+        
+        if len(operator['inputs']) < 4:
+            # No need to consume other operators' output tensor (normally because the filter is 1x1)
+            input_tensor_ids.append(operator['inputs'][0])
+        else:
+            pad_config = self.buffers[self.tensor[operator['inputs'][3]]['buffer']]['data']
+            # Need to consume other operators' output tensor
+            for i in range(4, len(operator['inputs'])):
+                input_tensor_ids.append(operator['inputs'][i])
         filter_tensor_id = operator['inputs'][1]
         bias_tensor_id = operator['inputs'][2]
-        for i in range(3, len(operator['inputs'])):
-            input_tensor_ids.append(operator['inputs'][i])
         output_tensor_id = operator['outputs'][0]
 
-        buffer_size = self.RequestScratchBuffer(input_tensor_ids, output_tensor_id, sid)
-
         for input_tensor_id in input_tensor_ids:
-            input_tensor = self.tensor[input_tensor_id]
-            input_quant_scale = np.int32(input_tensor['quantization']['scale'][0]).view('float32')
-            input_quant_zp = input_tensor['quantization']['zero_point'][0]
-
-            tokens = input_tensor['name'].split('_split_')
-            name = tokens[0]
-            sid = -1
-            if len(tokens) == 2:
-                if tokens[1].isnumeric():
-                    sid = int(tokens[1])
-            elif len(tokens) > 2:
-                raise(f"Invalid tensor name: {input_tensor['name']}")
-
-            code = self.CodeGen_Set_input_tensor(input_tensor, self.allocated_tensor[input_tensor_id].start_address, input_quant_zp)
-            self.npu_code += code
-        
+            input_tensors.append(self.tensor[input_tensor_id])
         filter_tensor = self.tensor[filter_tensor_id]
+        bias_tensor = self.tensor[bias_tensor_id]
         output_tensor = self.tensor[output_tensor_id]
 
-        input_quant_scale = np.int32(input_tensor['quantization']['scale'][0]).view('float32')
-        weight_quant_scale = np.int32(filter_tensor['quantization']['scale'][0]).view('float32')
-        output_qunat_scale = np.int32(output_tensor['quantization']['scale'][0]).view('float32')
-        scale = input_quant_scale * weight_quant_scale / output_qunat_scale
-        multiplier, shift = self.QuantizeMultiplier(scale)
+        stride_h = operator['builtin_options']['stride_h']
+        pad_h = pad_config[0]
+        pad_w = pad_config[1]
 
-        input_quant_zp = input_tensor['quantization']['zero_point'][0]
-        filter_quant_zp = filter_tensor['quantization']['zero_point'][0]
-        output_quant_zp = output_tensor['quantization']['zero_point'][0]
+        tokens = output_tensor['name'].split('_split_')
+        output_id = -1
+        if len(tokens) == 2:
+            if tokens[1].isnumeric():
+                output_id = int(tokens[1])
+        elif len(tokens) > 2:
+                raise(f"Invalid output tensor name: {output_tensor['name']}")
+        
+        # Initial the input tensor's range required
+        split_size = self.tensor[operator['inputs'][0]]['shape'][1]
+        input_range_required = defaultdict(list)
+        input_id_list = []
+        for input_tensor_id in input_tensor_ids:
+            input_tensor = self.tensor[input_tensor_id]
+            tokens = input_tensor['name'].split('_split_')
+            if tokens[1].isnumeric():
+                input_id = int(tokens[1])
+                # Put the input tensor's range reversed, for the following comarison to find the real boundry
+                input_range_required[input_id] = [(input_id + 1) * split_size - 1, input_id * split_size]
+                input_id_list.append(input_id)
+        
+        # Compute the start of the boundry of the input tensor
+        for out_h in range(split_size * output_id, split_size * (output_id + 1)):
+            in_h_origin = out_h * stride_h - pad_h
+            for kernel_h in range(filter_tensor['shape'][1]):
+                in_h = in_h_origin + kernel_h
+                # OverBound case, no need to consider over the maximum boundry, since it has considered in the model_gen
+                source_sid = in_h // split_size
+                if in_h < 0 or source_sid not in input_range_required:
+                    continue
+                else:
+                    # print(f"out_h: {out_h}, in_h: {in_h}, source_sid: {source_sid}")
+                    input_range_required[source_sid][0] = min(input_range_required[source_sid][0], in_h)
+                    input_range_required[source_sid][1] = max(input_range_required[source_sid][1], in_h)
 
-        code = ""
-        # Start to load weights
-        code += self.CodeGen_DMA_start(self.allocated_tensor[filter_tensor_id].start_address, self.Compute_tensor_size(filter_tensor))
-        # Set input tensor
-        code += self.CodeGen_Set_input_tensor(input_tensor, self.allocated_tensor[input_tensor_id].start_address, input_quant_zp)
-        # Set weight tensor
-        code += self.CodeGen_Set_weight_tensor(filter_tensor, self.allocated_tensor[filter_tensor_id].start_address, filter_quant_zp)
-        # Set output tensor
-        code += self.CodeGen_Set_output_tensor(output_tensor, self.allocated_tensor[output_tensor_id].start_address, output_quant_zp)
-        # Set scale
-        code += f"SET_MULTIPLIER {multiplier}\n"
-        code += f"SET_SHIFT {shift}\n"
-        code += self.CodeGen_DMA_wait()
-        code += "CONV\n"
-        self.npu_code += code
+        # TODO: Compose the IFM (future work) 
+        for input_tensor_id, source_sid in input_tensor_ids, input_id_list:
+            pass
+            # input_tensor = self.tensor[input_tensor_id]
+            # input_quant_scale = np.int32(input_tensor['quantization']['scale'][0]).view('float32')
+            # input_quant_zp = input_tensor['quantization']['zero_point'][0]
+
+            # code = self.CodeGen_Set_input_tensor(input_tensor, self.allocated_tensor[input_tensor_id].start_address, input_quant_zp)
+            # self.npu_code += code
+
+        # input_quant_scale = np.int32(input_tensor['quantization']['scale'][0]).view('float32')
+        # weight_quant_scale = np.int32(filter_tensor['quantization']['scale'][0]).view('float32')
+        # output_qunat_scale = np.int32(output_tensor['quantization']['scale'][0]).view('float32')
+        # scale = input_quant_scale * weight_quant_scale / output_qunat_scale
+        # multiplier, shift = self.QuantizeMultiplier(scale)
+
+        # input_quant_zp = input_tensor['quantization']['zero_point'][0]
+        # filter_quant_zp = filter_tensor['quantization']['zero_point'][0]
+        # output_quant_zp = output_tensor['quantization']['zero_point'][0]
+
+        # code = ""
+        # # Start to load weights
+        # code += self.CodeGen_DMA_start(self.allocated_tensor[filter_tensor_id].start_address, self.Compute_tensor_size(filter_tensor))
+        # # Set input tensor
+        # code += self.CodeGen_Set_input_tensor(input_tensor, self.allocated_tensor[input_tensor_id].start_address, input_quant_zp)
+        # # Set weight tensor
+        # code += self.CodeGen_Set_weight_tensor(filter_tensor, self.allocated_tensor[filter_tensor_id].start_address, filter_quant_zp)
+        # # Set output tensor
+        # code += self.CodeGen_Set_output_tensor(output_tensor, self.allocated_tensor[output_tensor_id].start_address, output_quant_zp)
+        # # Set scale
+        # code += f"SET_MULTIPLIER {multiplier}\n"
+        # code += f"SET_SHIFT {shift}\n"
+        # code += self.CodeGen_DMA_wait()
+        # code += "CONV\n"
+        # self.npu_code += code
 
     def mul_codegen(self, operator):
         print(f"MUL: {operator['inputs']}, {operator['outputs']}")
@@ -205,6 +238,8 @@ class OPGen:
         opcode_type = self.opcodes[opcode_index].get("builtin_code")
         if opcode_type == 'FULLY_CONNECTED':
             self.fully_connected_codegen(operator)
+        elif opcode_type == 'CONV_2D':
+            self.conv_codegen(operator)
         elif opcode_type == 'BATCH_MATMUL':
             self.batch_matmul_codegen(operator)
         elif opcode_type == 'MUL':
