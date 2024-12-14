@@ -11,6 +11,7 @@ parser.add_argument("--schema_path", nargs='?', type=str,
 parser.add_argument("--models_dir", nargs='?', type=str,
                     default="models/")
 parser.add_argument("--split_size", nargs='?', type=int, default=50)
+parser.add_argument("--token_size", nargs='?', type=int, default=50)
 parser.add_argument("--model_type", nargs='?', type=str, 
                     default="bert")
 parser.add_argument("--verbose_performance", action='store_true')
@@ -20,6 +21,7 @@ rewriter_path = str(args.rewriter_path)
 schema_path = str(args.schema_path)
 models_dir = str(args.models_dir)
 split_size = int(args.split_size)
+token_size = int(args.token_size)
 model_type = str(args.model_type)
 
 # tflite_list = [path for path in glob.glob(f'{models_dir}/*.tflite', recursive=True)]
@@ -34,7 +36,7 @@ for split_height in [split_size]:
         out_path = f"{subfolder_dir}/{model_name}_splitted_{exec_order}_{split_height}.tflite"
         print(out_path)
         cmd =   f"python {rewriter_path} {tflite_path} --schema_path {schema_path}" \
-                f" --exec_order {exec_order} --split_height {split_height}" \
+                f" --exec_order {exec_order} --split_height {split_height} --token_size {token_size}" \
                 f" --model_type {model_type}" \
                 f" --pad_fusion" \
                 f" --out_path {out_path}"

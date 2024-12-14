@@ -25,7 +25,9 @@ def estimate_add_cycles(model: Graph, opid: int) -> int:
         ifm2_elem_size = 8
         ofm_elem_size = 8
     else:
-        raise "Only support INT8 data type"
+        ifm1_elem_size = 32
+        ifm2_elem_size = 32
+        ofm_elem_size = 32
     
     # ifm's size (bytes)
     ifm1_storge_size = 1
@@ -91,7 +93,9 @@ def estimate_sub_cycles(model: Graph, opid: int) -> int:
         ifm2_elem_size = 8
         ofm_elem_size = 8
     else:
-        raise "Only support INT8 data type"
+        ifm1_elem_size = 32
+        ifm2_elem_size = 32
+        ofm_elem_size = 32
     
     # ifm's size (bytes)
     ifm1_storge_size = 1
@@ -157,7 +161,9 @@ def estimate_mul_cycles(model: Graph, opid: int) -> int:
         ifm2_elem_size = 8
         ofm_elem_size = 8
     else:
-        raise "Only support INT8 data type"
+        ifm1_elem_size = 32
+        ifm2_elem_size = 32
+        ofm_elem_size = 32
     
     # ifm's size (bytes)
     ifm1_storge_size = 1
@@ -220,7 +226,8 @@ def estimate_logistic_cycles(model: Graph, opid: int) -> int:
         ifm_elem_size = 8
         ofm_elem_size = 8
     else:
-        raise "Only support INT8 data type"
+        ifm_elem_size = 32
+        ofm_elem_size = 32
     
     # ifm's size (bytes)
     ifm_storge_size = 1
@@ -281,7 +288,8 @@ def estimate_conv_cycles(model: Graph, opid: int) -> int:
         ifm_elem_size = 8
         ofm_elem_size = 8
     else:
-        raise "IFM only support INT8 data type"
+        ifm_elem_size = 32
+        ofm_elem_size = 32
     
     # ifm's size (bytes)
     ifm_storge_size = 1
@@ -307,7 +315,7 @@ def estimate_conv_cycles(model: Graph, opid: int) -> int:
     if filter.get("type") == "INT8":
         filter_elem_size = 8
     else:
-        raise "Filter only support INT8 data type"
+        filter_elem_size = 32
     # filter's size (bytes)
     filter_storge_size = 1
     for dim in filter_shape:
@@ -393,7 +401,7 @@ def estimate_depthwise_conv_cycles(model: Graph, opid: int) -> int:
     if ifm.get("type") == "INT8":
         ifm_elem_size = 8
     else:
-        raise "IFM only support INT8 data type"
+        ifm_elem_size = 32
     # ifm's size (bytes)
     ifm_storge_size = 1
     if ifm_shape != []:
@@ -407,7 +415,7 @@ def estimate_depthwise_conv_cycles(model: Graph, opid: int) -> int:
     if weight.get("type") == "INT8":
         weight_elem_size = 8
     else:
-        raise "Weights only support INT8 data type"
+        weight_elem_size = 32
     # weight's size (bytes)
     weight_storge_size = weight_shape[0] * weight_shape[1] * weight_shape[2] * weight_shape[3] * (weight_elem_size / 8)
     
@@ -462,7 +470,8 @@ def estimate_mean_cycles(model: Graph, opid: int) -> int:
         ifm_elem_size = 8
         ofm_elem_size = 8
     else:
-        raise "IFM only support INT8 data type"
+        ifm_elem_size = 32
+        ofm_elem_size = 32
     # ifm's size (bytes)
     ifm_storge_size = 1
     if ifm_shape != []:
@@ -528,7 +537,7 @@ def estimate_trconv_cycles(model: Graph, opid: int) -> int:
     if ifm.get("type") == "INT8":
         ifm_elem_size = 8
     else:
-        raise "IFM only support INT8 data type"
+        ifm_elem_size = 32
     # ifm's size (bytes)
     ifm_storge_size = 1
     if ifm_shape != []:
@@ -542,7 +551,7 @@ def estimate_trconv_cycles(model: Graph, opid: int) -> int:
     if filter.get("type") == "INT8":
         filter_elem_size = 8
     else:
-        raise "Filter only support INT8 data type"
+        filter_elem_size = 32
     # filter's size (bytes)
     filter_storge_size = filter_shape[0] * filter_shape[1] * filter_shape[2] * filter_shape[3] * (filter_elem_size / 8)
 
@@ -583,7 +592,8 @@ def estimate_maxpool_cycles(model: Graph, opid: int) -> int:
         ifm_elem_size = 8
         ofm_elem_size = 8
     else:
-        raise "Only support INT8 data type"
+        ifm_elem_size = 32
+        ofm_elem_size = 32
     
     # ifm's size (bytes)
     ifm_storge_size = 1
@@ -664,7 +674,8 @@ def estimate_rsqrt_cycles(model: Graph, opid: int) -> int:
         ifm_elem_size = 8
         ofm_elem_size = 8
     else:
-        raise "IFM only support INT8 data type"
+        ifm_elem_size = 32
+        ofm_elem_size = 32
     
     # ifm's size (bytes)
     ifm_storge_size = 1
@@ -724,7 +735,9 @@ def estimate_squared_difference_cycles(model: Graph, opid: int) -> int:
         ifm2_elem_size = 8
         ofm_elem_size = 8
     else:
-        raise "Only support INT8 data type"
+        ifm1_elem_size = 32
+        ifm2_elem_size = 32
+        ofm_elem_size = 32
     
     # ifm's size (bytes)
     ifm1_storge_size = 1
@@ -789,7 +802,8 @@ def estimate_gelu_cycles(model: Graph, opid: int) -> int:
         ifm_elem_size = 8
         ofm_elem_size = 8
     else:
-        raise "Only support INT8 data type"
+        ifm_elem_size = 32
+        ofm_elem_size = 32
     
     # ifm's size (bytes)
     ifm_storge_size = 1
@@ -851,7 +865,8 @@ def estimate_leaky_relu_cycles(model: Graph, opid: int) -> int:
         ifm_elem_size = 8
         ofm_elem_size = 8
     else:
-        raise "Only support INT8 data type"
+        ifm_elem_size = 32
+        ofm_elem_size = 32
     
     # ifm's size (bytes)
     ifm_storge_size = 1
@@ -909,7 +924,8 @@ def estimate_fully_connected_cycles(model: Graph, opid: int) -> int:
         ifm_elem_size = 8
         ofm_elem_size = 8
     else:
-        raise "Only support INT8 data type"
+        ifm_elem_size = 32
+        ofm_elem_size = 32
     
     # ifm's size (bytes)
     ifm_storge_size = 1
@@ -935,7 +951,7 @@ def estimate_fully_connected_cycles(model: Graph, opid: int) -> int:
     if weight.get("type") == "INT8":
         weight_elem_size = 8
     else:
-        raise "Weight only support INT8 data type"
+        weight_elem_size = 32
     # weight's size (bytes)
     weight_storge_size = weight_shape[0] * weight_shape[1] * (weight_elem_size / 8)
 
@@ -993,7 +1009,8 @@ def estimate_softmax_cycles(model: Graph, opid: int) -> int:
         ifm_elem_size = 8
         ofm_elem_size = 8
     else:
-        raise "Only support INT8 data type"
+        ifm_elem_size = 32
+        ofm_elem_size = 32
     
     # ifm's size (bytes)
     ifm_storge_size = 1
@@ -1056,7 +1073,9 @@ def estimate_batch_matmul_cycles(model: Graph, opid: int) -> int:
         ifm2_elem_size = 8
         ofm_elem_size = 8
     else:
-        raise "Only support INT8 data type"
+        ifm1_elem_size = 32
+        ifm2_elem_size = 32
+        ofm_elem_size = 32
     
     # ifm's size (bytes)
     ifm1_storge_size = 1
@@ -1133,7 +1152,8 @@ def estimate_reduce_max_cycles(model: Graph, opid: int) -> int:
         ifm_elem_size = 8
         ofm_elem_size = 8
     else:
-        raise "Only support INT8 data type"
+        ifm_elem_size = 32
+        ofm_elem_size = 32
     
     axis_buffer = model.buffers[model.tensors[info['inputs'][1]]['buffer']]
     axis = axis_buffer['data'][0]
@@ -1197,12 +1217,10 @@ def estimate_quantize_cycles(model: Graph, opid: int) -> int:
     if ifm.get("type") == "INT8":
         ifm_elem_size = 8
     else:
-        # We only support INT8 and float32 data type
         ifm_elem_size = 32
     if ofm.get("type") == "INT8":
         ofm_elem_size = 8
     else:
-        # We only support INT8 and float32 data type
         ofm_elem_size = 32
     
     # ifm's size (bytes)
@@ -1252,7 +1270,7 @@ def estimate_dequantize_cycles(model: Graph, opid: int) -> int:
     outputs = info.get("outputs")
 
     if len(inputs) != 1 or len(outputs) != 1:
-        raise "Quantize operation should have 1 input and 1 output"
+        raise "Dequantize operation should have 1 input and 1 output"
     ifm = tensors[inputs[0]]
     ofm = tensors[outputs[0]]
     ifm_shape = ifm.get("shape")
@@ -1260,12 +1278,10 @@ def estimate_dequantize_cycles(model: Graph, opid: int) -> int:
     if ifm.get("type") == "INT8":
         ifm_elem_size = 8
     else:
-        # We only support INT8 and float32 data type
         ifm_elem_size = 32
     if ofm.get("type") == "INT8":
         ofm_elem_size = 8
     else:
-        # We only support INT8 and float32 data type
         ofm_elem_size = 32
     
     # ifm's size (bytes)

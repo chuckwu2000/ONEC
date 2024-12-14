@@ -17,6 +17,7 @@ parser.add_argument("--schema_path", nargs='?', default="utils/schema.fbs")
 parser.add_argument("--out_path")
 parser.add_argument("--exec_order", nargs='?', default="DF")
 parser.add_argument("--split_height", nargs='?', type=int, default=2)
+parser.add_argument("--token_size", nargs='?', type=int, default=50)
 parser.add_argument("--model_type", nargs='?', type=str, default="bert")
 parser.add_argument("--pad_fusion", action='store_true')
 parser.add_argument("--verbose_performance", action='store_true')
@@ -96,7 +97,7 @@ tensor_id_mapping = [ x for x in range(len(tensors))]
 
 ori_graph = Graph(operators, tensors, buffers, new_opcodes, subgraphs[0]['inputs'], subgraphs[0]['outputs'], args.exec_order)
 
-splitter = Splitter(ori_graph, args.split_height, model_type)
+splitter = Splitter(ori_graph, args.split_height, model_type, args.token_size)
 if args.pad_fusion and model_type == 1:
     splitter.PaddingFusion()
 
