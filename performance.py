@@ -785,6 +785,131 @@ def estimate_squared_difference_cycles(model: Graph, opid: int) -> int:
     total_cycles = dma_transfer_cycles + op_cycles
     return dma_transfer_cycles, op_cycles, total_cycles
 
+# Estimate the number of cycles for a given pow operation
+def estimate_pow_cycles(model: Graph, opid: int) -> int:
+    tensors = model.tensors
+    info = model.ops[opid].info
+    inputs = info.get("inputs")
+    outputs = info.get("outputs")
+
+    if len(inputs) != 2 or len(outputs) != 1:
+        raise "Pow operation should have 2 inputs and 1 output"
+    ifm = tensors[inputs[0]]
+    # Extract the exponent from the second input tensor, tflite store the data in little-endian format
+    exp_tensor = tensors[inputs[1]]
+    exp_buffer_data = bytes(model.buffers[exp_tensor['buffer']]['data'])
+    import struct
+    # Parse the exp_buffer_data to get the exponent, '<': little-endian, 'f': float
+    Exponent = int(struct.unpack('<f', exp_buffer_data)[0])
+    
+    ofm = tensors[outputs[0]]
+    ifm_shape = ifm.get("shape")
+    ofm_shape = ofm.get("shape")
+    if ifm.get("type") == "INT8" and ofm.get("type") == "INT8":
+        ifm_elem_size = 8
+        ofm_elem_size = 8
+    else:
+        ifm_elem_size = 32
+        ofm_elem_size = 32
+    
+    # ifm's size (bytes)
+    ifm_storge_size = 1
+    if ifm_shape != []:
+        for dim in ifm_shape:
+            ifm_storge_size *= dim
+        ifm_storge_size *= (ifm_elem_size / 8)
+    
+    # ofm's size (bytes)
+    ofm_storge_size = 1
+    for dim in ofm_shape:
+        ofm_storge_size *= dim
+    ofm_storge_size *= (ofm_elem_size / 8)
+
+    # DMA transfer cycles + IFM, OFM read/write cycles
+    have_data_layout_parent = False
+    for parent_op in model.ops[opid].parents:
+        opcode_index = model.ops[parent_op].info.get("opcode_index")
+        opcode_type = model.opcodes[opcode_index].get("builtin_code")
+        if opcode_type in data_layout_op:
+            have_data_layout_parent = True
+            break
+    if model.pipeline_schedule and not have_data_layout_parent:
+        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, 1)
+        dma_transfer_cycles = (ofm_storge_size) * one_element_transfer_cycles
+    else:
+        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size + ofm_storge_size)
+        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, 1)
+        dma_transfer_cycles += (ofm_storge_size) * one_element_transfer_cycles
+    
+    # Computations cycles
+    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["POW"] * Exponent
+    ofm_elems = 1
+    for dim in ofm_shape:
+        ofm_elems *= dim
+    op_cycles = ofm_elems * cycle_per_elem
+
+    total_cycles = dma_transfer_cycles + op_cycles
+    return dma_transfer_cycles, op_cycles, total_cycles
+
+# Estimate the number of cycles for a given tanh operation
+def estimate_tanh_cycles(model: Graph, opid: int) -> int:
+    tensors = model.tensors
+    info = model.ops[opid].info
+    inputs = info.get("inputs")
+    outputs = info.get("outputs")
+
+    if len(inputs) != 1 or len(outputs) != 1:
+        raise "Tanh operation should have 1 inputs and 1 output"
+    ifm = tensors[inputs[0]]
+    ofm = tensors[outputs[0]]
+    ifm_shape = ifm.get("shape")
+    ofm_shape = ofm.get("shape")
+    if ifm.get("type") == "INT8" and ofm.get("type") == "INT8":
+        ifm_elem_size = 8
+        ofm_elem_size = 8
+    else:
+        ifm_elem_size = 32
+        ofm_elem_size = 32
+
+    # ifm's size (bytes)
+    ifm_storge_size = 1
+    if ifm_shape != []:
+        for dim in ifm_shape:
+            ifm_storge_size *= dim
+        ifm_storge_size *= (ifm_elem_size / 8)
+
+    # ofm's size (bytes)
+    ofm_storge_size = 1
+    for dim in ofm_shape:
+        ofm_storge_size *= dim
+    ofm_storge_size *= (ofm_elem_size / 8)
+
+    # DMA transfer cycles + IFM, OFM read/write cycles
+    have_data_layout_parent = False
+    for parent_op in model.ops[opid].parents:
+        opcode_index = model.ops[parent_op].info.get("opcode_index")
+        opcode_type = model.opcodes[opcode_index].get("builtin_code")
+        if opcode_type in data_layout_op:
+            have_data_layout_parent = True
+            break
+    if model.pipeline_schedule and not have_data_layout_parent:
+        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, 1)
+        dma_transfer_cycles = (ofm_storge_size) * one_element_transfer_cycles
+    else:
+        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size + ofm_storge_size)
+        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, 1)
+        dma_transfer_cycles += (ofm_storge_size) * one_element_transfer_cycles
+
+    # Computations cycles
+    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["TANH"]
+    ofm_elems = 1
+    for dim in ofm_shape:
+        ofm_elems *= dim
+    op_cycles = ofm_elems * cycle_per_elem
+
+    total_cycles = dma_transfer_cycles + op_cycles
+    return dma_transfer_cycles, op_cycles, total_cycles
+
 # Estimate the number of cycles for a given gelu operation
 def estimate_gelu_cycles(model: Graph, opid: int) -> int:
     tensors = model.tensors
@@ -1400,6 +1525,16 @@ def estimate_op_cycles(model: Graph, opid: int) -> int:
         op.estimated_total_cycles = total_cycles
     elif opcode_type == "SQUARED_DIFFERENCE":
         dma_cycles, op_cycles, total_cycles = estimate_squared_difference_cycles(model, opid)
+        op.estimated_DMA_cycles = dma_cycles
+        op.estimated_op_cycles = op_cycles
+        op.estimated_total_cycles = total_cycles
+    elif opcode_type == "POW":
+        dma_cycles, op_cycles, total_cycles = estimate_pow_cycles(model, opid)
+        op.estimated_DMA_cycles = dma_cycles
+        op.estimated_op_cycles = op_cycles
+        op.estimated_total_cycles = total_cycles
+    elif opcode_type == "TANH":
+        dma_cycles, op_cycles, total_cycles = estimate_tanh_cycles(model, opid)
         op.estimated_DMA_cycles = dma_cycles
         op.estimated_op_cycles = op_cycles
         op.estimated_total_cycles = total_cycles

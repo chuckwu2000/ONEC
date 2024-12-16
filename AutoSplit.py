@@ -32,12 +32,14 @@ class Splitter:
             # 2: CONCATENATION
             # 3: CONV_2D
             # 4: DEPTHWISE_CONV_2D
+            # 6: DEQUANTIZE
             # 9: FULLY_CONNECTED
             # 14: LOGISTIC
             # 17: MAX_POOL_2D
             # 18: MUL
             # 22: RESHAPE
             # 25: SOFTMAX
+            # 28: TANH
             # 34: PAD
             # 39: TRANSPOSE
             # 40: MEAN
@@ -45,6 +47,7 @@ class Splitter:
             # 49: SPLIT
             # 67: TRANSPOSE_CONV
             # 76: RSQRT
+            # 78: POW
             # 82: REDUCE_MAX
             # 83: PACK
             # 97: RESIZE_NEAREST_NEIGHBOR
@@ -54,7 +57,7 @@ class Splitter:
             # 114: QUANTIZE
             # 126: BATCH_MATMUL
             # 127: GELU
-            split_candidate = [0, 2, 3, 4, 9, 14, 17, 18, 22, 25, 34, 39, 40, 41, 49, 67, 76, 82, 83, 97, 98, 99, 102, 114, 126, 127]
+            split_candidate = [0, 2, 3, 4, 6, 9, 14, 17, 18, 22, 25, 28, 34, 39, 40, 41, 49, 67, 76, 78, 82, 83, 97, 98, 99, 102, 114, 126, 127]
             if opcode.get("deprecated_builtin_code", 0) in split_candidate:
                 self.splittable_opcode_idxes[opcode.get("deprecated_builtin_code", 0)] = i
 
@@ -67,33 +70,8 @@ class Splitter:
         self.nodes = [SplitterNode(n) for n in self.ori_graph.ops]
         self.splittable_opcode_idxes = {}
         for i, opcode in enumerate(self.opcodes):
-            # 0: ADD
-            # 2: CONCATENATION
-            # 3: CONV_2D
-            # 4: DEPTHWISE_CONV_2D
-            # 9: FULLY_CONNECTED
-            # 14: LOGISTIC
-            # 17: MAX_POOL_2D
-            # 18: MUL
-            # 22: RESHAPE
-            # 25: SOFTMAX
-            # 34: PAD
-            # 39: TRANSPOSE
-            # 40: MEAN
-            # 41: SUB
-            # 49: SPLIT
-            # 67: TRANSPOSE_CONV
-            # 76: RSQRT
-            # 82: REDUCE_MAX
-            # 83: PACK
-            # 97: RESIZE_NEAREST_NEIGHBOR
-            # 98: LEAKY_RELU
-            # 99: SQUARED_DIFFERENCE
-            # 102: SPLIT_V
-            # 114: QUANTIZE
-            # 126: BATCH_MATMUL
-            # 127: GELU
-            split_candidate = [0, 2, 3, 4, 9, 14, 17, 18, 22, 25, 34, 39, 40, 41, 49, 67, 76, 82, 83, 97, 98, 99, 102, 114, 126, 127]
+            # See the corresponding number in the __init__ function
+            split_candidate = [0, 2, 3, 4, 6, 9, 14, 17, 18, 22, 25, 28, 34, 39, 40, 41, 49, 67, 76, 78, 82, 83, 97, 98, 99, 102, 114, 126, 127]
             if opcode.get("deprecated_builtin_code", 0) in split_candidate:
                 self.splittable_opcode_idxes[opcode.get("deprecated_builtin_code", 0)] = i
 
@@ -448,6 +426,8 @@ class Splitter:
             self.split_conv(opid, input_split, output_split)
         elif opcode_idx == self.splittable_opcode_idxes.get(4 , -1):
             self.split_dwconv(opid, input_split, output_split)
+        elif opcode_idx == self.splittable_opcode_idxes.get(6, -1):
+            self.split_dequantize(opid, output_split)
         elif opcode_idx == self.splittable_opcode_idxes.get(9, -1):
             self.split_fullyconnected(opid, output_split)
         elif opcode_idx == self.splittable_opcode_idxes.get(14, -1):
@@ -460,6 +440,8 @@ class Splitter:
             self.split_reshape(opid, output_split)
         elif opcode_idx == self.splittable_opcode_idxes.get(25, -1):
             self.split_softmax(opid, output_split)
+        elif opcode_idx == self.splittable_opcode_idxes.get(28, -1):
+            self.split_tanh(opid, output_split)
         elif opcode_idx == self.splittable_opcode_idxes.get(34, -1):
             self.split_pad(opid, output_split)
         elif opcode_idx == self.splittable_opcode_idxes.get(39, -1):
@@ -474,6 +456,8 @@ class Splitter:
             self.split_trconv(opid, input_split, output_split)
         elif opcode_idx == self.splittable_opcode_idxes.get(76, -1):
             self.split_rsqrt(opid, output_split)
+        elif opcode_idx == self.splittable_opcode_idxes.get(78, -1):
+            self.split_pow(opid, output_split)
         elif opcode_idx == self.splittable_opcode_idxes.get(82, -1):
             self.split_reduce_max(opid, output_split)
         elif opcode_idx == self.splittable_opcode_idxes.get(83, -1):
@@ -1641,7 +1625,104 @@ class Splitter:
                 self.nodes[opid].split_id.append(split_op_id)
                 split_op_id+=1
 
+    def split_pow(self, opid, output_split):
+        info = self.nodes[opid].node.info
+        output_shape = self.tensors[info['outputs'][0]]['shape']
+        if self.model_type == ModelType.BERT:
+            split_dim_value = self.token_size
+            for dim, dim_value in enumerate(output_shape):
+                if dim_value == split_dim_value:
+                    self.split_tensor_by_n(info['outputs'][0], output_split, dim)
+                    break
+        else:
+            split_dim = self.nodes[opid].node.split_dim
+            self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
+            for child in self.nodes[opid].node.children:
+                self.nodes[child].node.split_dim = self.nodes[opid].node.split_dim
+
+        inputs = info['inputs']
+        outputs = info['outputs']
+
+        if len(inputs) != 2:
+            raise "wrong input number"
+        elif len(outputs) != 1:
+            raise "wrong output number"
+        else:
+            split_op_id = len(self.nodes)
+            for a, b in zip(self.split_tensor_table[inputs[0]],
+                            self.split_tensor_table[outputs[0]]):
+                new_op_info = copy.deepcopy(info)
+                new_op_info['inputs'][0] = a
+                new_op_info['outputs'] = [b]
+                op = Node(new_op_info,split_op_id)
+                self.nodes.append(SplitterNode(op))
+                self.new_operators.append(new_op_info)
+                self.nodes[opid].split_id.append(split_op_id)
+                split_op_id += 1
+
+    def split_tanh(self, opid, output_split):
+        info = self.nodes[opid].node.info
+        output_shape = self.tensors[info['outputs'][0]]['shape']
+        if self.model_type == ModelType.BERT:
+            split_dim_value = self.token_size
+            for dim, dim_value in enumerate(output_shape):
+                if dim_value == split_dim_value:
+                    self.split_tensor_by_n(info['outputs'][0], output_split, dim)
+                    break
+        else:
+            split_dim = self.nodes[opid].node.split_dim
+            self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
+            for child in self.nodes[opid].node.children:
+                self.nodes[child].node.split_dim = self.nodes[opid].node.split_dim
+
+        inputs = info['inputs']
+        outputs = info['outputs']
+
+        if len(inputs) != 1:
+            raise "wrong input number"
+        elif len(outputs) != 1:
+            raise "wrong output number"
+        else:
+            split_op_id = len(self.nodes)
+            for a, b in zip(self.split_tensor_table[inputs[0]],
+                            self.split_tensor_table[outputs[0]]):
+                new_op_info = copy.deepcopy(info)
+                new_op_info['inputs'] = [a]
+                new_op_info['outputs'] = [b]
+                op = Node(new_op_info,split_op_id)
+                self.nodes.append(SplitterNode(op))
+                self.new_operators.append(new_op_info)
+                self.nodes[opid].split_id.append(split_op_id)
+                split_op_id += 1
+
     def split_quantize(self, opid, output_split):
+        info = self.nodes[opid].node.info
+        split_dim = self.nodes[opid].node.split_dim
+        self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
+        for child in self.nodes[opid].node.children:
+            self.nodes[child].node.split_dim = self.nodes[opid].node.split_dim
+
+        inputs = info['inputs']
+        outputs = info['outputs']
+
+        if len(inputs) != 1:
+            raise "wrong input number"
+        elif len(outputs) != 1:
+            raise "wrong output number"
+        else:
+            split_op_id = len(self.nodes)
+            for a,b in zip(self.split_tensor_table[inputs[0]],
+                            self.split_tensor_table[outputs[0]]):
+                new_op_info = copy.deepcopy(info)
+                new_op_info['inputs'] = [a]
+                new_op_info['outputs'] = [b]
+                op = Node(new_op_info,split_op_id)
+                self.nodes.append(SplitterNode(op))
+                self.new_operators.append(new_op_info)
+                self.nodes[opid].split_id.append(split_op_id)
+                split_op_id+=1
+
+    def split_dequantize(self, opid, output_split):
         info = self.nodes[opid].node.info
         split_dim = self.nodes[opid].node.split_dim
         self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
@@ -1890,6 +1971,11 @@ class Splitter:
         # Second, create a split node
         inputs = immediate_tensor_id
         split_dim = self.nodes[start_opid].node.split_dim
+        # If the op following the split is a PACK, then the split_dim should be decreased by 1
+        opcode_index = info.get("opcode_index")
+        opcode_type = self.opcodes[opcode_index].get("builtin_code")
+        if opcode_type == 'PACK':
+            split_dim -= 1
         self.split_tensor_by_n(inputs, output_split, split_dim)
         for child in self.nodes[start_opid].node.children:
             self.nodes[child].node.split_dim = split_dim

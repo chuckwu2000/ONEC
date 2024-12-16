@@ -31,7 +31,7 @@ model_name = os.path.splitext(os.path.basename(tflite_path))[0]
 folder_root = os.path.dirname(tflite_path).replace('tflite/', 'ts_model/')
 for split_height in [split_size]:
     for exec_order in ['DF']:
-        subfolder_dir = os.path.join(folder_root, f"{exec_order}_{split_height}")
+        subfolder_dir = os.path.join(folder_root, f"{model_name}_{exec_order}_{split_height}")
         os.makedirs(subfolder_dir, exist_ok=True)
         out_path = f"{subfolder_dir}/{model_name}_splitted_{exec_order}_{split_height}.tflite"
         print(out_path)

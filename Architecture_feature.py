@@ -23,6 +23,8 @@ class ArchitectureFeatures:
         "MAC": 1 / MAC_PE,
         "MUL": 3,
         "ADD/SUB": 3,
+        "POW": 3,
+        "TANH": 3,
         "LOGISTIC": 3,
         "LEAKY_RELU": 3,
         "SOFTMAX": 10,
