@@ -842,7 +842,7 @@ def estimate_pow_cycles(model: Graph, opid: int) -> int:
         dma_transfer_cycles += (ofm_storge_size) * one_element_transfer_cycles
     
     # Computations cycles
-    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["POW"] * Exponent
+    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["MUL"] * (Exponent - 1)
     ofm_elems = 1
     for dim in ofm_shape:
         ofm_elems *= dim
@@ -1039,8 +1039,8 @@ def estimate_fully_connected_cycles(model: Graph, opid: int) -> int:
     inputs = info.get("inputs")
     outputs = info.get("outputs")
 
-    if len(inputs) != 3 or len(outputs) != 1:
-        raise "FullyConnected operation should have 3 inputs and 1 output"
+    if len(outputs) != 1:
+        raise "FullyConnected operation should have at least 1 output"
     ifm = tensors[inputs[0]]
     ofm = tensors[outputs[0]]
     ifm_shape = ifm.get("shape")
@@ -1651,8 +1651,7 @@ def estimate_model(model: Graph, pipeline: bool) -> int:
                 total_dma_cycles -= op1.estimated_DMA_cycles
                 total_op_cycles -= op1.estimated_op_cycles
                 total_cycles -= op1.estimated_total_cycles
-    print(f"mac_idle_cycles: {mac_idle_cycles}, elem_wise_idle_cycles: {elem_wise_idle_cycles}, total_cycles: {total_op_cycles}")
-    return total_dma_cycles, total_op_cycles, total_cycles, (mac_idle_cycles / total_op_cycles, elem_wise_idle_cycles / total_op_cycles)
+    return total_dma_cycles, total_op_cycles, total_cycles, (mac_idle_cycles, elem_wise_idle_cycles)
 
 def print_performance(model: Graph):
     for order, opid in enumerate(model.ordered_opid):

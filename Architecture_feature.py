@@ -21,14 +21,14 @@ class ArchitectureFeatures:
     # Now assune we have 64 MACs
     output_cycles_per_elem = {
         "MAC": 1 / MAC_PE,
-        "MUL": 3,
-        "ADD/SUB": 3,
-        "POW": 3,
-        "TANH": 3,
+        "MUL": 1,
+        "ADD/SUB": 1,
+        "POW": 1,
+        "TANH": 1,
         "LOGISTIC": 3,
         "LEAKY_RELU": 3,
-        "SOFTMAX": 10,
-        "RSQRT": 9,
+        "SOFTMAX": 4,
+        "RSQRT": 4,
         "REDUCE_MAX": 1,
         "DE/QUANTIZE": 4,
         "LUT": 1

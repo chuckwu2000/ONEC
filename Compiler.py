@@ -115,17 +115,24 @@ set_active_engine(new_graph)
 
 split_dma_cycles, split_op_cycles, split_total_cycles, engine_idle_cycles = estimate_model(new_graph, pipeline = False)
 if args.verbose_performance:
-    print_performance(new_graph)
     print(f"Before pipeline schedule: dma cycles = {split_dma_cycles :.1f}, op cycles = {split_op_cycles :.1f}, total cycles = {split_total_cycles :.1f}")
-    print(f"mac engine idle cycles = {engine_idle_cycles[0] :.2f}, elemwise engine idle cycles = {engine_idle_cycles[1] :.2f}")
+    print(f"mac_idle_cycles: {engine_idle_cycles[0]}, elem_wise_idle_cycles: {engine_idle_cycles[1]}")
 pipeline_new_graph = pipeline_schedule(new_graph)
 if args.verbose_performance:
     pipeline_dma_cycles, pipeline_op_cycles, pipeline_total_cycles, engine_idle_cycles = estimate_model(pipeline_new_graph, pipeline = True)
+    print_performance(pipeline_new_graph)
     print(f"cascade ops = {pipeline_new_graph.cascade_matched_ops}")
     print(f"match ops = {pipeline_new_graph.matched_ops}")
+    total_fusion_ops = 0
+    total_match_ops = 0
+    for cascade_ops in pipeline_new_graph.cascade_matched_ops:
+        total_fusion_ops += len(cascade_ops)
+    for match_ops in pipeline_new_graph.matched_ops:
+        total_match_ops += len(match_ops)
+    print(f"total fusion ops = {total_fusion_ops}, total match ops = {total_match_ops}, total ops = {len(pipeline_new_graph.operators)}")
     print(f"After pipeline schedule: dma cycles = {pipeline_dma_cycles :.1f}, op cycles = {pipeline_op_cycles :.1f}, total cycles = {pipeline_total_cycles :.1f}")
+    print(f"mac_idle_cycles: {engine_idle_cycles[0]}, elem_wise_idle_cycles: {engine_idle_cycles[1]}")
     print(f"speedup = {((split_total_cycles/pipeline_total_cycles) - 1) * 100 :.2f}%")
-    print(f"mac engine idle cycles = {engine_idle_cycles[0] :.2f}, elemwise engine idle cycles = {engine_idle_cycles[1] :.2f}")
 new_buffers, new_tensors, new_inputs, new_outputs, new_operators, new_opcodes = pipeline_new_graph.export()
 
 new_model['buffers'] = new_buffers
