@@ -269,6 +269,7 @@ def estimate_logistic_cycles(model: Graph, opid: int) -> int:
     total_cycles = dma_transfer_cycles + op_cycles
     return dma_transfer_cycles, op_cycles, total_cycles
 
+# Refer to Planaria's implementation
 # Estimate the number of cycles for a given convolution operation
 def estimate_conv_cycles(model: Graph, opid: int) -> int:
     tensors = model.tensors
@@ -291,20 +292,20 @@ def estimate_conv_cycles(model: Graph, opid: int) -> int:
         ifm_elem_size = 32
         ofm_elem_size = 32
     
-    # ifm's size (bytes)
+    # Ifm's size (bytes)
     ifm_storge_size = 1
     if ifm_shape != []:
         for dim in ifm_shape:
             ifm_storge_size *= dim
         ifm_storge_size *= (ifm_elem_size / 8)
 
-    # ofm's size (bytes)
+    # Ofm's size (bytes)
     ofm_storge_size = 1
     for dim in ofm_shape:
         ofm_storge_size *= dim
     ofm_storge_size *= (ofm_elem_size / 8)
 
-    # ofm elements
+    # Ofm elements
     ofm_elems = 1
     for dim in ofm_shape:
         ofm_elems *= dim
@@ -316,7 +317,7 @@ def estimate_conv_cycles(model: Graph, opid: int) -> int:
         filter_elem_size = 8
     else:
         filter_elem_size = 32
-    # filter's size (bytes)
+    # Filter's size (bytes)
     filter_storge_size = 1
     for dim in filter_shape:
         filter_storge_size *= dim
@@ -329,8 +330,16 @@ def estimate_conv_cycles(model: Graph, opid: int) -> int:
         bias_elem_size = 32
     else:
         raise "Bias only support INT32 data type"
-    # bias's size (bytes)
+    # Bias's size (bytes)
     bias_storge_size = bias_shape[0] * (bias_elem_size / 8)
+
+    # Configuration
+    oc = filter_shape[0]
+    kh = filter_shape[1]
+    kw = filter_shape[2]
+    ic = filter_shape[3]
+    oh = ofm_shape[1]
+    ow = ofm_shape[2]
 
     # DMA transfer cycles
     have_data_layout_parent = False
@@ -342,37 +351,19 @@ def estimate_conv_cycles(model: Graph, opid: int) -> int:
             break
     if model.pipeline_schedule and not have_data_layout_parent:
         # Filter and bias are fetched from DRAM
-        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, filter_storge_size + bias_storge_size)
-        dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, bias_storge_size + ofm_storge_size)
-        # Assume input tensors can be accessed in parallel, one output element needs inner_product_size MACs
-        sub_mac_size = math.floor(4 / filter_shape[1])
-        # There may have multiple sub-mac engines (here, take 4x4 mac as smallest unit)
-        output_per_MAC = ArchitectureFeatures.MAC_PE / 16 * (sub_mac_size * sub_mac_size)
-        inner_product_size = filter_shape[1] * filter_shape[2]
-        ifm_transfer_cycles_per_MAC = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, inner_product_size * output_per_MAC)
-        # Our MAC engine have 64 PEs
-        dma_transfer_cycles +=  math.ceil(ofm_elems / output_per_MAC) * ifm_transfer_cycles_per_MAC
+        dram_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, filter_storge_size + bias_storge_size)
     else:
-        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size + filter_storge_size + bias_storge_size + ofm_storge_size)
-        dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, bias_storge_size + ofm_storge_size)
-        # Assume input tensors can be accessed in parallel, one output element needs inner_product_size MACs
-        sub_mac_size = math.floor(4 / filter_shape[1])
-        # There may have multiple sub-mac engines (here, take 4x4 mac as smallest unit)
-        output_per_MAC = ArchitectureFeatures.MAC_PE / 16 * (sub_mac_size * sub_mac_size)
-        inner_product_size = filter_shape[1] * filter_shape[2]
-        ifm_transfer_cycles_per_MAC = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, inner_product_size * output_per_MAC)
-        # Our MAC engine have 64 PEs
-        dma_transfer_cycles +=  math.ceil(ofm_elems / output_per_MAC) * ifm_transfer_cycles_per_MAC
+        dram_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size + filter_storge_size + bias_storge_size + ofm_storge_size * 2)
 
     # Computations cycles
-    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["MAC"]
-    # Total produce height * width * channel elements, each element need ifm's channel * filtersize * filtersize MACs => filter_shape * ofm_height * ofm_width
-    MACs = filter_shape[0] * filter_shape[1] * filter_shape[2] * filter_shape[3] * ofm_shape[1] * ofm_shape[2]
-    op_cycles = MACs * cycle_per_elem
+    op_cycles = math.ceil(oc / ArchitectureFeatures.MAC_width) * oh * ow * math.ceil(ic / ArchitectureFeatures.MAC_width) * kh * kw
+    op_cycles *= ArchitectureFeatures.output_cycles_per_elem["MAC"]
 
-    # # Requantize cycles
-    # cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"]
-    # op_cycles += ofm_elems * cycle_per_elem
+    dma_transfer_cycles = dram_transfer_cycles
+
+    # Requantize cycles
+    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"]
+    op_cycles += ofm_elems * cycle_per_elem
 
     total_cycles = dma_transfer_cycles + op_cycles
     return (dma_transfer_cycles, op_cycles, total_cycles)
@@ -573,6 +564,7 @@ def estimate_trconv_cycles(model: Graph, opid: int) -> int:
     total_cycles = dma_transfer_cycles + op_cycles
     return (dma_transfer_cycles, op_cycles, total_cycles)
 
+# Refer to Planaria's implementation
 # Estimate the number of cycles for a given maxpool operation
 def estimate_maxpool_cycles(model: Graph, opid: int) -> int:
     tensors = model.tensors
@@ -595,26 +587,34 @@ def estimate_maxpool_cycles(model: Graph, opid: int) -> int:
         ifm_elem_size = 32
         ofm_elem_size = 32
     
-    # ifm's size (bytes)
+    # Ifm's size (bytes)
     ifm_storge_size = 1
     if ifm_shape != []:
         for dim in ifm_shape:
             ifm_storge_size *= dim
         ifm_storge_size *= (ifm_elem_size / 8)
 
-    # ofm's size (bytes)
+    # Ofm's size (bytes)
     ofm_storge_size = 1
     for dim in ofm_shape:
         ofm_storge_size *= dim
     ofm_storge_size *= (ofm_elem_size / 8)
 
-    # ofm elements
+    # Ofm elements
     ofm_elems = 1
     for dim in ofm_shape:
         ofm_elems *= dim
 
-    # kernel shape
+    # Kernel shape
     ker_shape = (info['builtin_options']['filter_height'], info['builtin_options']['filter_width'])
+
+    # Configuration
+    oc = ofm_shape[3]
+    kh = ker_shape[0]
+    kw = ker_shape[1]
+    ic = ofm_shape[3]
+    oh = ofm_shape[1]
+    ow = ofm_shape[2]
 
     # DMA transfer cycles + IFM, OFM read/write cycles
     have_data_layout_parent = False
@@ -625,32 +625,16 @@ def estimate_maxpool_cycles(model: Graph, opid: int) -> int:
             have_data_layout_parent = True
             break
     if model.pipeline_schedule and not have_data_layout_parent:
-        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_storge_size)
-        # Assume input tensors can be accessed in parallel, one output element needs inner_product_size MACs
-        sub_mac_size = math.floor(8 / ker_shape[0])
-        # There may have multiple sub-mac engines (here, take 4x4 mac as smallest unit)
-        output_per_MAC = ArchitectureFeatures.MAC_PE / 64 * (sub_mac_size * sub_mac_size)
-        inner_product_size = ker_shape[0] * ker_shape[1]
-        ifm_transfer_cycles_per_MAC = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, inner_product_size * output_per_MAC)
-        # Our MAC engine have 64 PEs
-        dma_transfer_cycles +=  math.ceil(ofm_elems / output_per_MAC) * ifm_transfer_cycles_per_MAC
+        # Filter and bias are fetched from DRAM
+        dram_transfer_cycles = 0
     else:
-        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size + ofm_storge_size)
-        dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_storge_size)
-        # Assume input tensors can be accessed in parallel, one output element needs inner_product_size MACs
-        sub_mac_size = math.floor(8 / ker_shape[0])
-        # There may have multiple sub-mac engines (here, take 4x4 mac as smallest unit)
-        output_per_MAC = ArchitectureFeatures.MAC_PE / 64 * (sub_mac_size * sub_mac_size)
-        inner_product_size = ker_shape[0] * ker_shape[1]
-        ifm_transfer_cycles_per_MAC = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, inner_product_size * output_per_MAC)
-        # Our MAC engine have 64 PEs
-        dma_transfer_cycles +=  math.ceil(ofm_elems / output_per_MAC) * ifm_transfer_cycles_per_MAC
+        dram_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size + ofm_storge_size)
 
     # Computations cycles
-    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["MAC"]
-    # Total produce height * width * channel elements, each element need ifm's filtersize * filtersize MACs
-    MACs = ker_shape[0] * ker_shape[1] * ofm_shape[0] * ofm_shape[1] * ofm_shape[2] * ofm_shape[3]
-    op_cycles = MACs * cycle_per_elem
+    op_cycles = math.ceil(oc / ArchitectureFeatures.MAC_width) * oh * ow * math.ceil(ic / ArchitectureFeatures.MAC_width) * kh * kw
+    op_cycles *= ArchitectureFeatures.output_cycles_per_elem["MAC"]
+
+    dma_transfer_cycles = dram_transfer_cycles
 
     total_cycles = dma_transfer_cycles + op_cycles
     return (dma_transfer_cycles, op_cycles, total_cycles)
@@ -1039,8 +1023,10 @@ def estimate_fully_connected_cycles(model: Graph, opid: int) -> int:
     inputs = info.get("inputs")
     outputs = info.get("outputs")
 
+    # Not constraint the number of inputs, since in our model, we will perform fake concat operation to merge the input tensors
     if len(outputs) != 1:
         raise "FullyConnected operation should have at least 1 output"
+    
     ifm = tensors[inputs[0]]
     ofm = tensors[outputs[0]]
     ifm_shape = ifm.get("shape")
@@ -1052,36 +1038,44 @@ def estimate_fully_connected_cycles(model: Graph, opid: int) -> int:
         ifm_elem_size = 32
         ofm_elem_size = 32
     
-    # ifm's size (bytes)
+    # Ifm's size (bytes)
     ifm_storge_size = 1
     if ifm_shape != []:
         for dim in ifm_shape:
             ifm_storge_size *= dim
         ifm_storge_size *= (ifm_elem_size / 8)
 
-    # ofm's size (bytes)
+    # Ofm's size (bytes)
     ofm_storge_size = 1
     for dim in ofm_shape:
         ofm_storge_size *= dim
     ofm_storge_size *= (ofm_elem_size / 8)
 
-    # ofm elements
+    # Ofm elements
     ofm_elems = 1
     for dim in ofm_shape:
         ofm_elems *= dim
 
-    # weight tensor
+    # Weight tensor
     weight = tensors[inputs[1]]
     weight_shape = weight.get("shape")
     if weight.get("type") == "INT8":
         weight_elem_size = 8
     else:
         weight_elem_size = 32
-    # weight's size (bytes)
+    # Weight's size (bytes)
     weight_storge_size = weight_shape[0] * weight_shape[1] * (weight_elem_size / 8)
 
-    # bias tensor
+    # Bias tensor
     # Assume bias tensor is None
+
+    # Configuration
+    oc = weight_shape[0]
+    kh = 1
+    kw = 1
+    ic = weight_shape[1]
+    oh = ofm_shape[-2]
+    ow = ofm_shape[-1]
 
     # DMA transfer cycles + IFM, OFM read/write cycles
     have_data_layout_parent = False
@@ -1092,30 +1086,22 @@ def estimate_fully_connected_cycles(model: Graph, opid: int) -> int:
             have_data_layout_parent = True
             break
     if model.pipeline_schedule and not have_data_layout_parent:
-        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, weight_storge_size)
-        dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_storge_size)
-        # Assume input tensors can be accessed in parallel, one output element needs inner_product_size MACs
-        inner_product_size = ifm_shape[-1]
-        one_ifm_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, inner_product_size)
-        # Our MAC engine have 64 PEs
-        dma_transfer_cycles += one_ifm_transfer_cycles * ofm_elems
+        dram_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, weight_storge_size)
     else:
-        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size + weight_storge_size + ofm_storge_size)
-        dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_storge_size)
-        # Assume input tensors can be accessed in parallel, one output element needs inner_product_size MACs
-        inner_product_size = ifm_shape[-1]
-        one_ifm_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, inner_product_size)
-        # Our MAC engine have 64 PEs
-        dma_transfer_cycles += one_ifm_transfer_cycles * ofm_elems
+        dram_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size + weight_storge_size + ofm_storge_size * 2)
 
     # Computations cycles
-    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["MAC"]
-    # Total produce #token * #feature elements, each element need weight's #feature MACs
-    MACs = ofm_elems * weight_shape[1]
-    op_cycles = MACs * cycle_per_elem
+    op_cycles = math.ceil(oc / ArchitectureFeatures.MAC_width) * oh * ow * math.ceil(ic / ArchitectureFeatures.MAC_width) * kh * kw
+    op_cycles *= ArchitectureFeatures.output_cycles_per_elem["MAC"]
+
+    dma_transfer_cycles = dram_transfer_cycles
+
+    # Requantize cycles
+    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"]
+    op_cycles += ofm_elems * cycle_per_elem
 
     total_cycles = dma_transfer_cycles + op_cycles
-    return dma_transfer_cycles, op_cycles, total_cycles
+    return (dma_transfer_cycles, op_cycles, total_cycles)
 
 # Estimate the number of cycles for a given softmax operation
 def estimate_softmax_cycles(model: Graph, opid: int) -> int:
@@ -1179,6 +1165,7 @@ def estimate_softmax_cycles(model: Graph, opid: int) -> int:
     return dma_transfer_cycles, op_cycles, total_cycles
 
 # Estimate the number of cycles for a given batch matmul operation
+# TODO: this estimation is not accurate
 def estimate_batch_matmul_cycles(model: Graph, opid: int) -> int:
     tensors = model.tensors
     info = model.ops[opid].info

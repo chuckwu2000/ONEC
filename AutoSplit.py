@@ -1130,7 +1130,7 @@ class Splitter:
                     self.new_operators.append(new_op_info)
                     self.nodes[opid].split_id.append(split_op_id)
                     split_op_id += 1
-            elif self.nodes[opid].avoid_split:
+            elif self.nodes[opid].avoid_split and need_split_nxn:
                 for a, b, c in zip(self.split_tensor_table[inputs[0]],
                                 self.split_tensor_table[inputs[1]],
                                 self.split_tensor_table[outputs[0]]):
