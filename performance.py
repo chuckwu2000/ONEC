@@ -356,7 +356,7 @@ def estimate_conv_cycles(model: Graph, opid: int) -> int:
         dram_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size + filter_storge_size + bias_storge_size + ofm_storge_size * 2)
 
     # Computations cycles
-    op_cycles = math.ceil(oc / ArchitectureFeatures.MAC_width) * oh * ow * math.ceil(ic / ArchitectureFeatures.MAC_width) * kh * kw
+    op_cycles = math.ceil(oc / ArchitectureFeatures.MAC_width) * oh * ow * math.ceil(ic / ArchitectureFeatures.MAC_height) * kh * kw
     op_cycles *= ArchitectureFeatures.output_cycles_per_elem["MAC"]
 
     dma_transfer_cycles = dram_transfer_cycles
@@ -631,7 +631,7 @@ def estimate_maxpool_cycles(model: Graph, opid: int) -> int:
         dram_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size + ofm_storge_size)
 
     # Computations cycles
-    op_cycles = math.ceil(oc / ArchitectureFeatures.MAC_width) * oh * ow * math.ceil(ic / ArchitectureFeatures.MAC_width) * kh * kw
+    op_cycles = math.ceil(oc / ArchitectureFeatures.MAC_width) * oh * ow * math.ceil(ic / ArchitectureFeatures.MAC_height) * kh * kw
     op_cycles *= ArchitectureFeatures.output_cycles_per_elem["MAC"]
 
     dma_transfer_cycles = dram_transfer_cycles
@@ -1016,6 +1016,7 @@ def estimate_leaky_relu_cycles(model: Graph, opid: int) -> int:
     total_cycles = dma_transfer_cycles + op_cycles
     return dma_transfer_cycles, op_cycles, total_cycles
 
+# Refer to Planaria's implementation
 # Estimate the number of cycles for a given fully connected operation
 def estimate_fully_connected_cycles(model: Graph, opid: int) -> int:
     tensors = model.tensors
@@ -1070,12 +1071,13 @@ def estimate_fully_connected_cycles(model: Graph, opid: int) -> int:
     # Assume bias tensor is None
 
     # Configuration
+    # Fully connected layer can be replaced to a 1x1 convolution
     oc = weight_shape[0]
     kh = 1
     kw = 1
     ic = weight_shape[1]
     oh = ofm_shape[-2]
-    ow = ofm_shape[-1]
+    ow = 1
 
     # DMA transfer cycles + IFM, OFM read/write cycles
     have_data_layout_parent = False
@@ -1091,7 +1093,7 @@ def estimate_fully_connected_cycles(model: Graph, opid: int) -> int:
         dram_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size + weight_storge_size + ofm_storge_size * 2)
 
     # Computations cycles
-    op_cycles = math.ceil(oc / ArchitectureFeatures.MAC_width) * oh * ow * math.ceil(ic / ArchitectureFeatures.MAC_width) * kh * kw
+    op_cycles = math.ceil(oc / ArchitectureFeatures.MAC_width) * oh * ow * math.ceil(ic / ArchitectureFeatures.MAC_height) * kh * kw
     op_cycles *= ArchitectureFeatures.output_cycles_per_elem["MAC"]
 
     dma_transfer_cycles = dram_transfer_cycles
@@ -1438,10 +1440,10 @@ def estimate_dequantize_cycles(model: Graph, opid: int) -> int:
 # Estimate the number of cycles for memory to memory transfer
 def estimate_mem2mem_cycles(src_tensor_mem_area, dst_tensor_mem_area, transfer_size) -> int:
     if src_tensor_mem_area == Mem_area.DRAM and dst_tensor_mem_area == Mem_area.SRAM:
-        bws_per_cycle = (ArchitectureFeatures.axi_bit_width / 8) * ArchitectureFeatures.Dram_clock_scale
+        bws_per_cycle = (ArchitectureFeatures.axi_bit_width / 8) * ArchitectureFeatures.Dram_burst_length * ArchitectureFeatures.Dram_clock_scale
         transfer_cycles = math.ceil(transfer_size / bws_per_cycle)
     elif src_tensor_mem_area == Mem_area.SRAM and dst_tensor_mem_area == Mem_area.PE:
-        bws_per_cycle = (ArchitectureFeatures.axi_bit_width / 8) * ArchitectureFeatures.Sram_clock_scale
+        bws_per_cycle = ArchitectureFeatures.Sram_burst_length * ArchitectureFeatures.Sram_clock_scale
         transfer_cycles = math.ceil(transfer_size / bws_per_cycle)
     return transfer_cycles
 
