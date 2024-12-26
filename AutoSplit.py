@@ -47,19 +47,17 @@ class Splitter:
             # 40: MEAN
             # 41: SUB
             # 49: SPLIT
-            # 67: TRANSPOSE_CONV
             # 76: RSQRT
             # 78: POW
             # 82: REDUCE_MAX
             # 83: PACK
             # 97: RESIZE_NEAREST_NEIGHBOR
-            # 98: LEAKY_RELU
             # 99: SQUARED_DIFFERENCE
             # 102: SPLIT_V
             # 114: QUANTIZE
             # 126: BATCH_MATMUL
             # 127: GELU
-            split_candidate = [0, 2, 3, 4, 6, 9, 14, 17, 18, 22, 25, 28, 34, 39, 40, 41, 49, 67, 76, 78, 82, 83, 97, 98, 99, 102, 114, 126, 127]
+            split_candidate = [0, 2, 3, 4, 6, 9, 14, 17, 18, 22, 25, 28, 34, 39, 40, 41, 49, 76, 78, 82, 83, 97, 99, 102, 114, 126, 127]
             if opcode.get("deprecated_builtin_code", 0) in split_candidate:
                 self.splittable_opcode_idxes[opcode.get("deprecated_builtin_code", 0)] = i
 
@@ -73,7 +71,7 @@ class Splitter:
         self.splittable_opcode_idxes = {}
         for i, opcode in enumerate(self.opcodes):
             # See the corresponding number in the __init__ function
-            split_candidate = [0, 2, 3, 4, 6, 9, 14, 17, 18, 22, 25, 28, 34, 39, 40, 41, 49, 67, 76, 78, 82, 83, 97, 98, 99, 102, 114, 126, 127]
+            split_candidate = [0, 2, 3, 4, 6, 9, 14, 17, 18, 22, 25, 28, 34, 39, 40, 41, 49, 76, 78, 82, 83, 97, 99, 102, 114, 126, 127]
             if opcode.get("deprecated_builtin_code", 0) in split_candidate:
                 self.splittable_opcode_idxes[opcode.get("deprecated_builtin_code", 0)] = i
 
@@ -485,8 +483,6 @@ class Splitter:
             self.split_sub(opid, output_split)
         elif opcode_idx == self.splittable_opcode_idxes.get(49, -1):
             self.split_split(opid, output_split)
-        elif opcode_idx == self.splittable_opcode_idxes.get(67, -1):
-            self.split_trconv(opid, input_split, output_split)
         elif opcode_idx == self.splittable_opcode_idxes.get(76, -1):
             self.split_rsqrt(opid, output_split)
         elif opcode_idx == self.splittable_opcode_idxes.get(78, -1):
@@ -497,8 +493,6 @@ class Splitter:
             self.split_pack(opid, output_split)
         elif opcode_idx == self.splittable_opcode_idxes.get(97, -1):
             self.split_resize_nearest_neighbor(opid, output_split)
-        elif opcode_idx == self.splittable_opcode_idxes.get(98, -1):
-            self.split_leaky_relu(opid, output_split)
         elif opcode_idx == self.splittable_opcode_idxes.get(99, -1):
             self.split_squared_difference(opid, output_split)
         elif opcode_idx == self.splittable_opcode_idxes.get(102, -1):
@@ -990,76 +984,6 @@ class Splitter:
                 self.nodes[opid].split_id.append(split_op_id)
                 split_op_id += 1
 
-    def split_trconv(self, opid, input_split, output_split):
-        info = self.nodes[opid].node.info
-        self.split_tensor_by_n(info['outputs'][0], output_split, 1)
-
-        inputs = info['inputs']
-        outputs = info['outputs']
-        new_op_info_base = copy.deepcopy(info)
-
-        if len(inputs) != 3:
-            raise "wrong input number"
-        elif len(outputs) != 1:
-            raise "wrong output number"
-        else:
-            split_op_id = len(self.nodes)
-
-            tr_shape = self.tensors[inputs[0]]['shape']
-            in_shape = self.tensors[inputs[2]]['shape']
-            out_shape = self.tensors[outputs[0]]['shape']
-            ker_shape = self.tensors[inputs[1]]['shape']
-            stride_h = info['builtin_options']['stride_h']
-            stride_w = info['builtin_options']['stride_w']
-
-            # calculate padding
-            if info['builtin_options'].get('padding', 'SAME') == 'SAME':
-                # total_padding_H = (out_shape[1] - 1) * stride_h + ker_shape[1] - in_shape[1]
-                # total_padding_W = (out_shape[2] - 1) * stride_w + ker_shape[2] - in_shape[2]
-                total_padding_H = (in_shape[1] - 1) * stride_h + ker_shape[1] - out_shape[1]
-                total_padding_W = (in_shape[2] - 1) * stride_w + ker_shape[2] - out_shape[2]
-                paddings_H = total_padding_H // 2 if total_padding_H > 0 else 0
-                paddings_W = total_padding_W // 2 if total_padding_W > 0 else 0
-            else:
-                paddings_H = 0
-                paddings_W = 0
-
-            # generate splitted trconv for each tile
-            for out_y in range(0, out_shape[1], output_split):
-                new_op_info = copy.deepcopy(new_op_info_base)
-
-                guard_inner_y = min(output_split, out_shape[1] - out_y)
-
-                new_inputs = []
-                split_padding_H = -((out_y) * stride_h - paddings_H)
-                split_padding_H = 0 if split_padding_H < 0 else split_padding_H
-
-                # inference required in_y from this tile
-                required = []
-                for out_inner_y in range(guard_inner_y):
-                    in_y_origin = (out_y + out_inner_y) * stride_h - paddings_H
-                    for h in range(ker_shape[1]):
-                        in_y = in_y_origin + h
-                        if in_y >= 0 and in_y < in_shape[1] and (in_y//input_split) not in required:
-                            required.append((in_y//input_split))
-
-                # inputs
-                for in_y in required:
-                    new_inputs.append(self.split_tensor_table[inputs[2]][in_y])
-
-                padding_param_tensor = self.get_padding_param_tensor(split_padding_H, paddings_W)
-                new_op_info['inputs'] += [padding_param_tensor] + new_inputs
-                #new_op_info['inputs'][0] = new_op_info['inputs'][5]
-
-                # outputs
-                new_op_info['outputs'] = [self.split_tensor_table[outputs[0]][int(out_y)//input_split]]
-
-                self.new_operators.append(new_op_info)
-                op = Node(new_op_info, split_op_id)
-                self.nodes.append(SplitterNode(op))
-                self.nodes[opid].split_id.append(split_op_id)
-                split_op_id += 1
-
     def split_fullyconnected(self, opid, output_split):
         info = self.nodes[opid].node.info
 
@@ -1527,30 +1451,6 @@ class Splitter:
         self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
         for child in self.nodes[opid].node.children:
             self.nodes[child].node.split_dim = self.nodes[opid].node.split_dim
-
-        inputs = info['inputs']
-        outputs = info['outputs']
-
-        if len(inputs) != 1:
-            raise "wrong input number"
-        elif len(outputs) != 1:
-            raise "wrong output number"
-        else:
-            split_op_id = len(self.nodes)
-            for a,b in zip(self.split_tensor_table[inputs[0]],
-                            self.split_tensor_table[outputs[0]]):
-                new_op_info = copy.deepcopy(info)
-                new_op_info['inputs'] = [a]
-                new_op_info['outputs'] = [b]
-                op = Node(new_op_info,split_op_id)
-                self.nodes.append(SplitterNode(op))
-                self.new_operators.append(new_op_info)
-                self.nodes[opid].split_id.append(split_op_id)
-                split_op_id+=1
-
-    def split_leaky_relu(self, opid, output_split):
-        info = self.nodes[opid].node.info
-        self.split_tensor_by_n(info['outputs'][0], output_split, 1)
 
         inputs = info['inputs']
         outputs = info['outputs']

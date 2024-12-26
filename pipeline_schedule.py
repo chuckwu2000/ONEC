@@ -43,33 +43,41 @@ def pipeline_schedule(split_graph: Graph):
             if split_graph.ops[opid].is_mac_main_op:
                 estimated_total_cycles = split_graph.ops[opid].estimated_total_cycles
                 cascade_matched_ops = [opid]
+                now_idx = idx
                 child_idx = idx + 1
-                if child_idx >= len(new_operators):
-                    continue
-                child_opid = new_operators[child_idx]
-                while child_opid < len(new_operators):
+                while child_idx < len(new_operators):
+                    now_opid = new_operators[now_idx]
+                    child_opid = new_operators[child_idx]
                     opcode_index = split_graph.ops[child_opid].info.get("opcode_index")
                     opcode_type = split_graph.opcodes[opcode_index].get("builtin_code")
                     # If the child op need to perform reduce operation, we can't let it directly consume the output of mac-main-op
                     if opcode_type in reduce_ops:
                         break
-                    if split_graph.ops[child_opid].is_elem_wise_main_op and split_graph.ops[child_opid].have_fully_matched is False:
-                        # Check whether child_opid is the opid's child
-                        keep_search = False
-                        for child in split_graph.ops[opid].children:
-                            if child_opid == child:
-                                if estimated_total_cycles <= split_graph.ops[child_opid].estimated_total_cycles:
-                                    keep_search = False
-                                else:
-                                    estimated_total_cycles -= split_graph.ops[child_opid].estimated_total_cycles
-                                    keep_search = True
-                                cascade_matched_ops.append(child_opid)
-                                split_graph.ops[child_opid].have_fully_matched = True
-                                break
-                        if not keep_search:
+
+                    # Check whether have producer-consumer relationship
+                    have_producer_consumer = False
+                    for child in split_graph.ops[now_opid].children:
+                        if child == child_opid:
+                            have_producer_consumer = True
                             break
+                    if not have_producer_consumer:
+                        break
+
+                    if split_graph.ops[child_opid].is_mem_main_op:
+                        # Skip the mem_main_op
+                        now_idx = child_idx
                         child_idx += 1
-                        child_opid = new_operators[child_idx]
+                        continue
+                    
+                    if split_graph.ops[child_opid].is_elem_wise_main_op and not split_graph.ops[child_opid].have_fully_matched:
+                        if estimated_total_cycles < 0:
+                            break
+                        else:
+                            estimated_total_cycles -= split_graph.ops[child_opid].estimated_total_cycles
+                        cascade_matched_ops.append(child_opid)
+                        split_graph.ops[child_opid].have_fully_matched = True
+                        now_idx = child_idx
+                        child_idx += 1
                     else:
                         break
                 if len(cascade_matched_ops) > 1:

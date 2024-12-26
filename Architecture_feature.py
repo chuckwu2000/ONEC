@@ -17,8 +17,8 @@ class ArchitectureFeatures:
     Dram_clock_scale = 1
     Dram_burst_length = 8
     # MAC configuration is refer to Planaria
-    MAC_height = 128
-    MAC_width = 128
+    MAC_height = 32
+    MAC_width = 32
 
     # Output cycles per element (MAC main op, mul, add/sub)
     # Now assune we have 64 MACs
@@ -29,11 +29,15 @@ class ArchitectureFeatures:
         "ADD/SUB": 1,
         "POW": 1,
         "TANH": 1,
+        "EXP": 1,
+        "RECIPROCAL": 1,
+        "REDUCE_SUM": 1,
         "LOGISTIC": 3,
-        "LEAKY_RELU": 3,
-        "SOFTMAX": 4,
         "RSQRT": 4,
         "REDUCE_MAX": 1,
         "DE/QUANTIZE": 1,
         "LUT": 1
     }
+
+    # Element-wise operation vectorization
+    VECTOR_LEN = 128
