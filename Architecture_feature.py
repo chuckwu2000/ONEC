@@ -17,8 +17,8 @@ class ArchitectureFeatures:
     Dram_clock_scale = 1
     Dram_burst_length = 8
     # MAC configuration is refer to Planaria
-    MAC_height = 32
-    MAC_width = 32
+    MAC_height = 128
+    MAC_width = 128
 
     # Output cycles per element (MAC main op, mul, add/sub)
     # Now assune we have 64 MACs

@@ -41,10 +41,12 @@ def estimate_add_cycles(model: Graph, opid: int) -> int:
             ifm2_storge_size *= dim
         ifm2_storge_size *= (ifm2_elem_size / 8)
 
-    # ofm's size (bytes)
+    # ofm's size (bytes) & elements
     ofm_storge_size = 1
+    ofm_elems = 1
     for dim in ofm_shape:
         ofm_storge_size *= dim
+        ofm_elems *= dim
     ofm_storge_size *= (ofm_elem_size / 8)
 
     # Data transfer cycles
@@ -57,18 +59,15 @@ def estimate_add_cycles(model: Graph, opid: int) -> int:
             break
     if model.pipeline_schedule and not have_data_layout_parent:
         dram_transfer_cycles = 0
-        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, 1)
-        sram_transfer_cycles = (ofm_storge_size) * one_element_transfer_cycles
+        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
+        sram_transfer_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
     else:
         dram_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm1_storge_size + ifm2_storge_size + ofm_storge_size)
-        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, 1)
-        sram_transfer_cycles = (ofm_storge_size) * one_element_transfer_cycles
+        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
+        sram_transfer_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
 
     # Computations cycles
     # Assume that element-wise op will speedup by vectorization
-    ofm_elems = 1
-    for dim in ofm_shape:
-        ofm_elems *= dim
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["ADD/SUB"]
     op_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
 
@@ -114,10 +113,12 @@ def estimate_sub_cycles(model: Graph, opid: int) -> int:
             ifm2_storge_size *= dim
         ifm2_storge_size *= (ifm2_elem_size / 8)
 
-    # ofm's size (bytes)
+    # ofm's size (bytes) & elements
     ofm_storge_size = 1
+    ofm_elems = 1
     for dim in ofm_shape:
         ofm_storge_size *= dim
+        ofm_elems *= dim
     ofm_storge_size *= (ofm_elem_size / 8)
 
     # Data transfer cycles
@@ -130,18 +131,15 @@ def estimate_sub_cycles(model: Graph, opid: int) -> int:
             break
     if model.pipeline_schedule and not have_data_layout_parent:
         dram_transfer_cycles = 0
-        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, 1)
-        sram_transfer_cycles = (ofm_storge_size) * one_element_transfer_cycles
+        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
+        sram_transfer_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
     else:
         dram_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm1_storge_size + ifm2_storge_size + ofm_storge_size)
-        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, 1)
-        sram_transfer_cycles = (ofm_storge_size) * one_element_transfer_cycles
+        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
+        sram_transfer_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
 
     # Computations cycles
     # Assume that element-wise op will speedup by vectorization
-    ofm_elems = 1
-    for dim in ofm_shape:
-        ofm_elems *= dim
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["ADD/SUB"]
     op_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
 
@@ -187,10 +185,12 @@ def estimate_mul_cycles(model: Graph, opid: int) -> int:
             ifm2_storge_size *= dim
         ifm2_storge_size *= (ifm2_elem_size / 8)
 
-    # ofm's size (bytes)
+    # ofm's size (bytes) & elements
     ofm_storge_size = 1
+    ofm_elems = 1
     for dim in ofm_shape:
         ofm_storge_size *= dim
+        ofm_elems *= dim
     ofm_storge_size *= (ofm_elem_size / 8)
 
     # Data transfer cycles
@@ -203,18 +203,15 @@ def estimate_mul_cycles(model: Graph, opid: int) -> int:
             break
     if model.pipeline_schedule and not have_data_layout_parent:
         dram_transfer_cycles = 0
-        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, 1)
-        sram_transfer_cycles = (ofm_storge_size) * one_element_transfer_cycles
+        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
+        sram_transfer_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
     else:
         dram_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm1_storge_size + ifm2_storge_size + ofm_storge_size)
-        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, 1)
-        sram_transfer_cycles = (ofm_storge_size) * one_element_transfer_cycles
+        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
+        sram_transfer_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
 
     # Computations cycles
     # Assume that element-wise op will speedup by vectorization
-    ofm_elems = 1
-    for dim in ofm_shape:
-        ofm_elems *= dim
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["MUL"]
     op_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
 
@@ -251,10 +248,12 @@ def estimate_logistic_cycles(model: Graph, opid: int) -> int:
             ifm_storge_size *= dim
         ifm_storge_size *= (ifm_elem_size / 8)
     
-    # ofm's size (bytes)
+    # ofm's size (bytes) & elements
     ofm_storge_size = 1
+    ofm_elems = 1
     for dim in ofm_shape:
         ofm_storge_size *= dim
+        ofm_elems *= dim
     ofm_storge_size *= (ofm_elem_size / 8)
 
     # Data transfer cycles
@@ -267,19 +266,16 @@ def estimate_logistic_cycles(model: Graph, opid: int) -> int:
             break
     if model.pipeline_schedule and not have_data_layout_parent:
         dram_transfer_cycles = 0
-        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, 1)
-        sram_transfer_cycles = (ofm_storge_size) * one_element_transfer_cycles
+        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
+        sram_transfer_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
     else:
         dram_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size + ofm_storge_size)
-        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, 1)
-        sram_transfer_cycles = (ofm_storge_size) * one_element_transfer_cycles
+        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
+        sram_transfer_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
 
     # Computations cycles
     # Logistic(x) = 1 / (1 + exp(-x))
     # Element-wise operation will speedup by vectorization
-    ofm_elems = 1
-    for dim in ofm_shape:
-        ofm_elems *= dim
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"] * 2
     op_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["LOGISTIC"]
@@ -501,6 +497,7 @@ def estimate_depthwise_conv_cycles(model: Graph, opid: int) -> int:
 
 # Refer to Planaria's implementation
 # Estimate the number of cycles for a given mean operation
+# Refer to vela's optimization, mean will break into depthwise convolution then perform divide operation
 def estimate_mean_cycles(model: Graph, opid: int) -> int:
     # Mean op will be converted to depthwise convolution + mul
     tensors = model.tensors
@@ -531,19 +528,21 @@ def estimate_mean_cycles(model: Graph, opid: int) -> int:
             ifm_storge_size *= dim
         ifm_storge_size *= (ifm_elem_size / 8)
 
-    # ofm's size (bytes)
+    # ofm's size (bytes) & elements
     ofm_storge_size = 1
+    ofm_elems = 1
     for dim in ofm_shape:
         ofm_storge_size *= dim
+        ofm_elems *= dim
     ofm_storge_size *= (ofm_elem_size / 8)
 
     # Configuration
     oc = 1
     kh = 1
     kw = 1
-    ic = 1
-    oh = ofm_shape[1]
-    ow = ifm_shape[axis]
+    ic = ifm_shape[axis]
+    oh = ofm_shape[0]
+    ow = ofm_shape[1]
 
     # DMA transfer cycles
     have_data_layout_parent = False
@@ -555,20 +554,28 @@ def estimate_mean_cycles(model: Graph, opid: int) -> int:
             break
     if model.pipeline_schedule and not have_data_layout_parent:
         dram_transfer_cycles = 0
+        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
+        # For transfer MAC engine's result to element-wise engine
+        sram_transfer_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
     else:
         dram_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size + ofm_storge_size)
+        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
+        # For transfer MAC engine's result to element-wise engine
+        sram_transfer_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
 
     # Computations cycles
     op_cycles = math.ceil(oc / ArchitectureFeatures.MAC_width) * oh * ow * math.ceil(ic / ArchitectureFeatures.MAC_height) * kh * kw
     op_cycles *= ArchitectureFeatures.output_cycles_per_elem["MAC"]
-    op_cycles *= ic
+
     # Perform division (reciprocal + mul)
-    op_cycles += (oc * ArchitectureFeatures.output_cycles_per_elem["MUL"] * 2)
+    divide_cycles = (math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * \
+                  (ArchitectureFeatures.output_cycles_per_elem["RECIPROCAL"] + ArchitectureFeatures.output_cycles_per_elem["MUL"]))
+    divide_cycles = max(divide_cycles, sram_transfer_cycles)
 
     # DMA transfer cycles
-    dma_transfer_cycles = dram_transfer_cycles
+    dma_transfer_cycles = dram_transfer_cycles 
 
-    total_cycles = dma_transfer_cycles + op_cycles
+    total_cycles = dma_transfer_cycles + op_cycles + divide_cycles
     return dma_transfer_cycles, op_cycles, total_cycles
 
 # Refer to Planaria's implementation
@@ -674,10 +681,12 @@ def estimate_rsqrt_cycles(model: Graph, opid: int) -> int:
             ifm_storge_size *= dim
         ifm_storge_size *= (ifm_elem_size / 8)
 
-    # ofm's size (bytes)
+    # ofm's size (bytes) & elements
     ofm_storge_size = 1
+    ofm_elems = 1
     for dim in ofm_shape:
         ofm_storge_size *= dim
+        ofm_elems *= dim
     ofm_storge_size *= (ofm_elem_size / 8)
 
     # Data transfer cycles
@@ -690,18 +699,17 @@ def estimate_rsqrt_cycles(model: Graph, opid: int) -> int:
             break
     if model.pipeline_schedule and not have_data_layout_parent:
         dram_transfer_cycles = 0
-        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, 1)
-        sram_transfer_cycles = (ofm_storge_size) * one_element_transfer_cycles
+        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
+        sram_transfer_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
     else:
         dram_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size + ofm_storge_size)
-        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, 1)
-        sram_transfer_cycles = (ofm_storge_size) * one_element_transfer_cycles
+        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
+        sram_transfer_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
 
     # Computations cycles
+    # Rsqrt(x) = 1 / sqrt(x) almost equal to 3*mul + 1*sub
+    # Above reference: https://blog.csdn.net/qq_26499321/article/details/73724763
     # Element-wise operation will speedup by vectorization
-    ofm_elems = 1
-    for dim in ofm_shape:
-        ofm_elems *= dim
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["RSQRT"]
     op_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
 
@@ -747,10 +755,12 @@ def estimate_squared_difference_cycles(model: Graph, opid: int) -> int:
             ifm2_storge_size *= dim
         ifm2_storge_size *= (ifm2_elem_size / 8)
 
-    # ofm's size (bytes)
+    # ofm's size (bytes) & elements
     ofm_storge_size = 1
+    ofm_elems = 1
     for dim in ofm_shape:
         ofm_storge_size *= dim
+        ofm_elems *= dim
     ofm_storge_size *= (ofm_elem_size / 8)
     
     # Data transfer cycles
@@ -763,18 +773,15 @@ def estimate_squared_difference_cycles(model: Graph, opid: int) -> int:
             break
     if model.pipeline_schedule and not have_data_layout_parent:
         dram_transfer_cycles = 0
-        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, 1)
-        sram_transfer_cycles = (ofm_storge_size) * one_element_transfer_cycles
+        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
+        sram_transfer_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
     else:
         dram_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm1_storge_size + ifm2_storge_size + ofm_storge_size)
-        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, 1)
-        sram_transfer_cycles = (ofm_storge_size) * one_element_transfer_cycles
+        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
+        sram_transfer_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
 
     # Computations cycles (x - y)(x - y)
     # Element-wise operation will speedup by vectorization
-    ofm_elems = 1
-    for dim in ofm_shape:
-        ofm_elems *= dim
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["ADD/SUB"]
     op_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["MUL"]
@@ -820,10 +827,12 @@ def estimate_pow_cycles(model: Graph, opid: int) -> int:
             ifm_storge_size *= dim
         ifm_storge_size *= (ifm_elem_size / 8)
     
-    # ofm's size (bytes)
+    # ofm's size (bytes) & elements
     ofm_storge_size = 1
+    ofm_elems = 1
     for dim in ofm_shape:
         ofm_storge_size *= dim
+        ofm_elems *= dim
     ofm_storge_size *= (ofm_elem_size / 8)
 
     # Data transfer cycles
@@ -836,18 +845,15 @@ def estimate_pow_cycles(model: Graph, opid: int) -> int:
             break
     if model.pipeline_schedule and not have_data_layout_parent:
         dram_transfer_cycles = 0
-        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, 1)
-        sram_transfer_cycles = (ofm_storge_size) * one_element_transfer_cycles
+        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
+        sram_transfer_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
     else:
         dram_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size + ofm_storge_size)
-        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, 1)
-        sram_transfer_cycles = (ofm_storge_size) * one_element_transfer_cycles
+        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
+        sram_transfer_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
     
     # Computations cycles
     # Element-wise operation will speedup by vectorization
-    ofm_elems = 1
-    for dim in ofm_shape:
-        ofm_elems *= dim
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["MUL"] * (Exponent - 1)
     op_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
 
@@ -884,10 +890,12 @@ def estimate_tanh_cycles(model: Graph, opid: int) -> int:
             ifm_storge_size *= dim
         ifm_storge_size *= (ifm_elem_size / 8)
 
-    # ofm's size (bytes)
+    # ofm's size (bytes) & elements
     ofm_storge_size = 1
+    ofm_elems = 1
     for dim in ofm_shape:
         ofm_storge_size *= dim
+        ofm_elems *= dim
     ofm_storge_size *= (ofm_elem_size / 8)
 
     # Data transfer cycles
@@ -900,18 +908,15 @@ def estimate_tanh_cycles(model: Graph, opid: int) -> int:
             break
     if model.pipeline_schedule and not have_data_layout_parent:
         dram_transfer_cycles = 0
-        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, 1)
-        sram_transfer_cycles = (ofm_storge_size) * one_element_transfer_cycles
+        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
+        sram_transfer_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
     else:
         dram_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size + ofm_storge_size)
-        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, 1)
-        sram_transfer_cycles = (ofm_storge_size) * one_element_transfer_cycles
+        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
+        sram_transfer_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
 
     # Computations cycles
     # Element-wise operation will speedup by vectorization
-    ofm_elems = 1
-    for dim in ofm_shape:
-        ofm_elems *= dim
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["TANH"]
     op_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
 
@@ -948,10 +953,12 @@ def estimate_gelu_cycles(model: Graph, opid: int) -> int:
             ifm_storge_size *= dim
         ifm_storge_size *= (ifm_elem_size / 8)
 
-    # ofm's size (bytes)
+    # ofm's size (bytes) & elements
     ofm_storge_size = 1
+    ofm_elems = 1
     for dim in ofm_shape:
         ofm_storge_size *= dim
+        ofm_elems *= dim
     ofm_storge_size *= (ofm_elem_size / 8)
 
     # Data transfer cycles
@@ -964,18 +971,15 @@ def estimate_gelu_cycles(model: Graph, opid: int) -> int:
             break
     if model.pipeline_schedule and not have_data_layout_parent:
         dram_transfer_cycles = 0
-        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, 1)
-        sram_transfer_cycles = (ofm_storge_size) * one_element_transfer_cycles
+        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
+        sram_transfer_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
     else:
         dram_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size + ofm_storge_size)
-        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, 1)
-        sram_transfer_cycles = (ofm_storge_size) * one_element_transfer_cycles
+        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
+        sram_transfer_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
 
     # Computations cycles gelu(x)  = x * logistic(1.702 * x)
     # Element-wise operation will speedup by vectorization
-    ofm_elems = 1
-    for dim in ofm_shape:
-        ofm_elems *= dim
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["MUL"]
     op_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"] * 2
@@ -1107,10 +1111,12 @@ def estimate_softmax_cycles(model: Graph, opid: int) -> int:
             ifm_storge_size *= dim
         ifm_storge_size *= (ifm_elem_size / 8)
 
-    # ofm's size (bytes)
+    # ofm's size (bytes) & elements
     ofm_storge_size = 1
+    ofm_elems = 1
     for dim in ofm_shape:
         ofm_storge_size *= dim
+        ofm_elems *= dim
     ofm_storge_size *= (ofm_elem_size / 8)
 
     # Data transfer cycles
@@ -1123,19 +1129,16 @@ def estimate_softmax_cycles(model: Graph, opid: int) -> int:
             break
     if model.pipeline_schedule and not have_data_layout_parent:
         dram_transfer_cycles = 0
-        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, 1)
-        sram_transfer_cycles = (ofm_storge_size) * one_element_transfer_cycles
+        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
+        sram_transfer_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
     else:
         dram_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size + ofm_storge_size)
-        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, 1)
-        sram_transfer_cycles = (ofm_storge_size) * one_element_transfer_cycles
+        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
+        sram_transfer_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
 
     # Computations cycles
     # Softmax(x) = exp(x) / sum(exp(x))
     # Element-wise operation will speedup by vectorization
-    ofm_elems = 1
-    for dim in ofm_shape:
-        ofm_elems *= dim
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"] * 2
     op_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["EXP"]
@@ -1267,10 +1270,12 @@ def estimate_reduce_max_cycles(model: Graph, opid: int) -> int:
             ifm_storge_size *= dim
         ifm_storge_size *= (ifm_elem_size / 8)
 
-    # ofm's size (bytes)
+    # ofm's size (bytes) & elements
     ofm_storge_size = 1
+    ofm_elems = 1
     for dim in ofm_shape:
         ofm_storge_size *= dim
+        ofm_elems *= dim
     ofm_storge_size *= (ofm_elem_size / 8)
 
     # Data transfer cycles
@@ -1283,20 +1288,17 @@ def estimate_reduce_max_cycles(model: Graph, opid: int) -> int:
             break
     if model.pipeline_schedule and not have_data_layout_parent:
         dram_transfer_cycles = 0
-        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, 1)
-        sram_transfer_cycles = (ifm_storge_size) * one_element_transfer_cycles
+        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
+        sram_transfer_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
     else:
         dram_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size + ofm_storge_size)
-        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, 1)
-        sram_transfer_cycles = (ifm_storge_size) * one_element_transfer_cycles
+        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
+        sram_transfer_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
 
     # Computations cycles
     # Assume each element need reduce_size - 1 cycles to compare
     # Element-wise operation will speedup by vectorization
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["REDUCE_MAX"] * (reduce_size - 1)
-    ofm_elems = 1
-    for dim in ofm_shape:
-        ofm_elems *= dim
     op_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
 
     # DMA transfer cycles
@@ -1335,9 +1337,12 @@ def estimate_quantize_cycles(model: Graph, opid: int) -> int:
         ifm_storge_size *= (ifm_elem_size / 8)
 
     # ofm's size (bytes)
+    # ofm's size (bytes) & elements
     ofm_storge_size = 1
+    ofm_elems = 1
     for dim in ofm_shape:
         ofm_storge_size *= dim
+        ofm_elems *= dim
     ofm_storge_size *= (ofm_elem_size / 8)
 
     # Data transfer cycles
@@ -1350,19 +1355,16 @@ def estimate_quantize_cycles(model: Graph, opid: int) -> int:
             break
     if model.pipeline_schedule and not have_data_layout_parent:
         dram_transfer_cycles = 0
-        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, 1)
-        sram_transfer_cycles = (ofm_storge_size) * one_element_transfer_cycles
+        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
+        sram_transfer_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
     else:
         dram_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size + ofm_storge_size)
-        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, 1)
-        sram_transfer_cycles = (ofm_storge_size) * one_element_transfer_cycles
+        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
+        sram_transfer_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
 
     # Computations cycles
     # Element-wise operation will speedup by vectorization
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"]
-    ofm_elems = 1
-    for dim in ofm_shape:
-        ofm_elems *= dim
     op_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
 
     # DMA transfer cycles
@@ -1400,10 +1402,12 @@ def estimate_dequantize_cycles(model: Graph, opid: int) -> int:
             ifm_storge_size *= dim
         ifm_storge_size *= (ifm_elem_size / 8)
 
-    # ofm's size (bytes)
+    # ofm's size (bytes) & elements
     ofm_storge_size = 1
+    ofm_elems = 1
     for dim in ofm_shape:
         ofm_storge_size *= dim
+        ofm_elems *= dim
     ofm_storge_size *= (ofm_elem_size / 8)
 
     # Data transfer cycles
@@ -1416,19 +1420,16 @@ def estimate_dequantize_cycles(model: Graph, opid: int) -> int:
             break
     if model.pipeline_schedule and not have_data_layout_parent:
         dram_transfer_cycles = 0
-        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, 1)
-        sram_transfer_cycles = (ofm_storge_size) * one_element_transfer_cycles
+        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
+        sram_transfer_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
     else:
         dram_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size + ofm_storge_size)
-        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, 1)
-        sram_transfer_cycles = (ofm_storge_size) * one_element_transfer_cycles
+        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
+        sram_transfer_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
 
     # Computations cycles
     # Element-wise operation will speedup by vectorization
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"]
-    ofm_elems = 1
-    for dim in ofm_shape:
-        ofm_elems *= dim
     op_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
 
     # DMA transfer cycles
@@ -1443,7 +1444,7 @@ def estimate_mem2mem_cycles(src_tensor_mem_area, dst_tensor_mem_area, transfer_s
         bws_per_cycle = (ArchitectureFeatures.axi_bit_width / 8) * ArchitectureFeatures.Dram_burst_length * ArchitectureFeatures.Dram_clock_scale
         transfer_cycles = math.ceil(transfer_size / bws_per_cycle)
     elif src_tensor_mem_area == Mem_area.SRAM and dst_tensor_mem_area == Mem_area.PE:
-        bws_per_cycle = ArchitectureFeatures.Sram_burst_length * ArchitectureFeatures.Sram_clock_scale
+        bws_per_cycle = (ArchitectureFeatures.axi_bit_width / 8) * ArchitectureFeatures.Sram_burst_length * ArchitectureFeatures.Sram_clock_scale
         transfer_cycles = math.ceil(transfer_size / bws_per_cycle)
     return transfer_cycles
 
@@ -1494,11 +1495,6 @@ def estimate_op_cycles(model: Graph, opid: int) -> int:
         op.estimated_total_cycles = total_cycles
     elif opcode_type == "SOFTMAX":
         dma_cycles, op_cycles, total_cycles = estimate_softmax_cycles(model, opid)
-        op.estimated_DMA_cycles = dma_cycles
-        op.estimated_op_cycles = op_cycles
-        op.estimated_total_cycles = total_cycles
-    elif opcode_type == "TRANSPOSE_CONV":
-        dma_cycles, op_cycles, total_cycles = estimate_trconv_cycles(model, opid)
         op.estimated_DMA_cycles = dma_cycles
         op.estimated_op_cycles = op_cycles
         op.estimated_total_cycles = total_cycles
