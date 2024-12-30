@@ -1687,10 +1687,18 @@ class Splitter:
 
     def split_quantize(self, opid, output_split):
         info = self.nodes[opid].node.info
-        split_dim = self.nodes[opid].node.split_dim
-        self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
-        for child in self.nodes[opid].node.children:
-            self.nodes[child].node.split_dim = self.nodes[opid].node.split_dim
+        output_shape = self.tensors[info['outputs'][0]]['shape']
+        if self.model_type == ModelType.BERT:
+            split_dim_value = self.token_size
+            for dim, dim_value in enumerate(output_shape):
+                if dim_value == split_dim_value:
+                    self.split_tensor_by_n(info['outputs'][0], output_split, dim)
+                    break
+        else:
+            split_dim = self.nodes[opid].node.split_dim
+            self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
+            for child in self.nodes[opid].node.children:
+                self.nodes[child].node.split_dim = self.nodes[opid].node.split_dim
 
         inputs = info['inputs']
         outputs = info['outputs']
@@ -1714,10 +1722,19 @@ class Splitter:
 
     def split_dequantize(self, opid, output_split):
         info = self.nodes[opid].node.info
-        split_dim = self.nodes[opid].node.split_dim
-        self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
-        for child in self.nodes[opid].node.children:
-            self.nodes[child].node.split_dim = self.nodes[opid].node.split_dim
+        output_shape = self.tensors[info['outputs'][0]]['shape']
+
+        if self.model_type == ModelType.BERT:
+            split_dim_value = self.token_size
+            for dim, dim_value in enumerate(output_shape):
+                if dim_value == split_dim_value:
+                    self.split_tensor_by_n(info['outputs'][0], output_split, dim)
+                    break
+        else:
+            split_dim = self.nodes[opid].node.split_dim
+            self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
+            for child in self.nodes[opid].node.children:
+                self.nodes[child].node.split_dim = self.nodes[opid].node.split_dim
 
         inputs = info['inputs']
         outputs = info['outputs']

@@ -6,6 +6,7 @@ import math
 data_layout_op = ["CONCATENATION", "SPLIT", "RESHAPE", "SPLIT_V", "TRANSPOSE", "RESIZE_NEAREST_NEIGHBOR"]
 
 # Estimate the number of cycles for a given add operation
+# ADD's requant cost refer to vela's data
 def estimate_add_cycles(model: Graph, opid: int) -> int:
     tensors = model.tensors
     info = model.ops[opid].info
@@ -70,6 +71,8 @@ def estimate_add_cycles(model: Graph, opid: int) -> int:
     # Assume that element-wise op will speedup by vectorization
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["ADD/SUB"]
     op_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
+    cycles_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"] * 2
+    op_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycles_per_elem
 
     # DMA transfer cycles
     dma_transfer_cycles = dram_transfer_cycles + max(0, sram_transfer_cycles - op_cycles)
@@ -78,6 +81,7 @@ def estimate_add_cycles(model: Graph, opid: int) -> int:
     return dma_transfer_cycles, op_cycles, total_cycles
 
 # Estimate the number of cycles for a given sub operation
+# SUB's requant cost refer to vela's data
 def estimate_sub_cycles(model: Graph, opid: int) -> int:
     tensors = model.tensors
     info = model.ops[opid].info
@@ -142,6 +146,8 @@ def estimate_sub_cycles(model: Graph, opid: int) -> int:
     # Assume that element-wise op will speedup by vectorization
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["ADD/SUB"]
     op_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
+    cycles_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"] * 2
+    op_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycles_per_elem
 
     # DMA transfer cycles
     dma_transfer_cycles = dram_transfer_cycles + max(0, sram_transfer_cycles - op_cycles)
@@ -150,6 +156,7 @@ def estimate_sub_cycles(model: Graph, opid: int) -> int:
     return dma_transfer_cycles, op_cycles, total_cycles
 
 # Estimate the number of cycles for a given mul operation
+# MUL's requant cost refer to vela's data
 def estimate_mul_cycles(model: Graph, opid: int) -> int:
     tensors = model.tensors
     info = model.ops[opid].info
@@ -214,6 +221,8 @@ def estimate_mul_cycles(model: Graph, opid: int) -> int:
     # Assume that element-wise op will speedup by vectorization
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["MUL"]
     op_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
+    cycles_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"]
+    op_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycles_per_elem
 
     # DMA transfer cycles
     dma_transfer_cycles = dram_transfer_cycles + max(0, sram_transfer_cycles - op_cycles)
@@ -386,7 +395,7 @@ def estimate_conv_cycles(model: Graph, opid: int) -> int:
 
     # Requantize cycles
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"]
-    op_cycles += ofm_elems * cycle_per_elem
+    op_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
 
     total_cycles = dma_transfer_cycles + op_cycles
     return (dma_transfer_cycles, op_cycles, total_cycles)
@@ -490,13 +499,14 @@ def estimate_depthwise_conv_cycles(model: Graph, opid: int) -> int:
 
     # Requantize cycles
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"]
-    op_cycles += ofm_elems * cycle_per_elem
+    op_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
 
     total_cycles = dma_transfer_cycles + op_cycles
     return (dma_transfer_cycles, op_cycles, total_cycles)
 
 # Refer to Planaria's implementation
 # Estimate the number of cycles for a given mean operation
+# MEAN's requant cost refer to tflm's data
 # Refer to vela's optimization, mean will break into depthwise convolution then perform divide operation
 def estimate_mean_cycles(model: Graph, opid: int) -> int:
     # Mean op will be converted to depthwise convolution + mul
@@ -569,7 +579,8 @@ def estimate_mean_cycles(model: Graph, opid: int) -> int:
 
     # Perform division (reciprocal + mul)
     divide_cycles = (math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * \
-                  (ArchitectureFeatures.output_cycles_per_elem["RECIPROCAL"] + ArchitectureFeatures.output_cycles_per_elem["MUL"]))
+                  (ArchitectureFeatures.output_cycles_per_elem["RECIPROCAL"] + ArchitectureFeatures.output_cycles_per_elem["MUL"] + \
+                   ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"]))
     divide_cycles = max(divide_cycles, sram_transfer_cycles)
 
     # DMA transfer cycles
@@ -712,6 +723,8 @@ def estimate_rsqrt_cycles(model: Graph, opid: int) -> int:
     # Element-wise operation will speedup by vectorization
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["RSQRT"]
     op_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
+    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"]
+    op_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
 
     # DMA transfer cycles
     dma_transfer_cycles = dram_transfer_cycles + max(0, sram_transfer_cycles - op_cycles)
@@ -786,6 +799,8 @@ def estimate_squared_difference_cycles(model: Graph, opid: int) -> int:
     op_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["MUL"]
     op_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
+    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"]
+    op_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
 
     # DMA transfer cycles
     dma_transfer_cycles = dram_transfer_cycles + max(0, sram_transfer_cycles - op_cycles)
@@ -856,6 +871,8 @@ def estimate_pow_cycles(model: Graph, opid: int) -> int:
     # Element-wise operation will speedup by vectorization
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["MUL"] * (Exponent - 1)
     op_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
+    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"] * 2
+    op_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
 
     # DMA transfer cycles
     dma_transfer_cycles = dram_transfer_cycles + max(0, sram_transfer_cycles - op_cycles)
@@ -919,6 +936,8 @@ def estimate_tanh_cycles(model: Graph, opid: int) -> int:
     # Element-wise operation will speedup by vectorization
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["TANH"]
     op_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
+    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"]
+    op_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
 
     # DMA transfer cycles
     dma_transfer_cycles = dram_transfer_cycles + max(0, sram_transfer_cycles - op_cycles)
@@ -1079,7 +1098,7 @@ def estimate_fully_connected_cycles(model: Graph, opid: int) -> int:
 
     # Requantize cycles
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"]
-    op_cycles += ofm_elems * cycle_per_elem
+    op_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
 
     total_cycles = dma_transfer_cycles + op_cycles
     return (dma_transfer_cycles, op_cycles, total_cycles)
@@ -1300,6 +1319,8 @@ def estimate_reduce_max_cycles(model: Graph, opid: int) -> int:
     # Element-wise operation will speedup by vectorization
     cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["REDUCE_MAX"] * (reduce_size - 1)
     op_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
+    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"]
+    op_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
 
     # DMA transfer cycles
     dma_transfer_cycles = dram_transfer_cycles + max(0, sram_transfer_cycles - op_cycles)
