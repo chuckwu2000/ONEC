@@ -29,7 +29,6 @@ def set_active_engine(graph: Graph):
 def pipeline_schedule(split_graph: Graph):
     # First priority schedule:
     # Try to reuse the output of mac-main-op as the input of elem-wise-main-op & these two ops can be executed concurrently
-    # TODO: need to check that sequencial elem-wise-main-ops have producer-consumer relationship
     def first_priority_schedule(split_graph: Graph):
         new_operators = split_graph.ordered_opid
         # Check each op whether can hoist and modify its order in DF-1 schedule
@@ -73,7 +72,8 @@ def pipeline_schedule(split_graph: Graph):
                         if estimated_total_cycles < 0:
                             break
                         else:
-                            estimated_total_cycles -= split_graph.ops[child_opid].estimated_total_cycles
+                            # Only subtract the estimated_op_cycles, since the intermedia tensor will store in SRAM
+                            estimated_total_cycles -= split_graph.ops[child_opid].estimated_op_cycles
                         cascade_matched_ops.append(child_opid)
                         split_graph.ops[child_opid].have_fully_matched = True
                         now_idx = child_idx
@@ -268,8 +268,16 @@ def pipeline_schedule(split_graph: Graph):
                             split_graph.ops[insert_pos_opid].non_overlap_cycles = 0
                             split_graph.matched_ops.append(matched_ops)
                             break
-          
-    def set_new_operators(split_graph: Graph):
+    
+    # Start to piepline schedule
+    first_priority_schedule(split_graph)
+    second_priority_schedule(split_graph)
+    
+    #return pipeline_split_graph
+    split_graph.pipeline_schedule = True
+    return split_graph
+
+def set_new_operators(split_graph: Graph):
         # Store the new schedule order into a list, it contain some op have the same schedule order
         split_graph.operators = []
         split_graph.ordered_opid = []
@@ -301,14 +309,3 @@ def pipeline_schedule(split_graph: Graph):
             new_matched_ops.append(new_matched_pattern)
         split_graph.cascade_matched_ops = new_cascade_matched_ops
         split_graph.matched_ops = new_matched_ops
-    
-    # Start to piepline schedule
-    first_priority_schedule(split_graph)
-    second_priority_schedule(split_graph)
-
-    # Set model's new operators & update the cascade_matched_ops and matched_ops
-    set_new_operators(split_graph)
-    
-    #return pipeline_split_graph
-    split_graph.pipeline_schedule = True
-    return split_graph
