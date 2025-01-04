@@ -28,7 +28,6 @@ class ArchitectureFeatures:
         "MUL": 1,
         "ADD/SUB": 1,
         "POW": 1,
-        "TANH": 1,
         "EXP": 1,
         "RECIPROCAL": 1,
         "REDUCE_SUM": 1,

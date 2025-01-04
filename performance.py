@@ -2,1664 +2,483 @@ from MyGraph import Graph
 from Architecture_feature import Mem_area
 from Architecture_feature import ArchitectureFeatures
 import math
-
-data_layout_op = ["CONCATENATION", "SPLIT", "RESHAPE", "SPLIT_V", "TRANSPOSE", "RESIZE_NEAREST_NEIGHBOR"]
-
-# Estimate the number of cycles for a given add operation
-# ADD's requant cost refer to vela's data
-def estimate_add_cycles(model: Graph, opid: int) -> int:
-    tensors = model.tensors
-    info = model.ops[opid].info
-    inputs = info.get("inputs")
-    outputs = info.get("outputs")
-
-    if len(inputs) != 2 or len(outputs) != 1:
-        raise "Add operation should have 2 inputs and 1 output"
-    ifm1 = tensors[inputs[0]]
-    ifm2 = tensors[inputs[1]]
-    ofm = tensors[outputs[0]]
-    ifm1_shape = ifm1.get("shape")
-    ifm2_shape = ifm2.get("shape")
-    ofm_shape = ofm.get("shape")
-    if ifm1.get("type") == "INT8" and ifm2.get("type") == "INT8" and ofm.get("type") == "INT8":
-        ifm1_elem_size = 8
-        ifm2_elem_size = 8
-        ofm_elem_size = 8
-    else:
-        ifm1_elem_size = 32
-        ifm2_elem_size = 32
-        ofm_elem_size = 32
-    
-    # ifm's size (bytes)
-    ifm1_storge_size = 1
-    if ifm1_shape != []:
-        for dim in ifm1_shape:
-            ifm1_storge_size *= dim
-        ifm1_storge_size *= (ifm1_elem_size / 8)
-    ifm2_storge_size = 1
-    if ifm2_shape != []:
-        for dim in ifm2_shape:
-            ifm2_storge_size *= dim
-        ifm2_storge_size *= (ifm2_elem_size / 8)
-
-    # ofm's size (bytes) & elements
-    ofm_storge_size = 1
-    ofm_elems = 1
-    for dim in ofm_shape:
-        ofm_storge_size *= dim
-        ofm_elems *= dim
-    ofm_storge_size *= (ofm_elem_size / 8)
-
-    # Data transfer cycles
-    have_data_layout_parent = False
-    for parent_op in model.ops[opid].parents:
-        opcode_index = model.ops[parent_op].info.get("opcode_index")
-        opcode_type = model.opcodes[opcode_index].get("builtin_code")
-        if opcode_type in data_layout_op:
-            have_data_layout_parent = True
-            break
-    if model.pipeline_schedule and not have_data_layout_parent:
-        dram_transfer_cycles = 0
-        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
-        sram_transfer_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
-    else:
-        dram_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm1_storge_size + ifm2_storge_size + ofm_storge_size)
-        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
-        sram_transfer_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
-
-    # Computations cycles
-    # Assume that element-wise op will speedup by vectorization
-    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["ADD/SUB"]
-    op_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
-    cycles_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"] * 2
-    op_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycles_per_elem
-
-    # DMA transfer cycles
-    dma_transfer_cycles = dram_transfer_cycles + max(0, sram_transfer_cycles - op_cycles)
-
-    total_cycles = dma_transfer_cycles + op_cycles
-    return dma_transfer_cycles, op_cycles, total_cycles
-
-# Estimate the number of cycles for a given sub operation
-# SUB's requant cost refer to vela's data
-def estimate_sub_cycles(model: Graph, opid: int) -> int:
-    tensors = model.tensors
-    info = model.ops[opid].info
-    inputs = info.get("inputs")
-    outputs = info.get("outputs")
-
-    if len(inputs) != 2 or len(outputs) != 1:
-        raise "Sub operation should have 2 inputs and 1 output"
-    ifm1 = tensors[inputs[0]]
-    ifm2 = tensors[inputs[1]]
-    ofm = tensors[outputs[0]]
-    ifm1_shape = ifm1.get("shape")
-    ifm2_shape = ifm2.get("shape")
-    ofm_shape = ofm.get("shape")
-    if ifm1.get("type") == "INT8" and ifm2.get("type") == "INT8" and ofm.get("type") == "INT8":
-        ifm1_elem_size = 8
-        ifm2_elem_size = 8
-        ofm_elem_size = 8
-    else:
-        ifm1_elem_size = 32
-        ifm2_elem_size = 32
-        ofm_elem_size = 32
-    
-    # ifm's size (bytes)
-    ifm1_storge_size = 1
-    if ifm1_shape != []:
-        for dim in ifm1_shape:
-            ifm1_storge_size *= dim
-        ifm1_storge_size *= (ifm1_elem_size / 8)
-    ifm2_storge_size = 1
-    if ifm2_shape != []:
-        for dim in ifm2_shape:
-            ifm2_storge_size *= dim
-        ifm2_storge_size *= (ifm2_elem_size / 8)
-
-    # ofm's size (bytes) & elements
-    ofm_storge_size = 1
-    ofm_elems = 1
-    for dim in ofm_shape:
-        ofm_storge_size *= dim
-        ofm_elems *= dim
-    ofm_storge_size *= (ofm_elem_size / 8)
-
-    # Data transfer cycles
-    have_data_layout_parent = False
-    for parent_op in model.ops[opid].parents:
-        opcode_index = model.ops[parent_op].info.get("opcode_index")
-        opcode_type = model.opcodes[opcode_index].get("builtin_code")
-        if opcode_type in data_layout_op:
-            have_data_layout_parent = True
-            break
-    if model.pipeline_schedule and not have_data_layout_parent:
-        dram_transfer_cycles = 0
-        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
-        sram_transfer_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
-    else:
-        dram_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm1_storge_size + ifm2_storge_size + ofm_storge_size)
-        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
-        sram_transfer_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
-
-    # Computations cycles
-    # Assume that element-wise op will speedup by vectorization
-    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["ADD/SUB"]
-    op_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
-    cycles_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"] * 2
-    op_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycles_per_elem
-
-    # DMA transfer cycles
-    dma_transfer_cycles = dram_transfer_cycles + max(0, sram_transfer_cycles - op_cycles)
-
-    total_cycles = dma_transfer_cycles + op_cycles
-    return dma_transfer_cycles, op_cycles, total_cycles
-
-# Estimate the number of cycles for a given mul operation
-# MUL's requant cost refer to vela's data
-def estimate_mul_cycles(model: Graph, opid: int) -> int:
-    tensors = model.tensors
-    info = model.ops[opid].info
-    inputs = info.get("inputs")
-    outputs = info.get("outputs")
-
-    if len(inputs) != 2 or len(outputs) != 1:
-        raise "Mul operation should have 2 inputs and 1 output"
-    ifm1 = tensors[inputs[0]]
-    ifm2 = tensors[inputs[1]]
-    ofm = tensors[outputs[0]]
-    ifm1_shape = ifm1.get("shape")
-    ifm2_shape = ifm2.get("shape")
-    ofm_shape = ofm.get("shape")
-    if ifm1.get("type") == "INT8" and ifm2.get("type") == "INT8" and ofm.get("type") == "INT8":
-        ifm1_elem_size = 8
-        ifm2_elem_size = 8
-        ofm_elem_size = 8
-    else:
-        ifm1_elem_size = 32
-        ifm2_elem_size = 32
-        ofm_elem_size = 32
-    
-    # ifm's size (bytes)
-    ifm1_storge_size = 1
-    if ifm1_shape != []:
-        for dim in ifm1_shape:
-            ifm1_storge_size *= dim
-        ifm1_storge_size *= (ifm1_elem_size / 8)
-    ifm2_storge_size = 1
-    if ifm2_shape != []:
-        for dim in ifm2_shape:
-            ifm2_storge_size *= dim
-        ifm2_storge_size *= (ifm2_elem_size / 8)
-
-    # ofm's size (bytes) & elements
-    ofm_storge_size = 1
-    ofm_elems = 1
-    for dim in ofm_shape:
-        ofm_storge_size *= dim
-        ofm_elems *= dim
-    ofm_storge_size *= (ofm_elem_size / 8)
-
-    # Data transfer cycles
-    have_data_layout_parent = False
-    for parent_op in model.ops[opid].parents:
-        opcode_index = model.ops[parent_op].info.get("opcode_index")
-        opcode_type = model.opcodes[opcode_index].get("builtin_code")
-        if opcode_type in data_layout_op:
-            have_data_layout_parent = True
-            break
-    if model.pipeline_schedule and not have_data_layout_parent:
-        dram_transfer_cycles = 0
-        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
-        sram_transfer_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
-    else:
-        dram_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm1_storge_size + ifm2_storge_size + ofm_storge_size)
-        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
-        sram_transfer_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
-
-    # Computations cycles
-    # Assume that element-wise op will speedup by vectorization
-    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["MUL"]
-    op_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
-    cycles_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"]
-    op_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycles_per_elem
-
-    # DMA transfer cycles
-    dma_transfer_cycles = dram_transfer_cycles + max(0, sram_transfer_cycles - op_cycles)
-
-    total_cycles = dma_transfer_cycles + op_cycles
-    return dma_transfer_cycles, op_cycles, total_cycles
-
-# Estimate the number of cycles for a given logistic operation
-def estimate_logistic_cycles(model: Graph, opid: int) -> int:
-    tensors = model.tensors
-    info = model.ops[opid].info
-    inputs = info.get("inputs")
-    outputs = info.get("outputs")
-
-    if len(inputs) != 1 or len(outputs) != 1:
-        raise "Logistic operation should have 1 inputs and 1 output"
-    ifm = tensors[inputs[0]]
-    ofm = tensors[outputs[0]]
-    ifm_shape = ifm.get("shape")
-    ofm_shape = ofm.get("shape")
-    if ifm.get("type") == "INT8" and ofm.get("type") == "INT8":
-        ifm_elem_size = 8
-        ofm_elem_size = 8
-    else:
-        ifm_elem_size = 32
-        ofm_elem_size = 32
-    
-    # ifm's size (bytes)
-    ifm_storge_size = 1
-    if ifm_shape != []:
-        for dim in ifm_shape:
-            ifm_storge_size *= dim
-        ifm_storge_size *= (ifm_elem_size / 8)
-    
-    # ofm's size (bytes) & elements
-    ofm_storge_size = 1
-    ofm_elems = 1
-    for dim in ofm_shape:
-        ofm_storge_size *= dim
-        ofm_elems *= dim
-    ofm_storge_size *= (ofm_elem_size / 8)
-
-    # Data transfer cycles
-    have_data_layout_parent = False
-    for parent_op in model.ops[opid].parents:
-        opcode_index = model.ops[parent_op].info.get("opcode_index")
-        opcode_type = model.opcodes[opcode_index].get("builtin_code")
-        if opcode_type in data_layout_op:
-            have_data_layout_parent = True
-            break
-    if model.pipeline_schedule and not have_data_layout_parent:
-        dram_transfer_cycles = 0
-        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
-        sram_transfer_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
-    else:
-        dram_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size + ofm_storge_size)
-        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
-        sram_transfer_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
-
-    # Computations cycles
-    # Logistic(x) = 1 / (1 + exp(-x))
-    # Element-wise operation will speedup by vectorization
-    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"] * 2
-    op_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
-    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["LOGISTIC"]
-    op_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
-
-    # DMA transfer cycles
-    dma_transfer_cycles = dram_transfer_cycles + max(0, sram_transfer_cycles - op_cycles)
-
-    total_cycles = dma_transfer_cycles + op_cycles
-    return dma_transfer_cycles, op_cycles, total_cycles
-
-# Refer to Planaria's implementation
-# Estimate the number of cycles for a given convolution operation
-def estimate_conv_cycles(model: Graph, opid: int) -> int:
-    tensors = model.tensors
-    info = model.ops[opid].info
-    inputs = info.get("inputs")
-    outputs = info.get("outputs")
-
-    # Not constraint the number of inputs, since in TS model, the input tensor is represent the dependence relationship, so it may have more than 1 inputs
-    if len(outputs) != 1:
-        raise "Conv2D operation should have at least 1 output"
-    # Count the number of ifm
-    ifm_total = 0
-    for _ in range (4, len(inputs)):
-        ifm_total += 1
-    
-    ifm = tensors[inputs[0]]
-    ofm = tensors[outputs[0]]
-    ifm_shape = ifm.get("shape")
-    ofm_shape = ofm.get("shape")
-    if ifm.get("type") == "INT8" and ofm.get("type") == "INT8":
-        ifm_elem_size = 8
-        ofm_elem_size = 8
-    else:
-        ifm_elem_size = 32
-        ofm_elem_size = 32
-    
-    # Ifm's size (bytes)
-    ifm_storge_size = 1
-    if ifm_shape != []:
-        for dim in ifm_shape:
-            ifm_storge_size *= dim
-        ifm_storge_size *= (ifm_elem_size / 8)
-    ifm_storge_size *= ifm_total
-
-    # Ofm's size (bytes)
-    ofm_storge_size = 1
-    for dim in ofm_shape:
-        ofm_storge_size *= dim
-    ofm_storge_size *= (ofm_elem_size / 8)
-
-    # Ofm elements
-    ofm_elems = 1
-    for dim in ofm_shape:
-        ofm_elems *= dim
-    
-    # Filter tensor
-    filter = tensors[inputs[1]]
-    filter_shape = filter.get("shape")
-    if filter.get("type") == "INT8":
-        filter_elem_size = 8
-    else:
-        filter_elem_size = 32
-    # Filter's size (bytes)
-    filter_storge_size = 1
-    for dim in filter_shape:
-        filter_storge_size *= dim
-    filter_storge_size *= (filter_elem_size / 8)
-    
-    # Bias tensor
-    bias = tensors[inputs[2]]
-    bias_shape = bias.get("shape")
-    if bias.get("type") == "INT32":
-        bias_elem_size = 32
-    else:
-        raise "Bias only support INT32 data type"
-    # Bias's size (bytes)
-    bias_storge_size = bias_shape[0] * (bias_elem_size / 8)
-
-    # Configuration
-    oc = filter_shape[0]
-    kh = filter_shape[1]
-    kw = filter_shape[2]
-    ic = filter_shape[3]
-    oh = ofm_shape[1]
-    ow = ofm_shape[2]
-
-    # DMA transfer cycles
-    have_data_layout_parent = False
-    for parent_op in model.ops[opid].parents:
-        opcode_index = model.ops[parent_op].info.get("opcode_index")
-        opcode_type = model.opcodes[opcode_index].get("builtin_code")
-        if opcode_type in data_layout_op:
-            have_data_layout_parent = True
-            break
-    if model.pipeline_schedule and not have_data_layout_parent:
-        # Filter and bias are fetched from DRAM
-        dram_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, filter_storge_size + bias_storge_size)
-    else:
-        dram_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size + filter_storge_size + bias_storge_size + ofm_storge_size * 2)
-
-    # Computations cycles
-    op_cycles = math.ceil(oc / ArchitectureFeatures.MAC_width) * oh * ow * math.ceil(ic / ArchitectureFeatures.MAC_height) * kh * kw
-    op_cycles *= ArchitectureFeatures.output_cycles_per_elem["MAC"]
-
-    dma_transfer_cycles = dram_transfer_cycles
-
-    # Requantize cycles
-    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"]
-    op_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
-
-    total_cycles = dma_transfer_cycles + op_cycles
-    return (dma_transfer_cycles, op_cycles, total_cycles)
-
-# Refer to Planaria's implementation
-# Estimate the number of cycles for a given depthwise convolution operation
-def estimate_depthwise_conv_cycles(model: Graph, opid: int) -> int:
-    tensors = model.tensors
-    info = model.ops[opid].info
-    inputs = info.get("inputs")
-    outputs = info.get("outputs")
-
-    # Not constraint the number of inputs, since in TS model, the input tensor is represent the dependence relationship, so it may have more than 1 inputs
-    if len(outputs) != 1:
-        raise "DepthwiseConv2D operation should have at least 1 output"
-    
-    ifm_list = []
-    for input_id in range (4, len(inputs)):
-        ifm_list.append(tensors[inputs[input_id]])
-    ifm = tensors[inputs[4]]
-    ofm = tensors[outputs[0]]
-
-    # Only fetch first ifm in the list, since it has checked that all ifm have the same shape in the TS model
-    ifm_shape = ifm.get("shape")
-    ofm_shape = ofm.get("shape")
-    if ifm.get("type") == "INT8":
-        ifm_elem_size = 8
-        ofm_elem_size = 8
-    else:
-        ifm_elem_size = 32
-        ofm_elem_size = 32
-    # ifm's size (bytes)
-    ifm_storge_size = 1
-    if ifm_shape != []:
-        for dim in ifm_shape:
-            ifm_storge_size *= dim
-        ifm_storge_size *= (ifm_elem_size / 8)
-
-    # Ofm's size (bytes)
-    ofm_storge_size = 1
-    for dim in ofm_shape:
-        ofm_storge_size *= dim
-    ofm_storge_size *= (ofm_elem_size / 8)
-
-    # Ofm elements
-    ofm_elems = 1
-    for dim in ofm_shape:
-        ofm_elems *= dim
-    
-    # Weight tensor
-    weight = tensors[inputs[1]]
-    weight_shape = weight.get("shape")
-    if weight.get("type") == "INT8":
-        weight_elem_size = 8
-    else:
-        weight_elem_size = 32
-    # Weight's size (bytes)
-    weight_storge_size = 1
-    for dim in weight_shape:
-        weight_storge_size *= dim
-    weight_storge_size *= (weight_elem_size / 8)
-    
-    # Bias tensor
-    bias = tensors[inputs[2]]
-    bias_shape = bias.get("shape")
-    if bias.get("type") == "INT32":
-        bias_elem_size = 32
-    else:
-        raise "Bias only support INT32 data type"
-    # bias's size (bytes)
-    bias_storge_size = bias_shape[0] * (bias_elem_size / 8)
-
-    # Configuration
-    oc = 1
-    kh = weight_shape[1]
-    kw = weight_shape[2]
-    ic = 1
-    oh = ofm_shape[1]
-    ow = ofm_shape[2]
-
-    # DMA transfer cycles
-    have_data_layout_parent = False
-    for parent_op in model.ops[opid].parents:
-        opcode_index = model.ops[parent_op].info.get("opcode_index")
-        opcode_type = model.opcodes[opcode_index].get("builtin_code")
-        if opcode_type in data_layout_op:
-            have_data_layout_parent = True
-            break
-    if model.pipeline_schedule and not have_data_layout_parent:
-        # Filter and bias are fetched from DRAM
-        dram_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, weight_storge_size + bias_storge_size)
-    else:
-        dram_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size + weight_storge_size + bias_storge_size + ofm * 2)
-
-    # Computations cycles
-    op_cycles = math.ceil(oc / ArchitectureFeatures.MAC_width) * oh * ow * math.ceil(ic / ArchitectureFeatures.MAC_height) * kh * kw
-    op_cycles *= ArchitectureFeatures.output_cycles_per_elem["MAC"]
-    op_cycles *= ofm_shape[3]
-
-    dma_transfer_cycles = dram_transfer_cycles
-
-    # Requantize cycles
-    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"]
-    op_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
-
-    total_cycles = dma_transfer_cycles + op_cycles
-    return (dma_transfer_cycles, op_cycles, total_cycles)
-
-# Refer to Planaria's implementation
-# Estimate the number of cycles for a given mean operation
-# MEAN's requant cost refer to tflm's data
-# Refer to vela's optimization, mean will break into depthwise convolution then perform divide operation
-def estimate_mean_cycles(model: Graph, opid: int) -> int:
-    # Mean op will be converted to depthwise convolution + mul
-    tensors = model.tensors
-    info = model.ops[opid].info
-    inputs = info.get("inputs")
-    outputs = info.get("outputs")
-
-    if len(inputs) != 2 or len(outputs) != 1:
-        raise "Mean operation should have 2 inputs and 1 output"
-    
-    ifm = tensors[inputs[0]]
-    ofm = tensors[outputs[0]]
-    axis = model.buffers[tensors[inputs[1]]['buffer']]['data'][0]
-
-    # Only fetch first ifm in the list, since it has checked that all ifm have the same shape in the TS model
-    ifm_shape = ifm.get("shape")
-    ofm_shape = ofm.get("shape")
-    if ifm.get("type") == "INT8" and ofm.get("type") == "INT8":
-        ifm_elem_size = 8
-        ofm_elem_size = 8
-    else:
-        ifm_elem_size = 32
-        ofm_elem_size = 32
-    # ifm's size (bytes)
-    ifm_storge_size = 1
-    if ifm_shape != []:
-        for dim in ifm_shape:
-            ifm_storge_size *= dim
-        ifm_storge_size *= (ifm_elem_size / 8)
-
-    # ofm's size (bytes) & elements
-    ofm_storge_size = 1
-    ofm_elems = 1
-    for dim in ofm_shape:
-        ofm_storge_size *= dim
-        ofm_elems *= dim
-    ofm_storge_size *= (ofm_elem_size / 8)
-
-    # Configuration
-    oc = 1
-    kh = 1
-    kw = 1
-    ic = ifm_shape[axis]
-    oh = ofm_shape[0]
-    ow = ofm_shape[1]
-
-    # DMA transfer cycles
-    have_data_layout_parent = False
-    for parent_op in model.ops[opid].parents:
-        opcode_index = model.ops[parent_op].info.get("opcode_index")
-        opcode_type = model.opcodes[opcode_index].get("builtin_code")
-        if opcode_type in data_layout_op:
-            have_data_layout_parent = True
-            break
-    if model.pipeline_schedule and not have_data_layout_parent:
-        dram_transfer_cycles = 0
-        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
-        # For transfer MAC engine's result to element-wise engine
-        sram_transfer_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
-    else:
-        dram_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size + ofm_storge_size)
-        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
-        # For transfer MAC engine's result to element-wise engine
-        sram_transfer_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
-
-    # Computations cycles
-    op_cycles = math.ceil(oc / ArchitectureFeatures.MAC_width) * oh * ow * math.ceil(ic / ArchitectureFeatures.MAC_height) * kh * kw
-    op_cycles *= ArchitectureFeatures.output_cycles_per_elem["MAC"]
-
-    # Perform division (reciprocal + mul)
-    divide_cycles = (math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * \
-                  (ArchitectureFeatures.output_cycles_per_elem["RECIPROCAL"] + ArchitectureFeatures.output_cycles_per_elem["MUL"] + \
-                   ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"]))
-    divide_cycles = max(divide_cycles, sram_transfer_cycles)
-
-    # DMA transfer cycles
-    dma_transfer_cycles = dram_transfer_cycles 
-
-    total_cycles = dma_transfer_cycles + op_cycles + divide_cycles
-    return dma_transfer_cycles, op_cycles, total_cycles
-
-# Refer to Planaria's implementation
-# Estimate the number of cycles for a given maxpool operation
-def estimate_maxpool_cycles(model: Graph, opid: int) -> int:
-    tensors = model.tensors
-    info = model.ops[opid].info
-    inputs = info.get("inputs")
-    outputs = info.get("outputs")
-
-    # Not constraint the number of inputs, since in TS model, the input tensor is represent the dependence relationship, so it may have more than 1 inputs
-    if len(outputs) != 1:
-        raise "MaxPool operation should have at least 1 output"
-    
-    ifm = tensors[inputs[0]]
-    ofm = tensors[outputs[0]]
-    ifm_shape = ifm.get("shape")
-    ofm_shape = ofm.get("shape")
-    if ifm.get("type") == "INT8" and ofm.get("type") == "INT8":
-        ifm_elem_size = 8
-        ofm_elem_size = 8
-    else:
-        ifm_elem_size = 32
-        ofm_elem_size = 32
-    
-    # Ifm's size (bytes)
-    ifm_storge_size = 1
-    if ifm_shape != []:
-        for dim in ifm_shape:
-            ifm_storge_size *= dim
-        ifm_storge_size *= (ifm_elem_size / 8)
-
-    # Ofm's size (bytes)
-    ofm_storge_size = 1
-    for dim in ofm_shape:
-        ofm_storge_size *= dim
-    ofm_storge_size *= (ofm_elem_size / 8)
-
-    # Ofm elements
-    ofm_elems = 1
-    for dim in ofm_shape:
-        ofm_elems *= dim
-
-    # Kernel shape
-    ker_shape = (info['builtin_options']['filter_height'], info['builtin_options']['filter_width'])
-
-    # Configuration
-    oc = ofm_shape[3]
-    kh = ker_shape[0]
-    kw = ker_shape[1]
-    ic = ofm_shape[3]
-    oh = ofm_shape[1]
-    ow = ofm_shape[2]
-
-    # DMA transfer cycles + IFM, OFM read/write cycles
-    have_data_layout_parent = False
-    for parent_op in model.ops[opid].parents:
-        opcode_index = model.ops[parent_op].info.get("opcode_index")
-        opcode_type = model.opcodes[opcode_index].get("builtin_code")
-        if opcode_type in data_layout_op:
-            have_data_layout_parent = True
-            break
-    if model.pipeline_schedule and not have_data_layout_parent:
-        dram_transfer_cycles = 0
-    else:
-        dram_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size + ofm_storge_size)
-
-    # Computations cycles
-    op_cycles = math.ceil(oc / ArchitectureFeatures.MAC_width) * oh * ow * math.ceil(ic / ArchitectureFeatures.MAC_height) * kh * kw
-    op_cycles *= ArchitectureFeatures.output_cycles_per_elem["MAC"]
-
-    dma_transfer_cycles = dram_transfer_cycles
-
-    total_cycles = dma_transfer_cycles + op_cycles
-    return (dma_transfer_cycles, op_cycles, total_cycles)
-
-# Estimate the number of cycles for a given rsqrt operation
-def estimate_rsqrt_cycles(model: Graph, opid: int) -> int:
-    tensors = model.tensors
-    info = model.ops[opid].info
-    inputs = info.get("inputs")
-    outputs = info.get("outputs")
-
-    if len(inputs) != 1 or len(outputs) != 1:
-        raise "Rsqrt operation should have 1 inputs and 1 output"
-    
-    ifm = tensors[inputs[0]]
-    ofm = tensors[outputs[0]]
-    ifm_shape = ifm.get("shape")
-    ofm_shape = ofm.get("shape")
-
-    if ifm.get("type") == "INT8" and ofm.get("type") == "INT8":
-        ifm_elem_size = 8
-        ofm_elem_size = 8
-    else:
-        ifm_elem_size = 32
-        ofm_elem_size = 32
-    
-    # ifm's size (bytes)
-    ifm_storge_size = 1
-    if ifm_shape != []:
-        for dim in ifm_shape:
-            ifm_storge_size *= dim
-        ifm_storge_size *= (ifm_elem_size / 8)
-
-    # ofm's size (bytes) & elements
-    ofm_storge_size = 1
-    ofm_elems = 1
-    for dim in ofm_shape:
-        ofm_storge_size *= dim
-        ofm_elems *= dim
-    ofm_storge_size *= (ofm_elem_size / 8)
-
-    # Data transfer cycles
-    have_data_layout_parent = False
-    for parent_op in model.ops[opid].parents:
-        opcode_index = model.ops[parent_op].info.get("opcode_index")
-        opcode_type = model.opcodes[opcode_index].get("builtin_code")
-        if opcode_type in data_layout_op:
-            have_data_layout_parent = True
-            break
-    if model.pipeline_schedule and not have_data_layout_parent:
-        dram_transfer_cycles = 0
-        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
-        sram_transfer_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
-    else:
-        dram_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size + ofm_storge_size)
-        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
-        sram_transfer_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
-
-    # Computations cycles
-    # Rsqrt(x) = 1 / sqrt(x) almost equal to 3*mul + 1*sub
-    # Above reference: https://blog.csdn.net/qq_26499321/article/details/73724763
-    # Element-wise operation will speedup by vectorization
-    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["RSQRT"]
-    op_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
-    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"]
-    op_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
-
-    # DMA transfer cycles
-    dma_transfer_cycles = dram_transfer_cycles + max(0, sram_transfer_cycles - op_cycles)
-
-    total_cycles = op_cycles + dma_transfer_cycles
-    return dma_transfer_cycles, op_cycles, total_cycles
-
-# Estimate the number of cycles for a given squared difference operation
-def estimate_squared_difference_cycles(model: Graph, opid: int) -> int:
-    tensors = model.tensors
-    info = model.ops[opid].info
-    inputs = info.get("inputs")
-    outputs = info.get("outputs")
-
-    if len(inputs) != 2 or len(outputs) != 1:
-        raise "SquaredDifference operation should have 2 inputs and 1 output"
-    ifm1 = tensors[inputs[0]]
-    ifm2 = tensors[inputs[1]]
-    ofm = tensors[outputs[0]]
-    ifm1_shape = ifm1.get("shape")
-    ifm2_shape = ifm2.get("shape")
-    ofm_shape = ofm.get("shape")
-    if ifm1.get("type") == "INT8" and ifm2.get("type") == "INT8" and ofm.get("type") == "INT8":
-        ifm1_elem_size = 8
-        ifm2_elem_size = 8
-        ofm_elem_size = 8
-    else:
-        ifm1_elem_size = 32
-        ifm2_elem_size = 32
-        ofm_elem_size = 32
-    
-    # ifm's size (bytes)
-    ifm1_storge_size = 1
-    if ifm1_shape != []:
-        for dim in ifm1_shape:
-            ifm1_storge_size *= dim
-        ifm1_storge_size *= (ifm1_elem_size / 8)
-    ifm2_storge_size = 1
-    if ifm2_shape != []:
-        for dim in ifm2_shape:
-            ifm2_storge_size *= dim
-        ifm2_storge_size *= (ifm2_elem_size / 8)
-
-    # ofm's size (bytes) & elements
-    ofm_storge_size = 1
-    ofm_elems = 1
-    for dim in ofm_shape:
-        ofm_storge_size *= dim
-        ofm_elems *= dim
-    ofm_storge_size *= (ofm_elem_size / 8)
-    
-    # Data transfer cycles
-    have_data_layout_parent = False
-    for parent_op in model.ops[opid].parents:
-        opcode_index = model.ops[parent_op].info.get("opcode_index")
-        opcode_type = model.opcodes[opcode_index].get("builtin_code")
-        if opcode_type in data_layout_op:
-            have_data_layout_parent = True
-            break
-    if model.pipeline_schedule and not have_data_layout_parent:
-        dram_transfer_cycles = 0
-        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
-        sram_transfer_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
-    else:
-        dram_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm1_storge_size + ifm2_storge_size + ofm_storge_size)
-        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
-        sram_transfer_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
-
-    # Computations cycles (x - y)(x - y)
-    # Element-wise operation will speedup by vectorization
-    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["ADD/SUB"]
-    op_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
-    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["MUL"]
-    op_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
-    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"]
-    op_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
-
-    # DMA transfer cycles
-    dma_transfer_cycles = dram_transfer_cycles + max(0, sram_transfer_cycles - op_cycles)
-
-    total_cycles = dma_transfer_cycles + op_cycles
-    return dma_transfer_cycles, op_cycles, total_cycles
-
-# Estimate the number of cycles for a given pow operation
-def estimate_pow_cycles(model: Graph, opid: int) -> int:
-    tensors = model.tensors
-    info = model.ops[opid].info
-    inputs = info.get("inputs")
-    outputs = info.get("outputs")
-
-    if len(inputs) != 2 or len(outputs) != 1:
-        raise "Pow operation should have 2 inputs and 1 output"
-    ifm = tensors[inputs[0]]
-    # Extract the exponent from the second input tensor, tflite store the data in little-endian format
-    exp_tensor = tensors[inputs[1]]
-    exp_buffer_data = bytes(model.buffers[exp_tensor['buffer']]['data'])
-    import struct
-    # Parse the exp_buffer_data to get the exponent, '<': little-endian, 'f': float
-    Exponent = int(struct.unpack('<f', exp_buffer_data)[0])
-    
-    ofm = tensors[outputs[0]]
-    ifm_shape = ifm.get("shape")
-    ofm_shape = ofm.get("shape")
-    if ifm.get("type") == "INT8" and ofm.get("type") == "INT8":
-        ifm_elem_size = 8
-        ofm_elem_size = 8
-    else:
-        ifm_elem_size = 32
-        ofm_elem_size = 32
-    
-    # ifm's size (bytes)
-    ifm_storge_size = 1
-    if ifm_shape != []:
-        for dim in ifm_shape:
-            ifm_storge_size *= dim
-        ifm_storge_size *= (ifm_elem_size / 8)
-    
-    # ofm's size (bytes) & elements
-    ofm_storge_size = 1
-    ofm_elems = 1
-    for dim in ofm_shape:
-        ofm_storge_size *= dim
-        ofm_elems *= dim
-    ofm_storge_size *= (ofm_elem_size / 8)
-
-    # Data transfer cycles
-    have_data_layout_parent = False
-    for parent_op in model.ops[opid].parents:
-        opcode_index = model.ops[parent_op].info.get("opcode_index")
-        opcode_type = model.opcodes[opcode_index].get("builtin_code")
-        if opcode_type in data_layout_op:
-            have_data_layout_parent = True
-            break
-    if model.pipeline_schedule and not have_data_layout_parent:
-        dram_transfer_cycles = 0
-        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
-        sram_transfer_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
-    else:
-        dram_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size + ofm_storge_size)
-        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
-        sram_transfer_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
-    
-    # Computations cycles
-    # Element-wise operation will speedup by vectorization
-    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["MUL"] * (Exponent - 1)
-    op_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
-    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"] * 2
-    op_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
-
-    # DMA transfer cycles
-    dma_transfer_cycles = dram_transfer_cycles + max(0, sram_transfer_cycles - op_cycles)
-
-    total_cycles = dma_transfer_cycles + op_cycles
-    return dma_transfer_cycles, op_cycles, total_cycles
-
-# Estimate the number of cycles for a given tanh operation
-def estimate_tanh_cycles(model: Graph, opid: int) -> int:
-    tensors = model.tensors
-    info = model.ops[opid].info
-    inputs = info.get("inputs")
-    outputs = info.get("outputs")
-
-    if len(inputs) != 1 or len(outputs) != 1:
-        raise "Tanh operation should have 1 inputs and 1 output"
-    ifm = tensors[inputs[0]]
-    ofm = tensors[outputs[0]]
-    ifm_shape = ifm.get("shape")
-    ofm_shape = ofm.get("shape")
-    if ifm.get("type") == "INT8" and ofm.get("type") == "INT8":
-        ifm_elem_size = 8
-        ofm_elem_size = 8
-    else:
-        ifm_elem_size = 32
-        ofm_elem_size = 32
-
-    # ifm's size (bytes)
-    ifm_storge_size = 1
-    if ifm_shape != []:
-        for dim in ifm_shape:
-            ifm_storge_size *= dim
-        ifm_storge_size *= (ifm_elem_size / 8)
-
-    # ofm's size (bytes) & elements
-    ofm_storge_size = 1
-    ofm_elems = 1
-    for dim in ofm_shape:
-        ofm_storge_size *= dim
-        ofm_elems *= dim
-    ofm_storge_size *= (ofm_elem_size / 8)
-
-    # Data transfer cycles
-    have_data_layout_parent = False
-    for parent_op in model.ops[opid].parents:
-        opcode_index = model.ops[parent_op].info.get("opcode_index")
-        opcode_type = model.opcodes[opcode_index].get("builtin_code")
-        if opcode_type in data_layout_op:
-            have_data_layout_parent = True
-            break
-    if model.pipeline_schedule and not have_data_layout_parent:
-        dram_transfer_cycles = 0
-        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
-        sram_transfer_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
-    else:
-        dram_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size + ofm_storge_size)
-        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
-        sram_transfer_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
-
-    # Computations cycles
-    # Element-wise operation will speedup by vectorization
-    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["TANH"]
-    op_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
-    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"]
-    op_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
-
-    # DMA transfer cycles
-    dma_transfer_cycles = dram_transfer_cycles + max(0, sram_transfer_cycles - op_cycles)
-
-    total_cycles = dma_transfer_cycles + op_cycles
-    return dma_transfer_cycles, op_cycles, total_cycles
-
-# Estimate the number of cycles for a given gelu operation
-def estimate_gelu_cycles(model: Graph, opid: int) -> int:
-    tensors = model.tensors
-    info = model.ops[opid].info
-    inputs = info.get("inputs")
-    outputs = info.get("outputs")
-
-    if len(inputs) != 1 or len(outputs) != 1:
-        raise "Gelu operation should have 1 inputs and 1 output"
-    ifm = tensors[inputs[0]]
-    ofm = tensors[outputs[0]]
-    ifm_shape = ifm.get("shape")
-    ofm_shape = ofm.get("shape")
-    if ifm.get("type") == "INT8" and ofm.get("type") == "INT8":
-        ifm_elem_size = 8
-        ofm_elem_size = 8
-    else:
-        ifm_elem_size = 32
-        ofm_elem_size = 32
-    
-    # ifm's size (bytes)
-    ifm_storge_size = 1
-    if ifm_shape != []:
-        for dim in ifm_shape:
-            ifm_storge_size *= dim
-        ifm_storge_size *= (ifm_elem_size / 8)
-
-    # ofm's size (bytes) & elements
-    ofm_storge_size = 1
-    ofm_elems = 1
-    for dim in ofm_shape:
-        ofm_storge_size *= dim
-        ofm_elems *= dim
-    ofm_storge_size *= (ofm_elem_size / 8)
-
-    # Data transfer cycles
-    have_data_layout_parent = False
-    for parent_op in model.ops[opid].parents:
-        opcode_index = model.ops[parent_op].info.get("opcode_index")
-        opcode_type = model.opcodes[opcode_index].get("builtin_code")
-        if opcode_type in data_layout_op:
-            have_data_layout_parent = True
-            break
-    if model.pipeline_schedule and not have_data_layout_parent:
-        dram_transfer_cycles = 0
-        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
-        sram_transfer_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
-    else:
-        dram_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size + ofm_storge_size)
-        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
-        sram_transfer_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
-
-    # Computations cycles gelu(x)  = x * logistic(1.702 * x)
-    # Element-wise operation will speedup by vectorization
-    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["MUL"]
-    op_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
-    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"] * 2
-    op_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
-    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["LOGISTIC"]
-    op_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
-    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["MUL"]
-    op_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
-
-    # DMA transfer cycles
-    dma_transfer_cycles = dram_transfer_cycles + max(0, sram_transfer_cycles - op_cycles)
-
-    total_cycles = dma_transfer_cycles + op_cycles
-    return dma_transfer_cycles, op_cycles, total_cycles
-
-# Refer to Planaria's implementation
-# Estimate the number of cycles for a given fully connected operation
-def estimate_fully_connected_cycles(model: Graph, opid: int) -> int:
-    tensors = model.tensors
-    info = model.ops[opid].info
-    inputs = info.get("inputs")
-    outputs = info.get("outputs")
-
-    # Not constraint the number of inputs, since in our model, we will perform fake concat operation to merge the input tensors
-    if len(outputs) != 1:
-        raise "FullyConnected operation should have at least 1 output"
-    
-    ifm = tensors[inputs[0]]
-    ofm = tensors[outputs[0]]
-    ifm_shape = ifm.get("shape")
-    ofm_shape = ofm.get("shape")
-    if ifm.get("type") == "INT8" and ofm.get("type") == "INT8":
-        ifm_elem_size = 8
-        ofm_elem_size = 8
-    else:
-        ifm_elem_size = 32
-        ofm_elem_size = 32
-    
-    # Ifm's size (bytes)
-    ifm_storge_size = 1
-    if ifm_shape != []:
-        for dim in ifm_shape:
-            ifm_storge_size *= dim
-        ifm_storge_size *= (ifm_elem_size / 8)
-
-    # Ofm's size (bytes)
-    ofm_storge_size = 1
-    for dim in ofm_shape:
-        ofm_storge_size *= dim
-    ofm_storge_size *= (ofm_elem_size / 8)
-
-    # Ofm elements
-    ofm_elems = 1
-    for dim in ofm_shape:
-        ofm_elems *= dim
-
-    # Weight tensor
-    weight = tensors[inputs[1]]
-    weight_shape = weight.get("shape")
-    if weight.get("type") == "INT8":
-        weight_elem_size = 8
-    else:
-        weight_elem_size = 32
-    # Weight's size (bytes)
-    weight_storge_size = weight_shape[0] * weight_shape[1] * (weight_elem_size / 8)
-
-    # Bias tensor
-    # Assume bias tensor is None
-
-    # Configuration
-    # Fully connected layer can be replaced to a 1x1 convolution
-    oc = weight_shape[0]
-    kh = 1
-    kw = 1
-    ic = weight_shape[1]
-    oh = ofm_shape[-2]
-    ow = 1
-
-    # DMA transfer cycles + IFM, OFM read/write cycles
-    have_data_layout_parent = False
-    for parent_op in model.ops[opid].parents:
-        opcode_index = model.ops[parent_op].info.get("opcode_index")
-        opcode_type = model.opcodes[opcode_index].get("builtin_code")
-        if opcode_type in data_layout_op:
-            have_data_layout_parent = True
-            break
-    if model.pipeline_schedule and not have_data_layout_parent:
-        dram_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, weight_storge_size)
-    else:
-        dram_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size + weight_storge_size + ofm_storge_size * 2)
-
-    # Computations cycles
-    op_cycles = math.ceil(oc / ArchitectureFeatures.MAC_width) * oh * ow * math.ceil(ic / ArchitectureFeatures.MAC_height) * kh * kw
-    op_cycles *= ArchitectureFeatures.output_cycles_per_elem["MAC"]
-
-    dma_transfer_cycles = dram_transfer_cycles
-
-    # Requantize cycles
-    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"]
-    op_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
-
-    total_cycles = dma_transfer_cycles + op_cycles
-    return (dma_transfer_cycles, op_cycles, total_cycles)
-
-# Estimate the number of cycles for a given softmax operation
-def estimate_softmax_cycles(model: Graph, opid: int) -> int:
-    tensors = model.tensors
-    info = model.ops[opid].info
-    inputs = info.get("inputs")
-    outputs = info.get("outputs")
-
-    if len(inputs) != 1 or len(outputs) != 1:
-        raise "Softmax operation should have 1 inputs and 1 output"
-    ifm = tensors[inputs[0]]
-    ofm = tensors[outputs[0]]
-    ifm_shape = ifm.get("shape")
-    ofm_shape = ofm.get("shape")
-    if ifm.get("type") == "INT8" and ofm.get("type") == "INT8":
-        ifm_elem_size = 8
-        ofm_elem_size = 8
-    else:
-        ifm_elem_size = 32
-        ofm_elem_size = 32
-    
-    # ifm's size (bytes)
-    ifm_storge_size = 1
-    if ifm_shape != []:
-        for dim in ifm_shape:
-            ifm_storge_size *= dim
-        ifm_storge_size *= (ifm_elem_size / 8)
-
-    # ofm's size (bytes) & elements
-    ofm_storge_size = 1
-    ofm_elems = 1
-    for dim in ofm_shape:
-        ofm_storge_size *= dim
-        ofm_elems *= dim
-    ofm_storge_size *= (ofm_elem_size / 8)
-
-    # Data transfer cycles
-    have_data_layout_parent = False
-    for parent_op in model.ops[opid].parents:
-        opcode_index = model.ops[parent_op].info.get("opcode_index")
-        opcode_type = model.opcodes[opcode_index].get("builtin_code")
-        if opcode_type in data_layout_op:
-            have_data_layout_parent = True
-            break
-    if model.pipeline_schedule and not have_data_layout_parent:
-        dram_transfer_cycles = 0
-        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
-        sram_transfer_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
-    else:
-        dram_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size + ofm_storge_size)
-        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
-        sram_transfer_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
-
-    # Computations cycles
-    # Softmax(x) = exp(x) / sum(exp(x))
-    # Element-wise operation will speedup by vectorization
-    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"] * 2
-    op_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
-    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["EXP"]
-    op_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
-    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["REDUCE_SUM"]
-    op_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
-    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["RECIPROCAL"]
-    op_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
-    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["MUL"]
-    op_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
-
-    # DMA transfer cycles
-    dma_transfer_cycles = dram_transfer_cycles + max(0, sram_transfer_cycles - op_cycles)
-
-    total_cycles = dma_transfer_cycles + op_cycles
-    return dma_transfer_cycles, op_cycles, total_cycles
-
-# Estimate the number of cycles for a given batch matmul operation
-# TODO: this estimation is not accurate
-def estimate_batch_matmul_cycles(model: Graph, opid: int) -> int:
-    tensors = model.tensors
-    info = model.ops[opid].info
-    inputs = info.get("inputs")
-    outputs = info.get("outputs")
-
-    if len(inputs) != 2 or len(outputs) != 1:
-        raise "BatchMatmul operation should have 2 inputs and 1 output"
-    ifm1 = tensors[inputs[0]]
-    ifm2 = tensors[inputs[1]]
-    ofm = tensors[outputs[0]]
-    ifm1_shape = ifm1.get("shape")
-    ifm2_shape = ifm2.get("shape")
-    ofm_shape = ofm.get("shape")
-    if ifm1.get("type") == "INT8" and ifm2.get("type") == "INT8" and ofm.get("type") == "INT8":
-        ifm1_elem_size = 8
-        ifm2_elem_size = 8
-        ofm_elem_size = 8
-    else:
-        ifm1_elem_size = 32
-        ifm2_elem_size = 32
-        ofm_elem_size = 32
-    
-    # ifm's size (bytes)
-    ifm1_storge_size = 1
-    if ifm1_shape != []:
-        for dim in ifm1_shape:
-            ifm1_storge_size *= dim
-        ifm1_storge_size *= (ifm1_elem_size / 8)
-    ifm2_storge_size = 1
-    if ifm2_shape != []:
-        for dim in ifm2_shape:
-            ifm2_storge_size *= dim
-        ifm2_storge_size *= (ifm2_elem_size / 8)
-
-    # ofm's size (bytes)
-    ofm_storge_size = 1
-    for dim in ofm_shape:
-        ofm_storge_size *= dim
-    ofm_storge_size *= (ofm_elem_size / 8)
-
-    # ofm's elements
-    ofm_elems = 1
-    for dim in ofm_shape:
-        ofm_elems *= dim
-
-    # DMA transfer cycles + IFM, OFM read/write cycles
-    have_data_layout_parent = False
-    for parent_op in model.ops[opid].parents:
-        opcode_index = model.ops[parent_op].info.get("opcode_index")
-        opcode_type = model.opcodes[opcode_index].get("builtin_code")
-        if opcode_type in data_layout_op:
-            have_data_layout_parent = True
-            break
-    if model.pipeline_schedule and not have_data_layout_parent:
-        # The weight tensor is stored in DRAM
-        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm2_storge_size) 
-        dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_storge_size)
-        # Assume input tensors can be accessed in parallel, one output element needs inner_product_size MACs
-        inner_product_size = ifm1_shape[3]
-        one_ifm_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, inner_product_size)
-        # Our MAC engine have 64 PEs
-        dma_transfer_cycles += (inner_product_size / ArchitectureFeatures.MAC_PE) * one_ifm_transfer_cycles * ofm_elems
-    else:
-        dma_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm1_storge_size + ifm2_storge_size + ofm_storge_size)
-        dma_transfer_cycles += estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_storge_size)
-        # Assume input tensors can be accessed in parallel, one output element needs inner_product_size MACs
-        inner_product_size = ifm1_shape[3]
-        one_ifm_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, inner_product_size)
-        # Our MAC engine have 64 PEs
-        dma_transfer_cycles += (inner_product_size / ArchitectureFeatures.MAC_PE) * one_ifm_transfer_cycles * ofm_elems
-
-    # Computations cycles
-    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["MAC"]
-    # Total produce height * width * channel elements, each element need ifm1's channel MACs
-    MACs = ofm_shape[0] * ofm_shape[1] * ofm_shape[2] * ofm_shape[3] * ifm1_shape[3]
-    op_cycles = MACs * cycle_per_elem
-
-    total_cycles = dma_transfer_cycles + op_cycles
-    return dma_transfer_cycles, op_cycles, total_cycles
-
-# Estimate the number of cycles for a given reduce_max operation
-def estimate_reduce_max_cycles(model: Graph, opid: int) -> int:
-    tensors = model.tensors
-    info = model.ops[opid].info
-    inputs = info.get("inputs")
-    outputs = info.get("outputs")
-
-    if len(inputs) != 2 or len(outputs) != 1:
-        raise "ReduceMax operation should have 2 inputs and 1 output"
-    ifm = tensors[inputs[0]]
-    ofm = tensors[outputs[0]]
-    ifm_shape = ifm.get("shape")
-    ofm_shape = ofm.get("shape")
-    if ifm.get("type") == "INT8" and ofm.get("type") == "INT8":
-        ifm_elem_size = 8
-        ofm_elem_size = 8
-    else:
-        ifm_elem_size = 32
-        ofm_elem_size = 32
-    
-    axis_buffer = model.buffers[model.tensors[info['inputs'][1]]['buffer']]
-    axis = axis_buffer['data'][0]
-    reduce_size = ifm_shape[axis]
-    
-    # ifm's size (bytes)
-    ifm_storge_size = 1
-    if ifm_shape != []:
-        for dim in ifm_shape:
-            ifm_storge_size *= dim
-        ifm_storge_size *= (ifm_elem_size / 8)
-
-    # ofm's size (bytes) & elements
-    ofm_storge_size = 1
-    ofm_elems = 1
-    for dim in ofm_shape:
-        ofm_storge_size *= dim
-        ofm_elems *= dim
-    ofm_storge_size *= (ofm_elem_size / 8)
-
-    # Data transfer cycles
-    have_data_layout_parent = False
-    for parent_op in model.ops[opid].parents:
-        opcode_index = model.ops[parent_op].info.get("opcode_index")
-        opcode_type = model.opcodes[opcode_index].get("builtin_code")
-        if opcode_type in data_layout_op:
-            have_data_layout_parent = True
-            break
-    if model.pipeline_schedule and not have_data_layout_parent:
-        dram_transfer_cycles = 0
-        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
-        sram_transfer_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
-    else:
-        dram_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size + ofm_storge_size)
-        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
-        sram_transfer_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
-
-    # Computations cycles
-    # Assume each element need reduce_size - 1 cycles to compare
-    # Element-wise operation will speedup by vectorization
-    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["REDUCE_MAX"] * (reduce_size - 1)
-    op_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
-    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"]
-    op_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
-
-    # DMA transfer cycles
-    dma_transfer_cycles = dram_transfer_cycles + max(0, sram_transfer_cycles - op_cycles)
-
-    total_cycles = dma_transfer_cycles + op_cycles
-    return dma_transfer_cycles, op_cycles, total_cycles
-
-# Estimate the number of cycles for a given quantize operation
-def estimate_quantize_cycles(model: Graph, opid: int) -> int:
-    tensors = model.tensors
-    info = model.ops[opid].info
-    inputs = info.get("inputs")
-    outputs = info.get("outputs")
-
-    if len(inputs) != 1 or len(outputs) != 1:
-        raise "Quantize operation should have 1 input and 1 output"
-    ifm = tensors[inputs[0]]
-    ofm = tensors[outputs[0]]
-    ifm_shape = ifm.get("shape")
-    ofm_shape = ofm.get("shape")
-    if ifm.get("type") == "INT8":
-        ifm_elem_size = 8
-    else:
-        ifm_elem_size = 32
-    if ofm.get("type") == "INT8":
-        ofm_elem_size = 8
-    else:
-        ofm_elem_size = 32
-    
-    # ifm's size (bytes)
-    ifm_storge_size = 1
-    if ifm_shape != []:
-        for dim in ifm_shape:
-            ifm_storge_size *= dim
-        ifm_storge_size *= (ifm_elem_size / 8)
-
-    # ofm's size (bytes)
-    # ofm's size (bytes) & elements
-    ofm_storge_size = 1
-    ofm_elems = 1
-    for dim in ofm_shape:
-        ofm_storge_size *= dim
-        ofm_elems *= dim
-    ofm_storge_size *= (ofm_elem_size / 8)
-
-    # Data transfer cycles
-    have_data_layout_parent = False
-    for parent_op in model.ops[opid].parents:
-        opcode_index = model.ops[parent_op].info.get("opcode_index")
-        opcode_type = model.opcodes[opcode_index].get("builtin_code")
-        if opcode_type in data_layout_op:
-            have_data_layout_parent = True
-            break
-    if model.pipeline_schedule and not have_data_layout_parent:
-        dram_transfer_cycles = 0
-        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
-        sram_transfer_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
-    else:
-        dram_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size + ofm_storge_size)
-        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
-        sram_transfer_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
-
-    # Computations cycles
-    # Element-wise operation will speedup by vectorization
-    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"]
-    op_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
-
-    # DMA transfer cycles
-    dma_transfer_cycles = dram_transfer_cycles + max(0, sram_transfer_cycles - op_cycles)
-
-    total_cycles = dma_transfer_cycles + op_cycles
-    return dma_transfer_cycles, op_cycles, total_cycles
-
-# Estimate the number of cycles for a given dequantize operation
-def estimate_dequantize_cycles(model: Graph, opid: int) -> int:
-    tensors = model.tensors
-    info = model.ops[opid].info
-    inputs = info.get("inputs")
-    outputs = info.get("outputs")
-
-    if len(inputs) != 1 or len(outputs) != 1:
-        raise "Dequantize operation should have 1 input and 1 output"
-    ifm = tensors[inputs[0]]
-    ofm = tensors[outputs[0]]
-    ifm_shape = ifm.get("shape")
-    ofm_shape = ofm.get("shape")
-    if ifm.get("type") == "INT8":
-        ifm_elem_size = 8
-    else:
-        ifm_elem_size = 32
-    if ofm.get("type") == "INT8":
-        ofm_elem_size = 8
-    else:
-        ofm_elem_size = 32
-    
-    # ifm's size (bytes)
-    ifm_storge_size = 1
-    if ifm_shape != []:
-        for dim in ifm_shape:
-            ifm_storge_size *= dim
-        ifm_storge_size *= (ifm_elem_size / 8)
-
-    # ofm's size (bytes) & elements
-    ofm_storge_size = 1
-    ofm_elems = 1
-    for dim in ofm_shape:
-        ofm_storge_size *= dim
-        ofm_elems *= dim
-    ofm_storge_size *= (ofm_elem_size / 8)
-
-    # Data transfer cycles
-    have_data_layout_parent = False
-    for parent_op in model.ops[opid].parents:
-        opcode_index = model.ops[parent_op].info.get("opcode_index")
-        opcode_type = model.opcodes[opcode_index].get("builtin_code")
-        if opcode_type in data_layout_op:
-            have_data_layout_parent = True
-            break
-    if model.pipeline_schedule and not have_data_layout_parent:
-        dram_transfer_cycles = 0
-        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
-        sram_transfer_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
-    else:
-        dram_transfer_cycles = estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size + ofm_storge_size)
-        one_element_transfer_cycles = estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
-        sram_transfer_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
-
-    # Computations cycles
-    # Element-wise operation will speedup by vectorization
-    cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"]
-    op_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
-
-    # DMA transfer cycles
-    dma_transfer_cycles = dram_transfer_cycles + max(0, sram_transfer_cycles - op_cycles)
-
-    total_cycles = dma_transfer_cycles + op_cycles
-    return dma_transfer_cycles, op_cycles, total_cycles
-
-# Estimate the number of cycles for memory to memory transfer
-def estimate_mem2mem_cycles(src_tensor_mem_area, dst_tensor_mem_area, transfer_size) -> int:
-    if src_tensor_mem_area == Mem_area.DRAM and dst_tensor_mem_area == Mem_area.SRAM:
-        bws_per_cycle = (ArchitectureFeatures.axi_bit_width / 8) * ArchitectureFeatures.Dram_burst_length * ArchitectureFeatures.Dram_clock_scale
-        transfer_cycles = math.ceil(transfer_size / bws_per_cycle)
-    elif src_tensor_mem_area == Mem_area.SRAM and dst_tensor_mem_area == Mem_area.PE:
-        bws_per_cycle = (ArchitectureFeatures.axi_bit_width / 8) * ArchitectureFeatures.Sram_burst_length * ArchitectureFeatures.Sram_clock_scale
-        transfer_cycles = math.ceil(transfer_size / bws_per_cycle)
-    return transfer_cycles
-
-# Estimate the number of cycles for a given operation
-def estimate_op_cycles(model: Graph, opid: int) -> int:
-    op = model.ops[opid]
-    opcode_index = op.info.get("opcode_index")
-    opcode_type = model.opcodes[opcode_index].get("builtin_code")
-    if opcode_type == "ADD":
-        dma_cycles, op_cycles, total_cycles = estimate_add_cycles(model, opid)
-        op.estimated_DMA_cycles = dma_cycles
-        op.estimated_op_cycles = op_cycles
-        op.estimated_total_cycles = total_cycles
-    elif opcode_type == "SUB":
-        dma_cycles, op_cycles, total_cycles = estimate_sub_cycles(model, opid)
-        op.estimated_DMA_cycles = dma_cycles
-        op.estimated_op_cycles = op_cycles
-        op.estimated_total_cycles = total_cycles
-    elif opcode_type == "MUL":
-        dma_cycles, op_cycles, total_cycles = estimate_mul_cycles(model, opid)
-        op.estimated_DMA_cycles = dma_cycles
-        op.estimated_op_cycles = op_cycles
-        op.estimated_total_cycles = total_cycles
-    elif opcode_type == "LOGISTIC":
-        dma_cycles, op_cycles, total_cycles = estimate_logistic_cycles(model, opid)
-        op.estimated_DMA_cycles = dma_cycles
-        op.estimated_op_cycles = op_cycles
-        op.estimated_total_cycles = total_cycles
-    elif opcode_type == "CONV_2D":
-        dma_cycles, op_cycles, total_cycles = estimate_conv_cycles(model, opid)
-        op.estimated_DMA_cycles = dma_cycles
-        op.estimated_op_cycles = op_cycles
-        op.estimated_total_cycles = total_cycles
-    elif opcode_type == "DEPTHWISE_CONV_2D":
-        dma_cycles, op_cycles, total_cycles = estimate_depthwise_conv_cycles(model, opid)
-        op.estimated_DMA_cycles = dma_cycles
-        op.estimated_op_cycles = op_cycles
-        op.estimated_total_cycles = total_cycles
-    elif opcode_type == "MEAN":
-        dma_cycles, op_cycles, total_cycles = estimate_mean_cycles(model, opid)
-        op.estimated_DMA_cycles = dma_cycles
-        op.estimated_op_cycles = op_cycles
-        op.estimated_total_cycles = total_cycles
-    elif opcode_type == "FULLY_CONNECTED":
-        dma_cycles, op_cycles, total_cycles = estimate_fully_connected_cycles(model, opid)
-        op.estimated_DMA_cycles = dma_cycles
-        op.estimated_op_cycles = op_cycles
-        op.estimated_total_cycles = total_cycles
-    elif opcode_type == "SOFTMAX":
-        dma_cycles, op_cycles, total_cycles = estimate_softmax_cycles(model, opid)
-        op.estimated_DMA_cycles = dma_cycles
-        op.estimated_op_cycles = op_cycles
-        op.estimated_total_cycles = total_cycles
-    elif opcode_type == "MAX_POOL_2D":
-        dma_cycles, op_cycles, total_cycles = estimate_maxpool_cycles(model, opid)
-        op.estimated_DMA_cycles = dma_cycles
-        op.estimated_op_cycles = op_cycles
-        op.estimated_total_cycles = total_cycles
-    elif opcode_type == "RSQRT":
-        dma_cycles, op_cycles, total_cycles = estimate_rsqrt_cycles(model, opid)
-        op.estimated_DMA_cycles = dma_cycles
-        op.estimated_op_cycles = op_cycles
-        op.estimated_total_cycles = total_cycles
-    elif opcode_type == "SQUARED_DIFFERENCE":
-        dma_cycles, op_cycles, total_cycles = estimate_squared_difference_cycles(model, opid)
-        op.estimated_DMA_cycles = dma_cycles
-        op.estimated_op_cycles = op_cycles
-        op.estimated_total_cycles = total_cycles
-    elif opcode_type == "POW":
-        dma_cycles, op_cycles, total_cycles = estimate_pow_cycles(model, opid)
-        op.estimated_DMA_cycles = dma_cycles
-        op.estimated_op_cycles = op_cycles
-        op.estimated_total_cycles = total_cycles
-    elif opcode_type == "TANH":
-        dma_cycles, op_cycles, total_cycles = estimate_tanh_cycles(model, opid)
-        op.estimated_DMA_cycles = dma_cycles
-        op.estimated_op_cycles = op_cycles
-        op.estimated_total_cycles = total_cycles
-    elif opcode_type == "GELU":
-        dma_cycles, op_cycles, total_cycles = estimate_gelu_cycles(model, opid)
-        op.estimated_DMA_cycles = dma_cycles
-        op.estimated_op_cycles = op_cycles
-        op.estimated_total_cycles = total_cycles
-    elif opcode_type == "BATCH_MATMUL":
-        dma_cycles, op_cycles, total_cycles = estimate_batch_matmul_cycles(model, opid)
-        op.estimated_DMA_cycles = dma_cycles
-        op.estimated_op_cycles = op_cycles
-        op.estimated_total_cycles = total_cycles
-    elif opcode_type == "REDUCE_MAX":
-        dma_cycles, op_cycles, total_cycles = estimate_reduce_max_cycles(model, opid)
-        op.estimated_DMA_cycles = dma_cycles
-        op.estimated_op_cycles = op_cycles
-        op.estimated_total_cycles = total_cycles
-    elif opcode_type == "QUANTIZE":
-        dma_cycles, op_cycles, total_cycles = estimate_quantize_cycles(model, opid)
-        op.estimated_DMA_cycles = dma_cycles
-        op.estimated_op_cycles = op_cycles
-        op.estimated_total_cycles = total_cycles
-    elif opcode_type == "DEQUANTIZE":
-        dma_cycles, op_cycles, total_cycles = estimate_dequantize_cycles(model, opid)
-        op.estimated_DMA_cycles = dma_cycles
-        op.estimated_op_cycles = op_cycles
-        op.estimated_total_cycles = total_cycles
-    elif opcode_type == "CONCATENATION" or opcode_type == "SPLIT" or opcode_type == "RESHAPE" or \
-         opcode_type == "SPLIT_V" or opcode_type == "TRANSPOSE" or opcode_type == "RESIZE_NEAREST_NEIGHBOR" or \
-         opcode_type == "PACK":
-        # NPU won't do concatenation, so just set the cycles to 0
-        dma_cycles, op_cycles, total_cycles = 0, 0, 0
-        op.estimated_DMA_cycles = dma_cycles
-        op.estimated_op_cycles = op_cycles
-        op.estimated_total_cycles = total_cycles
-    else:
-        dma_cycles = 0
-        op_cycles = 0
-        total_cycles = 0
-        print(f"Not yet supported {opcode_type}'s cycle estimation, its opcode_index is {opcode_index}")
-    return dma_cycles, op_cycles, total_cycles
-
-def estimate_model(model: Graph, pipeline: bool) -> int:
-    total_dma_cycles = 0
-    total_op_cycles = 0
-    total_cycles = 0
-
-    mac_idle_cycles = 0
-    elem_wise_idle_cycles = 0
-
-    for opid in model.ordered_opid:
-        # w/wo pipeline schedule, the estimated total cycles will be different, since we consider the memory footprint between DRAM and SRAM
-        dma_cycles, op_cycles, op_total_cycles = estimate_op_cycles(model, opid)
-        # For later pipeline schedule, op_total_cycles will be used to determine the overlap range
-        if not pipeline:
-            model.ops[opid].non_overlap_cycles = op_total_cycles
-        total_dma_cycles += dma_cycles
-        total_op_cycles += op_cycles
-        total_cycles += op_total_cycles
-
-        if model.ops[opid].is_mac_main_op == True:
-            elem_wise_idle_cycles += op_cycles
-        elif model.ops[opid].is_elem_wise_main_op == True:
-            mac_idle_cycles += op_cycles
+import struct
+
+# The operation that will be fall back to CPU
+data_layout_ops = ["CONCATENATION", "SPLIT", "SPLIT_V", "TRANSPOSE", "RESIZE_NEAREST_NEIGHBOR", "PACK"]
+reduce_ops = ["REDUCE_MAX"]
+fall_back_cpu_ops = data_layout_ops + reduce_ops
+
+# MAC main operation
+mac_ops = ["CONV_2D", "DEPTHWISE_CONV_2D", "FULLY_CONNECTED", "MEAN", "MAX_POOL_2D", "BATCH_MATMUL"]
+
+# Element-wise main operation
+unary_elementwise_ops = ["LOGISTIC", "SOFTMAX", "RSQRT", "POW", "TANH", "GELU", "QUANTIZE", "DEQUANTIZE"]
+binary_elementwise_ops = ["ADD", "SUB", "MUL", "SQUARED_DIFFERENCE"]
+elementwise_ops = unary_elementwise_ops + binary_elementwise_ops
+
+# The operation that need requantization
+need_requant_ops = ["CONV_2D", "DEPTHWISE_CONV_2D", "FULLY_CONNECTED", "BATCH_MATMUL", "LOGISTIC", "SOFTMAX", "TANH", "GELU", "ADD", "SUB", "MUL", "SQUARED_DIFFERENCE"]
+
+# The operation that need dequantization
+need_dequant_ops = ["LOGISTIC", "SOFTMAX", "TANH", "GELU"]
+
+class simulator:
+    def __init__(self, model: Graph, tensor_storage):
+        self.model = model
+        self.buffers = model.buffers
+        self.tensors = model.tensors
+        self.ops = model.ops
+        self.opcodes = model.opcodes
+        self.tensor_storage = tensor_storage
         
-    if pipeline:
-        cascade_matched_ops = model.cascade_matched_ops
-        # For now, assume the two op parallel execution will take the longer one
-        for cascade_matched_op in cascade_matched_ops:
-            op1 = model.ops[cascade_matched_op[0]]
-            op2_estimated_DMA_cycles = 0
-            op2_estimated_op_cycles = 0
-            op2_estimated_total_cycles = 0
-            for op_id in range(1, len(cascade_matched_op)):
-                op2 = model.ops[cascade_matched_op[op_id]]
-                op2_estimated_DMA_cycles += op2.estimated_DMA_cycles
-                op2_estimated_op_cycles += op2.estimated_op_cycles
-                op2_estimated_total_cycles += op2.estimated_total_cycles
-            if op1.estimated_total_cycles > op2_estimated_total_cycles:
-                total_dma_cycles -= op2_estimated_DMA_cycles
-                total_op_cycles -= op2_estimated_op_cycles
-                total_cycles -= op2_estimated_total_cycles
-                if op1.is_mac_main_op == True:
-                    elem_wise_idle_cycles -= op2.estimated_op_cycles
-            else:
-                total_dma_cycles -= op1.estimated_DMA_cycles
-                total_op_cycles -= op1.estimated_op_cycles
-                total_cycles -= op1.estimated_total_cycles
-                if op1.is_elem_wise_main_op == True:
-                    mac_idle_cycles -= op2.estimated_op_cycles
-        matched_ops = model.matched_ops
-        # For now, assume the two op parallel execution will take the longer one
-        for matched_op in matched_ops:
-            op1 = model.ops[matched_op[0]]
-            op2_estimated_DMA_cycles = 0
-            op2_estimated_op_cycles = 0
-            op2_estimated_total_cycles = 0
-            for op_id in range(1, len(matched_op)):
-                op2 = model.ops[matched_op[op_id]]
-                op2_estimated_DMA_cycles += op2.estimated_DMA_cycles
-                op2_estimated_op_cycles += op2.estimated_op_cycles
-                op2_estimated_total_cycles += op2.estimated_total_cycles
-            if op1.estimated_total_cycles > op2_estimated_total_cycles:
-                total_dma_cycles -= op2_estimated_DMA_cycles
-                total_op_cycles -= op2_estimated_op_cycles
-                total_cycles -= op2_estimated_total_cycles
-            else:
-                total_dma_cycles -= op1.estimated_DMA_cycles
-                total_op_cycles -= op1.estimated_op_cycles
-                total_cycles -= op1.estimated_total_cycles
-    return total_dma_cycles, total_op_cycles, total_cycles, (mac_idle_cycles, elem_wise_idle_cycles)
+    def estimate_elementwise_op_cycles(self, opid: int, op_type: str) -> int:
+        tensors = self.tensors
+        info = self.ops[opid].info
+        inputs = info.get("inputs")
+        outputs = info.get("outputs")
+        need_requant = False
 
-def print_performance(model: Graph):
-    for order, opid in enumerate(model.ordered_opid):
-        op = model.ops[opid]
+        dram_transfer_cycles = 0
+        sram_transfer_cycles = 0
+        op_cycles = 0
+        if op_type in unary_elementwise_ops:
+            ifm = tensors[inputs[0]]
+            ofm = tensors[outputs[0]]
+            ifm_shape = ifm.get("shape")
+            ofm_shape = ofm.get("shape")
+
+            if ifm.get("type") == "INT8" and ofm.get("type") == "INT8":
+                ifm_elem_size = 8
+                ofm_elem_size = 8
+                need_requant = True
+            else:
+                ifm_elem_size = 32
+                ofm_elem_size = 32
+
+            # ifm's size (bytes)
+            ifm_storge_size = 1
+            if ifm_shape != []:
+                for dim in ifm_shape:
+                    ifm_storge_size *= dim
+            ifm_storge_size *= (ifm_elem_size / 8)
+
+            # ofm's size (bytes) & elements
+            ofm_storge_size = 1
+            ofm_elems = 1
+            for dim in ofm_shape:
+                ofm_storge_size *= dim
+                ofm_elems *= dim
+            ofm_storge_size *= (ofm_elem_size / 8)
+
+            # Data transfer cycles
+            # Our elementwise engine adopts a SIMD vector design
+            # IFM's data transfer
+            if self.tensor_storage[inputs[0]] == Mem_area.DRAM:
+                dram_transfer_cycles += self.estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size)
+                one_element_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm_elem_size / 8)
+                sram_transfer_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
+            else:
+                one_element_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm_elem_size / 8)
+                sram_transfer_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
+            # OFM's data transfer
+            if self.tensor_storage[outputs[0]] == Mem_area.DRAM:
+                dram_transfer_cycles += self.estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.DRAM, ofm_storge_size)
+                one_element_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.PE, Mem_area.SRAM, ofm_elem_size / 8)
+                sram_transfer_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
+            else:
+                one_element_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.PE, Mem_area.SRAM, ofm_elem_size / 8)
+                sram_transfer_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
+
+            # Computations cycles
+            # Element-wise operation will speedup by vectorization
+            if op_type == "LOGISTIC":
+                # Logistic(x) = 1 / (1 + exp(-x))
+                cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["LOGISTIC"]
+            elif op_type == "SOFTMAX":
+                # Softmax(x) = exp(x) / sum(exp(x))
+                cycle_per_elem = (ArchitectureFeatures.output_cycles_per_elem["EXP"] + ArchitectureFeatures.output_cycles_per_elem["RECIPROCAL"] + \
+                                ArchitectureFeatures.output_cycles_per_elem["MUL"])
+                # sum(exp(x)) can't be vectorized
+                reduce_sum_need = ifm_shape[-1]
+                reduce_cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["ADD/SUB"]
+                op_cycles += reduce_cycle_per_elem * reduce_sum_need
+            elif op_type == "RSQRT":
+                # Rsqrt(x) = 1 / sqrt(x) almost equal to 3*mul + 1*sub
+                # Above reference: https://blog.csdn.net/qq_26499321/article/details/73724763
+                cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["RSQRT"]
+            elif op_type == "POW":
+                # Pow(x, y) = x^y
+                # Extract the exponent from the second input tensor, tflite store the data in little-endian format
+                exp_tensor = tensors[inputs[1]]
+                exp_buffer_data = bytes(self.buffers[exp_tensor['buffer']]['data'])
+                # Parse the exp_buffer_data to get the exponent, '<': little-endian, 'f': float
+                Exponent = int(struct.unpack('<f', exp_buffer_data)[0])
+                cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["MUL"] * (Exponent - 1)
+            elif op_type == "TANH":
+                # Tanh(x) = (exp(x) - exp(-x)) / (exp(x) + exp(-x))
+                cycle_per_elem = (ArchitectureFeatures.output_cycles_per_elem["EXP"] * 2 + ArchitectureFeatures.output_cycles_per_elem["ADD/SUB"] * 2 + \
+                                ArchitectureFeatures.output_cycles_per_elem["RECIPROCAL"] + ArchitectureFeatures.output_cycles_per_elem["MUL"])
+            elif op_type == "GELU":
+                # Gelu(x) = x * logistic(1.702 * x)
+                cycle_per_elem = (ArchitectureFeatures.output_cycles_per_elem["LOGISTIC"] + ArchitectureFeatures.output_cycles_per_elem["MUL"] * 2)
+            elif op_type == "QUANTIZE":
+                cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"]
+            elif op_type == "DEQUANTIZE":
+                cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"]
+             
+            # Exponantial need to do dequant first
+            if need_requant and op_type in need_dequant_ops:
+                cycle_per_elem += ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"]
+            if need_requant and op_type in need_requant_ops:
+                cycle_per_elem += ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"]
+            op_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
+        elif op_type in binary_elementwise_ops:
+            ifm1 = tensors[inputs[0]]
+            ifm2 = tensors[inputs[1]]
+            ofm = tensors[outputs[0]]
+            ifm1_shape = ifm1.get("shape")
+            ifm2_shape = ifm2.get("shape")
+            ofm_shape = ofm.get("shape")
+
+            if ifm1.get("type") == "INT8" and ifm2.get("type") == "INT8" and ofm.get("type") == "INT8":
+                ifm1_elem_size = 8
+                ifm2_elem_size = 8
+                ofm_elem_size = 8
+                need_requant = True
+            else:
+                ifm1_elem_size = 32
+                ifm2_elem_size = 32
+                ofm_elem_size = 32
+
+            # ifm1's size (bytes)
+            ifm1_storge_size = 1
+            if ifm1_shape != []:
+                for dim in ifm1_shape:
+                    ifm1_storge_size *= dim
+            ifm1_storge_size *= (ifm1_elem_size / 8)
+
+            # ifm2's size (bytes)
+            ifm2_storge_size = 1
+            if ifm2_shape != []:
+                for dim in ifm2_shape:
+                    ifm2_storge_size *= dim
+            ifm2_storge_size *= (ifm2_elem_size / 8)
+
+            # ofm's size (bytes) & elements
+            ofm_storge_size = 1
+            ofm_elems = 1
+            for dim in ofm_shape:
+                ofm_storge_size *= dim
+                ofm_elems *= dim
+            ofm_storge_size *= (ofm_elem_size / 8)
+
+            # Data transfer cycles
+            # Our elementwise engine adopts a SIMD vector design
+            # IFM1's data transfer
+            if self.tensor_storage[inputs[0]] == Mem_area.DRAM:
+                dram_transfer_cycles += self.estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm1_storge_size)
+                one_element_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm1_elem_size / 8)
+                sram_transfer_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
+            else:
+                one_element_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm1_elem_size / 8)
+                sram_transfer_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
+            # IFM2's data transfer
+            if self.tensor_storage[inputs[1]] == Mem_area.DRAM:
+                dram_transfer_cycles += self.estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm2_storge_size)
+                one_element_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm2_elem_size / 8)
+                sram_transfer_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
+            else:
+                one_element_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm2_elem_size / 8)
+                sram_transfer_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
+            # OFM's data transfer
+            if self.tensor_storage[outputs[0]] == Mem_area.DRAM:
+                dram_transfer_cycles += self.estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.DRAM, ofm_storge_size)
+                one_element_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.PE, Mem_area.SRAM, ofm_elem_size / 8)
+                sram_transfer_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
+            else:
+                one_element_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.PE, Mem_area.SRAM, ofm_elem_size / 8)
+                sram_transfer_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
+            
+            # Computations cycles
+            # Element-wise operation will speedup by vectorization
+            if op_type == "ADD":
+                cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["ADD/SUB"]
+            elif op_type == "SUB":
+                cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["ADD/SUB"]
+            elif op_type == "MUL":
+                cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["MUL"]
+            elif op_type == "SQUARED_DIFFERENCE":
+                # SquaredDifference(x, y) = (x - y)(x - y)
+                cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["ADD/SUB"] + ArchitectureFeatures.output_cycles_per_elem["MUL"]
+            
+            # Exponantial need to do dequant first
+            if need_requant and op_type in need_dequant_ops:
+                cycle_per_elem += ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"]
+            if need_requant and op_type in need_requant_ops:
+                cycle_per_elem += ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"]
+            op_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
+
+        dma_transfer_cycles = dram_transfer_cycles + sram_transfer_cycles
+        total_cycles = dma_transfer_cycles + op_cycles
+        return dma_transfer_cycles, op_cycles, total_cycles
+    
+    # Refer to Planaria's implementation
+    def estimate_mac_op_cycles(self, opid: int, op_type: str) -> int:
+        tensors = self.tensors
+        info = self.ops[opid].info
+        inputs = info.get("inputs")
+        outputs = info.get("outputs")
+        need_requant = False
+
+        ofm = tensors[outputs[0]]
+        ofm_shape = ofm.get("shape")
+        if ofm.get("type") == "INT8":
+            ofm_elem_size = 8
+            need_requant = True
+        else:
+            ofm_elem_size = 32
+        
+        # OFM's size (bytes) & elements
+        ofm_storge_size = 1
+        ofm_elems = 1
+        for dim in ofm_shape:
+            ofm_storge_size *= dim
+            ofm_elems *= dim
+        ofm_storge_size *= (ofm_elem_size / 8)
+        
+        weight_storge_size = 0
+        bias_storge_size = 0
+        if op_type == "CONV_2D":
+            oh = ofm_shape[1]
+            ow = ofm_shape[2]
+            filter = tensors[inputs[1]]
+            filter_shape = filter.get("shape")
+            fh = filter_shape[1]
+            fw = filter_shape[2]
+            ic = filter_shape[3]
+            oc = filter_shape[0]
+            stride = info["builtin_options"]["stride_h"]
+
+            # Filter's size (bytes)
+            for dim in filter_shape:
+                weight_storge_size *= dim
+            weight_storge_size *= (ofm_elem_size / 8)
+
+            # Bias's size (bytes)
+            bias = tensors[inputs[2]]
+            bias_shape = bias.get("shape")
+            for dim in bias_shape:
+                bias_storge_size *= dim
+            bias_storge_size *= (ofm_elem_size / 8)
+        elif op_type == "DEPTHWISE_CONV_2D":
+            oh = ofm_shape[1]
+            ow = ofm_shape[2]
+            filter = tensors[inputs[1]]
+            filter_shape = filter.get("shape")
+            fh = filter_shape[1]
+            fw = filter_shape[2]
+            ic = 1
+            oc = 1
+            stride = info["builtin_options"]["stride_h"]
+            # Filter's size (bytes)
+            for dim in filter_shape:
+                weight_storge_size *= dim
+            weight_storge_size *= (ofm_elem_size / 8)
+            # Bias's size (bytes)
+            bias = tensors[inputs[2]]
+            bias_shape = bias.get("shape")
+            for dim in bias_shape:
+                bias_storge_size *= dim
+            bias_storge_size *= (ofm_elem_size / 8)
+        elif op_type == "FULLY_CONNECTED":
+            oh = ofm_shape[-2]
+            ow = 1
+            fh = 1
+            fw = 1
+            weight = tensors[inputs[1]]
+            weight_shape = weight.get("shape")
+            ic = weight_shape[1]
+            oc = weight_shape[0]
+            stride = 1
+            # Weight's size (bytes)
+            for dim in weight_shape:
+                weight_storge_size *= dim
+            weight_storge_size *= (ofm_elem_size / 8)
+        elif op_type == "MEAN":
+            oh = ofm_shape[0]
+            ow = ofm_shape[1]
+            fh = 1
+            fw = 1
+            ifm = tensors[inputs[0]]
+            ifm_shape = ifm.get("shape")
+            axis_tensor = self.tensors[inputs[1]]
+            axis = self.buffers[axis_tensor['buffer']]['data'][0]
+            ic = ifm_shape[axis]
+            oc = 1
+            stride = 1
+            # Weight's size (bytes)
+            weight_storge_size = ifm_shape[axis] * (ofm_elem_size / 8)
+        elif op_type == "MAX_POOL_2D":
+            oh = ofm_shape[1]
+            ow = ofm_shape[2]
+            fh = info["builtin_options"]["filter_height"]
+            fw = info["builtin_options"]["filter_width"]
+            ic = ofm_shape[3]
+            oc = ofm_shape[3]
+            stride = info["builtin_options"]["stride_h"]
+        # This estimation is not accurate
+        elif op_type == "BATCH_MATMUL":
+            oh = ofm_shape[1]
+            ow = ofm_shape[2]
+            fh = 1
+            fw = 1
+            ic = ofm_shape[3]
+            oc = ofm_shape[3]
+            stride = 1
+
+        ih = fh + (oh - 1) * stride
+        iw = fw + (ow - 1) * stride
+        ifm_storge_size = ic * ih * iw * (ofm_elem_size / 8)
+
+        # Data transfer cycles
+        # Filter and bias are fetched from DRAM
+        dram_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, weight_storge_size + bias_storge_size)
+        if self.tensor_storage[inputs[0]] == Mem_area.DRAM:
+            dram_transfer_cycles += self.estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size + ofm_storge_size)
+        dma_transfer_cycles = dram_transfer_cycles
+
+        # Computations cycles
+        op_cycles = math.ceil(oc / ArchitectureFeatures.MAC_width) * oh * ow * math.ceil(ic / ArchitectureFeatures.MAC_height) * fh * fw
+        op_cycles *= ArchitectureFeatures.output_cycles_per_elem["MAC"]
+        # Depthwise convolution will multiply the output channel
+        if op_type == "DEPTHWISE_CONV_2D":
+            op_cycles *= ofm_shape[3]
+        # MEAN need to perform divide operation
+        if op_type == "MEAN":
+            cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["RECIPROCAL"] + ArchitectureFeatures.output_cycles_per_elem["MUL"]
+            op_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
+        if need_requant:
+            cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"]
+            op_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
+
+        total_cycles = dma_transfer_cycles + op_cycles
+        return dma_transfer_cycles, op_cycles, total_cycles
+
+    # Estimate the number of cycles for memory to memory transfer
+    def estimate_mem2mem_cycles(src_tensor_mem_area, dst_tensor_mem_area, transfer_size) -> int:
+        if src_tensor_mem_area == Mem_area.DRAM and dst_tensor_mem_area == Mem_area.SRAM:
+            bws_per_cycle = (ArchitectureFeatures.axi_bit_width / 8) * ArchitectureFeatures.Dram_burst_length * ArchitectureFeatures.Dram_clock_scale
+            transfer_cycles = math.ceil(transfer_size / bws_per_cycle)
+        elif src_tensor_mem_area == Mem_area.SRAM and dst_tensor_mem_area == Mem_area.PE:
+            bws_per_cycle = (ArchitectureFeatures.axi_bit_width / 8) * ArchitectureFeatures.Sram_burst_length * ArchitectureFeatures.Sram_clock_scale
+            transfer_cycles = math.ceil(transfer_size / bws_per_cycle)
+        return transfer_cycles
+
+    # Estimate the number of cycles for a given operation
+    def estimate_op_cycles(self, opid: int) -> int:
+        op = self.ops[opid]
         opcode_index = op.info.get("opcode_index")
-        opcode_type = model.opcodes[opcode_index].get("builtin_code")
-        dma_cycles = op.estimated_DMA_cycles
-        op_cycles = op.estimated_op_cycles
-        op_total_cycles = op.estimated_total_cycles
-        print(f"opcode_index: {opid}, order: {order}, opcode_type: {opcode_type}, DMA cycles: {dma_cycles}, OP cycles: {op_cycles}, Total cycles: {op_total_cycles}")
+        opcode_type = self.opcodes[opcode_index].get("builtin_code")
+        if opcode_type in elementwise_ops:
+            dma_cycles, op_cycles, total_cycles = self.estimate_elementwise_op_cycles(opid, opcode_type)
+            op.estimated_DMA_cycles = dma_cycles
+            op.estimated_op_cycles = op_cycles
+            op.estimated_total_cycles = total_cycles
+        elif opcode_type in mac_ops:
+            dma_cycles, op_cycles, total_cycles = self.estimate_mac_op_cycles(opid, opcode_type)
+            op.estimated_DMA_cycles = dma_cycles
+            op.estimated_op_cycles = op_cycles
+            op.estimated_total_cycles = total_cycles
+        elif opcode_type in fall_back_cpu_ops:
+            # NPU won't do these ops, so for now set the cycles to 0
+            dma_cycles, op_cycles, total_cycles = 0, 0, 0
+            op.estimated_DMA_cycles = dma_cycles
+            op.estimated_op_cycles = op_cycles
+            op.estimated_total_cycles = total_cycles
+        else:
+            dma_cycles = 0
+            op_cycles = 0
+            total_cycles = 0
+            print(f"Not yet supported {opcode_type}'s cycle estimation, its opcode_index is {opcode_index}")
+        return dma_cycles, op_cycles, total_cycles
+
+    def estimate_model(self, pipeline: bool) -> int:
+        total_dma_cycles = 0
+        total_op_cycles = 0
+        total_cycles = 0
+
+        mac_idle_cycles = 0
+        elem_wise_idle_cycles = 0
+
+        for opid in self.model.ordered_opid:
+            # w/wo pipeline schedule, the estimated total cycles will be different, since we consider the memory footprint between DRAM and SRAM
+            dma_cycles, op_cycles, op_total_cycles = self.estimate_op_cycles(opid)
+            # For later pipeline schedule, op_total_cycles will be used to determine the overlap range
+            if not pipeline:
+                self.ops[opid].non_overlap_cycles = op_total_cycles
+            total_dma_cycles += dma_cycles
+            total_op_cycles += op_cycles
+            total_cycles += op_total_cycles
+
+            if self.ops[opid].is_mac_main_op == True:
+                elem_wise_idle_cycles += op_cycles
+            elif self.ops[opid].is_elem_wise_main_op == True:
+                mac_idle_cycles += op_cycles
+            
+        if pipeline:
+            cascade_matched_ops = self.model.cascade_matched_ops
+            # For now, assume the two op parallel execution will take the longer one
+            for cascade_matched_op in cascade_matched_ops:
+                op1 = self.ops[cascade_matched_op[0]]
+                op2_estimated_DMA_cycles = 0
+                op2_estimated_op_cycles = 0
+                op2_estimated_total_cycles = 0
+                for op_id in range(1, len(cascade_matched_op)):
+                    op2 = self.ops[cascade_matched_op[op_id]]
+                    op2_estimated_DMA_cycles += op2.estimated_DMA_cycles
+                    op2_estimated_op_cycles += op2.estimated_op_cycles
+                    op2_estimated_total_cycles += op2.estimated_total_cycles
+                if op1.estimated_total_cycles > op2_estimated_total_cycles:
+                    total_dma_cycles -= op2_estimated_DMA_cycles
+                    total_op_cycles -= op2_estimated_op_cycles
+                    total_cycles -= op2_estimated_total_cycles
+                    if op1.is_mac_main_op == True:
+                        elem_wise_idle_cycles -= op2.estimated_op_cycles
+                else:
+                    total_dma_cycles -= op1.estimated_DMA_cycles
+                    total_op_cycles -= op1.estimated_op_cycles
+                    total_cycles -= op1.estimated_total_cycles
+                    if op1.is_elem_wise_main_op == True:
+                        mac_idle_cycles -= op2.estimated_op_cycles
+            matched_ops = self.model.matched_ops
+            # For now, assume the two op parallel execution will take the longer one
+            for matched_op in matched_ops:
+                op1 = self.ops[matched_op[0]]
+                op2_estimated_DMA_cycles = 0
+                op2_estimated_op_cycles = 0
+                op2_estimated_total_cycles = 0
+                for op_id in range(1, len(matched_op)):
+                    op2 = self.ops[matched_op[op_id]]
+                    op2_estimated_DMA_cycles += op2.estimated_DMA_cycles
+                    op2_estimated_op_cycles += op2.estimated_op_cycles
+                    op2_estimated_total_cycles += op2.estimated_total_cycles
+                if op1.estimated_total_cycles > op2_estimated_total_cycles:
+                    total_dma_cycles -= op2_estimated_DMA_cycles
+                    total_op_cycles -= op2_estimated_op_cycles
+                    total_cycles -= op2_estimated_total_cycles
+                else:
+                    total_dma_cycles -= op1.estimated_DMA_cycles
+                    total_op_cycles -= op1.estimated_op_cycles
+                    total_cycles -= op1.estimated_total_cycles
+        return total_dma_cycles, total_op_cycles, total_cycles, (mac_idle_cycles, elem_wise_idle_cycles)
+
+    def print_performance(self):
+        for order, opid in enumerate(self.model.ordered_opid):
+            op = self.ops[opid]
+            opcode_index = op.info.get("opcode_index")
+            opcode_type = self.opcodes[opcode_index].get("builtin_code")
+            dma_cycles = op.estimated_DMA_cycles
+            op_cycles = op.estimated_op_cycles
+            op_total_cycles = op.estimated_total_cycles
+            print(f"opcode_index: {opid}, order: {order}, opcode_type: {opcode_type}, DMA cycles: {dma_cycles}, OP cycles: {op_cycles}, Total cycles: {op_total_cycles}")

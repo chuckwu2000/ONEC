@@ -9,8 +9,7 @@ import tempfile
 from pipeline_schedule import set_active_engine
 from pipeline_schedule import pipeline_schedule
 from pipeline_schedule import set_new_operators
-from performance import estimate_model
-from performance import print_performance
+from performance import simulator
 from memory_allocation import memory_allocator
 
 parser = argparse.ArgumentParser()
@@ -117,7 +116,8 @@ set_active_engine(new_graph)
 
 # Estimate the performance before pipeline schedule
 if args.verbose_performance:
-    split_dma_cycles, split_op_cycles, split_total_cycles, engine_idle_cycles = estimate_model(new_graph, pipeline = False)
+    model_sim = simulator(new_graph)
+    split_dma_cycles, split_op_cycles, split_total_cycles, engine_idle_cycles = model_sim.estimate_model(pipeline = False)
     print(f"Before pipeline schedule: dma cycles = {split_dma_cycles :.1f}, op cycles = {split_op_cycles :.1f}, total cycles = {split_total_cycles :.1f}")
     print(f"mac_idle_cycles: {engine_idle_cycles[0]}, elem_wise_idle_cycles: {engine_idle_cycles[1]}")
 
@@ -126,13 +126,15 @@ pipeline_new_graph = pipeline_schedule(new_graph)
 
 # Estimate the performance after pipeline schedule
 if args.verbose_performance:
-    pipeline_dma_cycles, pipeline_op_cycles, pipeline_total_cycles, engine_idle_cycles = estimate_model(pipeline_new_graph, pipeline = True)
+    model_sim = simulator(pipeline_new_graph)
+    pipeline_dma_cycles, pipeline_op_cycles, pipeline_total_cycles, engine_idle_cycles = model_sim.estimate_model(pipeline_new_graph, pipeline = True)
 
 # Set new operators for CodeGen use (this function will destroy the corresponding relationship between ops and operators)
 set_new_operators(pipeline_new_graph)
 
 if args.verbose_performance:
-    print_performance(pipeline_new_graph)
+    model_sim = simulator(pipeline_new_graph)
+    model_sim.print_performance(pipeline_new_graph)
     print(f"cascade ops = {pipeline_new_graph.cascade_matched_ops}")
     print(f"match ops = {pipeline_new_graph.matched_ops}")
     total_fusion_ops = 0
