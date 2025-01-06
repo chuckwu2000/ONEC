@@ -5,7 +5,7 @@ import math
 import struct
 
 # The operation that will be fall back to CPU
-data_layout_ops = ["CONCATENATION", "SPLIT", "SPLIT_V", "TRANSPOSE", "RESIZE_NEAREST_NEIGHBOR", "PACK"]
+data_layout_ops = ["CONCATENATION", "SPLIT", "SPLIT_V", "TRANSPOSE", "RESIZE_NEAREST_NEIGHBOR", "PACK", "RESHAPE"]
 reduce_ops = ["REDUCE_MAX"]
 fall_back_cpu_ops = data_layout_ops + reduce_ops
 
@@ -24,13 +24,13 @@ need_requant_ops = ["CONV_2D", "DEPTHWISE_CONV_2D", "FULLY_CONNECTED", "BATCH_MA
 need_dequant_ops = ["LOGISTIC", "SOFTMAX", "TANH", "GELU"]
 
 class simulator:
-    def __init__(self, model: Graph, tensor_storage):
+    def __init__(self, model: Graph, tensors_info):
         self.model = model
         self.buffers = model.buffers
         self.tensors = model.tensors
         self.ops = model.ops
         self.opcodes = model.opcodes
-        self.tensor_storage = tensor_storage
+        self.tensor_info = tensors_info
         
     def estimate_elementwise_op_cycles(self, opid: int, op_type: str) -> int:
         tensors = self.tensors
@@ -56,38 +56,28 @@ class simulator:
                 ifm_elem_size = 32
                 ofm_elem_size = 32
 
-            # ifm's size (bytes)
-            ifm_storge_size = 1
-            if ifm_shape != []:
-                for dim in ifm_shape:
-                    ifm_storge_size *= dim
-            ifm_storge_size *= (ifm_elem_size / 8)
-
             # ofm's size (bytes) & elements
-            ofm_storge_size = 1
             ofm_elems = 1
             for dim in ofm_shape:
-                ofm_storge_size *= dim
                 ofm_elems *= dim
-            ofm_storge_size *= (ofm_elem_size / 8)
 
             # Data transfer cycles
             # Our elementwise engine adopts a SIMD vector design
             # IFM's data transfer
-            if self.tensor_storage[inputs[0]] == Mem_area.DRAM:
-                dram_transfer_cycles += self.estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size)
+            if self.tensor_info[inputs[0]].memory_storage == Mem_area.DRAM:
+                dram_transfer_cycles += self.estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, self.tensor_info[inputs[0]].size)
                 one_element_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm_elem_size / 8)
                 sram_transfer_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
             else:
                 one_element_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm_elem_size / 8)
                 sram_transfer_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
             # OFM's data transfer
-            if self.tensor_storage[outputs[0]] == Mem_area.DRAM:
-                dram_transfer_cycles += self.estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.DRAM, ofm_storge_size)
-                one_element_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.PE, Mem_area.SRAM, ofm_elem_size / 8)
+            if self.tensor_info[outputs[0]].memory_storage == Mem_area.DRAM:
+                dram_transfer_cycles += self.estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, self.tensor_info[outputs[0]].size)
+                one_element_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
                 sram_transfer_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
             else:
-                one_element_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.PE, Mem_area.SRAM, ofm_elem_size / 8)
+                one_element_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
                 sram_transfer_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
 
             # Computations cycles
@@ -137,8 +127,6 @@ class simulator:
             ifm1 = tensors[inputs[0]]
             ifm2 = tensors[inputs[1]]
             ofm = tensors[outputs[0]]
-            ifm1_shape = ifm1.get("shape")
-            ifm2_shape = ifm2.get("shape")
             ofm_shape = ofm.get("shape")
 
             if ifm1.get("type") == "INT8" and ifm2.get("type") == "INT8" and ofm.get("type") == "INT8":
@@ -151,53 +139,36 @@ class simulator:
                 ifm2_elem_size = 32
                 ofm_elem_size = 32
 
-            # ifm1's size (bytes)
-            ifm1_storge_size = 1
-            if ifm1_shape != []:
-                for dim in ifm1_shape:
-                    ifm1_storge_size *= dim
-            ifm1_storge_size *= (ifm1_elem_size / 8)
-
-            # ifm2's size (bytes)
-            ifm2_storge_size = 1
-            if ifm2_shape != []:
-                for dim in ifm2_shape:
-                    ifm2_storge_size *= dim
-            ifm2_storge_size *= (ifm2_elem_size / 8)
-
             # ofm's size (bytes) & elements
-            ofm_storge_size = 1
             ofm_elems = 1
             for dim in ofm_shape:
-                ofm_storge_size *= dim
                 ofm_elems *= dim
-            ofm_storge_size *= (ofm_elem_size / 8)
 
             # Data transfer cycles
             # Our elementwise engine adopts a SIMD vector design
             # IFM1's data transfer
-            if self.tensor_storage[inputs[0]] == Mem_area.DRAM:
-                dram_transfer_cycles += self.estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm1_storge_size)
+            if self.tensor_info[inputs[0]].memory_storage == Mem_area.DRAM:
+                dram_transfer_cycles += self.estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, self.tensor_info[inputs[0]].size)
                 one_element_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm1_elem_size / 8)
                 sram_transfer_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
             else:
                 one_element_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm1_elem_size / 8)
                 sram_transfer_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
             # IFM2's data transfer
-            if self.tensor_storage[inputs[1]] == Mem_area.DRAM:
-                dram_transfer_cycles += self.estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm2_storge_size)
+            if self.tensor_info[inputs[1]].memory_storage == Mem_area.DRAM:
+                dram_transfer_cycles += self.estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, self.tensor_info[inputs[1]].size)
                 one_element_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm2_elem_size / 8)
                 sram_transfer_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
             else:
                 one_element_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm2_elem_size / 8)
                 sram_transfer_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
             # OFM's data transfer
-            if self.tensor_storage[outputs[0]] == Mem_area.DRAM:
-                dram_transfer_cycles += self.estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.DRAM, ofm_storge_size)
-                one_element_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.PE, Mem_area.SRAM, ofm_elem_size / 8)
+            if self.tensor_info[outputs[0]].memory_storage == Mem_area.DRAM:
+                dram_transfer_cycles += self.estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, self.tensor_info[outputs[0]].size)
+                one_element_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
                 sram_transfer_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
             else:
-                one_element_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.PE, Mem_area.SRAM, ofm_elem_size / 8)
+                one_element_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
                 sram_transfer_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
             
             # Computations cycles
@@ -240,12 +211,9 @@ class simulator:
             ofm_elem_size = 32
         
         # OFM's size (bytes) & elements
-        ofm_storge_size = 1
         ofm_elems = 1
         for dim in ofm_shape:
-            ofm_storge_size *= dim
             ofm_elems *= dim
-        ofm_storge_size *= (ofm_elem_size / 8)
         
         weight_storge_size = 0
         bias_storge_size = 0
@@ -261,6 +229,7 @@ class simulator:
             stride = info["builtin_options"]["stride_h"]
 
             # Filter's size (bytes)
+            weight_storge_size = 1
             for dim in filter_shape:
                 weight_storge_size *= dim
             weight_storge_size *= (ofm_elem_size / 8)
@@ -268,6 +237,7 @@ class simulator:
             # Bias's size (bytes)
             bias = tensors[inputs[2]]
             bias_shape = bias.get("shape")
+            bias_storge_size = 1
             for dim in bias_shape:
                 bias_storge_size *= dim
             bias_storge_size *= (ofm_elem_size / 8)
@@ -282,17 +252,21 @@ class simulator:
             oc = 1
             stride = info["builtin_options"]["stride_h"]
             # Filter's size (bytes)
+            weight_storge_size = 1
             for dim in filter_shape:
                 weight_storge_size *= dim
             weight_storge_size *= (ofm_elem_size / 8)
             # Bias's size (bytes)
             bias = tensors[inputs[2]]
             bias_shape = bias.get("shape")
+            bias_storge_size = 1
             for dim in bias_shape:
                 bias_storge_size *= dim
             bias_storge_size *= (ofm_elem_size / 8)
         elif op_type == "FULLY_CONNECTED":
-            oh = ofm_shape[-2]
+            ifm = tensors[inputs[0]]
+            ifm_shape = ifm.get("shape")
+            oh = ifm_shape[-2]
             ow = 1
             fh = 1
             fw = 1
@@ -302,6 +276,7 @@ class simulator:
             oc = weight_shape[0]
             stride = 1
             # Weight's size (bytes)
+            weight_storge_size = 1
             for dim in weight_shape:
                 weight_storge_size *= dim
             weight_storge_size *= (ofm_elem_size / 8)
@@ -344,8 +319,9 @@ class simulator:
         # Data transfer cycles
         # Filter and bias are fetched from DRAM
         dram_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, weight_storge_size + bias_storge_size)
-        if self.tensor_storage[inputs[0]] == Mem_area.DRAM:
-            dram_transfer_cycles += self.estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size + ofm_storge_size)
+        if self.tensor_info[inputs[0]].memory_storage == Mem_area.DRAM:
+            dram_transfer_cycles += self.estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size)
+            dram_transfer_cycles += self.estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, self.tensor_info[outputs[0]].size)
         dma_transfer_cycles = dram_transfer_cycles
 
         # Computations cycles
@@ -366,7 +342,7 @@ class simulator:
         return dma_transfer_cycles, op_cycles, total_cycles
 
     # Estimate the number of cycles for memory to memory transfer
-    def estimate_mem2mem_cycles(src_tensor_mem_area, dst_tensor_mem_area, transfer_size) -> int:
+    def estimate_mem2mem_cycles(self, src_tensor_mem_area, dst_tensor_mem_area, transfer_size) -> int:
         if src_tensor_mem_area == Mem_area.DRAM and dst_tensor_mem_area == Mem_area.SRAM:
             bws_per_cycle = (ArchitectureFeatures.axi_bit_width / 8) * ArchitectureFeatures.Dram_burst_length * ArchitectureFeatures.Dram_clock_scale
             transfer_cycles = math.ceil(transfer_size / bws_per_cycle)

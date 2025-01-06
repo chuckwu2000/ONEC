@@ -111,30 +111,32 @@ else:
 
 new_graph = splitter.perform_split(blocks)
 
+# Memory allocation(not perform cache optimization)
+mem_allocator = memory_allocator(new_graph, use_sram = False)
+
 # Set each operator's active engine for performance estimation
 set_active_engine(new_graph)
 
 # Estimate the performance before pipeline schedule
+model_sim = simulator(new_graph, mem_allocator.allocated_tensors)
 if args.verbose_performance:
-    model_sim = simulator(new_graph)
     split_dma_cycles, split_op_cycles, split_total_cycles, engine_idle_cycles = model_sim.estimate_model(pipeline = False)
     print(f"Before pipeline schedule: dma cycles = {split_dma_cycles :.1f}, op cycles = {split_op_cycles :.1f}, total cycles = {split_total_cycles :.1f}")
     print(f"mac_idle_cycles: {engine_idle_cycles[0]}, elem_wise_idle_cycles: {engine_idle_cycles[1]}")
+    model_sim.print_performance()
 
 # Perform software pipeline schedule
 pipeline_new_graph = pipeline_schedule(new_graph)
 
 # Estimate the performance after pipeline schedule
 if args.verbose_performance:
-    model_sim = simulator(pipeline_new_graph)
-    pipeline_dma_cycles, pipeline_op_cycles, pipeline_total_cycles, engine_idle_cycles = model_sim.estimate_model(pipeline_new_graph, pipeline = True)
+    model_sim = simulator(pipeline_new_graph, mem_allocator.allocated_tensors)
+    pipeline_dma_cycles, pipeline_op_cycles, pipeline_total_cycles, engine_idle_cycles = model_sim.estimate_model(pipeline = True)
 
 # Set new operators for CodeGen use (this function will destroy the corresponding relationship between ops and operators)
 set_new_operators(pipeline_new_graph)
 
 if args.verbose_performance:
-    model_sim = simulator(pipeline_new_graph)
-    model_sim.print_performance(pipeline_new_graph)
     print(f"cascade ops = {pipeline_new_graph.cascade_matched_ops}")
     print(f"match ops = {pipeline_new_graph.matched_ops}")
     total_fusion_ops = 0
