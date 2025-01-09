@@ -387,7 +387,8 @@ class simulator:
         mac_idle_cycles = 0
         elem_wise_idle_cycles = 0
 
-        for opid in self.model.ordered_opid:
+        for op in self.model.ordered_ops:
+            opid = op.opid
             # w/wo pipeline schedule, the estimated total cycles will be different, since we consider the memory footprint between DRAM and SRAM
             dma_cycles, op_cycles, op_total_cycles = self.estimate_op_cycles(opid)
             # For later pipeline schedule, op_total_cycles will be used to determine the overlap range
@@ -450,11 +451,10 @@ class simulator:
         return total_dma_cycles, total_op_cycles, total_cycles, (mac_idle_cycles, elem_wise_idle_cycles)
 
     def print_performance(self):
-        for order, opid in enumerate(self.model.ordered_opid):
-            op = self.ops[opid]
+        for order, op in enumerate(self.model.ordered_ops):
             opcode_index = op.info.get("opcode_index")
             opcode_type = self.opcodes[opcode_index].get("builtin_code")
             dma_cycles = op.estimated_DMA_cycles
             op_cycles = op.estimated_op_cycles
             op_total_cycles = op.estimated_total_cycles
-            print(f"opcode_index: {opid}, order: {order}, opcode_type: {opcode_type}, DMA cycles: {dma_cycles}, OP cycles: {op_cycles}, Total cycles: {op_total_cycles}")
+            print(f"order: {order}, opcode_type: {opcode_type}, DMA cycles: {dma_cycles}, OP cycles: {op_cycles}, Total cycles: {op_total_cycles}")

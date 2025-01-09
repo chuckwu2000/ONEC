@@ -109,12 +109,14 @@ if args.block_based:
 else:
     blocks = []
 
+################## BASELINE ##################
 new_graph = splitter.perform_split(blocks)
 
 # Memory allocation(not perform cache optimization)
-mem_allocator = memory_allocator(new_graph, use_sram = False)
+mem_allocator = memory_allocator(new_graph)
+mem_allocator.memory_allocate(use_sram = False)
 
-# Set each operator's active engine for performance estimation
+# Set each operator's active engine
 set_active_engine(new_graph)
 
 # Estimate the performance before pipeline schedule
@@ -123,20 +125,26 @@ if args.verbose_performance:
     split_dma_cycles, split_op_cycles, split_total_cycles, engine_idle_cycles = model_sim.estimate_model(pipeline = False)
     print(f"Before pipeline schedule: dma cycles = {split_dma_cycles :.1f}, op cycles = {split_op_cycles :.1f}, total cycles = {split_total_cycles :.1f}")
     print(f"mac_idle_cycles: {engine_idle_cycles[0]}, elem_wise_idle_cycles: {engine_idle_cycles[1]}")
-    model_sim.print_performance()
+##############################################
 
+################## PIPELINE SCHEDULE ##################
 # Perform software pipeline schedule
 pipeline_new_graph = pipeline_schedule(new_graph)
+
+# Set new operators/ops for Mem-alloc/CodeGen use
+set_new_operators(pipeline_new_graph)
+
+# Memory allocation(perform cache optimization)
+mem_allocator = memory_allocator(pipeline_new_graph)
+# Based on our engine concurrent pattern to set cache storage
+mem_allocator.set_cache_storage()
+mem_allocator.memory_allocate(use_sram = True)
 
 # Estimate the performance after pipeline schedule
 if args.verbose_performance:
     model_sim = simulator(pipeline_new_graph, mem_allocator.allocated_tensors)
     pipeline_dma_cycles, pipeline_op_cycles, pipeline_total_cycles, engine_idle_cycles = model_sim.estimate_model(pipeline = True)
-
-# Set new operators for CodeGen use (this function will destroy the corresponding relationship between ops and operators)
-set_new_operators(pipeline_new_graph)
-
-if args.verbose_performance:
+    model_sim.print_performance()
     print(f"cascade ops = {pipeline_new_graph.cascade_matched_ops}")
     print(f"match ops = {pipeline_new_graph.matched_ops}")
     total_fusion_ops = 0
@@ -149,6 +157,7 @@ if args.verbose_performance:
     print(f"After pipeline schedule: dma cycles = {pipeline_dma_cycles :.1f}, op cycles = {pipeline_op_cycles :.1f}, total cycles = {pipeline_total_cycles :.1f}")
     print(f"mac_idle_cycles: {engine_idle_cycles[0]}, elem_wise_idle_cycles: {engine_idle_cycles[1]}")
     print(f"speedup = {((split_total_cycles/pipeline_total_cycles) - 1) * 100 :.2f}%")
+#######################################################
 
 new_buffers, new_tensors, new_inputs, new_outputs, new_operators, new_opcodes = pipeline_new_graph.export()
 new_model['buffers'] = new_buffers
@@ -157,16 +166,10 @@ new_model['subgraphs'][0]['inputs'] = new_inputs
 new_model['subgraphs'][0]['outputs'] = new_outputs
 new_model['subgraphs'][0]['operators'] = new_operators
 
-# Record the cascade ops and matched ops for CodeGen use
-with open(pattern_path, 'w') as f:
-    json.dump({'cascade_matched_ops': pipeline_new_graph.cascade_matched_ops, 'matched_ops': pipeline_new_graph.matched_ops}, f)
+# Save the rewritten model
 with open(json_model_path, 'w') as f:
     json.dump(new_model, f, indent=2)
 
 os.system(f'flatc -o {tmp_dir_path} --binary {schema_path} {json_model_path}')
 os.system(f'mv {os.path.join(tmp_dir_path, filename)} {args.out_path}')
-pattern_json = os.path.basename(args.out_path).replace('.tflite', '_pattern.json')
-pattern_out_path = f'{os.path.dirname(args.out_path)}/{pattern_json}'
-os.system(f'mv {pattern_path} {pattern_out_path}')
-
 tmp_dir.cleanup()

@@ -16,9 +16,15 @@ class ArchitectureFeatures:
     Sram_burst_length = 8
     Dram_clock_scale = 1
     Dram_burst_length = 8
+    
     # MAC configuration is refer to Planaria
     MAC_height = 128
     MAC_width = 128
+
+    # DRAM's max size is 4GB
+    DRAM_MAX_SIZE = 1 << 32
+    # SRAM's max size is 2MB
+    SRAM_MAX_SIZE = 1 << 21
 
     # Output cycles per element (MAC main op, mul, add/sub)
     # Now assune we have 64 MACs
@@ -27,13 +33,10 @@ class ArchitectureFeatures:
         "MAC": 1,
         "MUL": 1,
         "ADD/SUB": 1,
-        "POW": 1,
         "EXP": 1,
         "RECIPROCAL": 1,
-        "REDUCE_SUM": 1,
         "LOGISTIC": 3,
         "RSQRT": 4,
-        "REDUCE_MAX": 1,
         "DE/QUANTIZE": 1,
         "LUT": 1
     }

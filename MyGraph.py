@@ -141,16 +141,17 @@ class Graph:
         if self.DFS_ordered == False:
             self.DFS_ordered = True
             self.BFS_ordered = False
+            # new_operators store the opid
             new_operators = []
             for root_op_id in self.root_op_ids:
                 DFS_ordering(root_op_id, new_operators)
             self.operators = []
             # For pipeline schedule, we need to record the order of each op.
-            self.ordered_opid = new_operators
-            for i, op in enumerate(new_operators):
-                self.ops[op].schedule_order = i
-                self.operators.append(self.ops[op].info)
-
+            self.ordered_ops = []
+            for i, opid in enumerate(new_operators):
+                self.ops[opid].schedule_order = i
+                self.operators.append(self.ops[opid].info)
+                self.ordered_ops.append(self.ops[opid])
 
     def ensure_BFS_order(self):
         import collections
