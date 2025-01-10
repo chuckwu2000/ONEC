@@ -277,7 +277,7 @@ def pipeline_schedule(split_graph: Graph):
     return split_graph
 
 def set_new_operators(split_graph: Graph):
-        # Store the new schedule order into a list, it contain some op have the same schedule order
+        # Store the new schedule order into a list, it contain some ops have the same schedule order
         split_graph.operators = []
         new_ops = []
         # For tmp use
@@ -310,3 +310,16 @@ def set_new_operators(split_graph: Graph):
         split_graph.matched_ops = new_matched_ops
         split_graph.ops = new_ops
         split_graph.ordered_ops = new_ops
+
+        # Update the root opid
+        # build input-op lookup table
+        op_lookup_input = {}
+        for opid, op in enumerate(split_graph.ops):
+            for in_id in op.info['inputs']:
+                if in_id not in op_lookup_input.keys():
+                    op_lookup_input[in_id] = []
+                op_lookup_input[in_id].append(opid)
+        # Find root (it may have multiple roots)
+        split_graph.root_op_ids = []
+        for in_tensor_id in split_graph.inputs:
+            split_graph.root_op_ids.append(op_lookup_input[in_tensor_id][0])

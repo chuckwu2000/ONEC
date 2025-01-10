@@ -1,5 +1,5 @@
 import copy
-import sys
+from collections import defaultdict
 
 class Node:
     def __init__(self, op_info, id):
@@ -109,7 +109,7 @@ class Graph:
         self.ops = [Node(op, i) for i, op in enumerate(ops)]
 
         # build input-op lookup table
-        op_lookup_input = {}
+        op_lookup_input = defaultdict(list)
         for opid, op in enumerate(ops):
             for in_id in op['inputs']:
                 if in_id not in op_lookup_input.keys():
