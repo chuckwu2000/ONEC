@@ -73,14 +73,13 @@ class memory_allocator:
         sram_max_size_per_split_path = ArchitectureFeatures.SRAM_MAX_SIZE
         tensor_wait_consume = {}
         # Enumerate with in, out, gen, kill
-        _in, _out, _gen, _kill = 0, 1, 2, 3
-        ops_relation = [[set(), set(), set(), set()] for _ in range(len(self.graph.ops))]
+        _in, _out, _gen, _kill, _sram_need = 0, 1, 2, 3, 4
+        ops_relation = [[set(), set(), set(), set(), set()] for _ in range(len(self.graph.ops))]
         # Number of input
-        _unary, _binary, _trinary = 1, 2, 3
+        _binary, _trinary = 2, 3
 
         ops = self.graph.ops
         for id, op in enumerate(ops):
-            mem_need = set()
             op_info = op.info
             opcode_index = op_info.get("opcode_index")
             opcode_type = self.graph.opcodes[opcode_index].get("builtin_code")
@@ -107,10 +106,17 @@ class memory_allocator:
                         tensor_wait_consume.update({output_tensor_id: wait_consume})
                 # OUT
                 ops_relation[id][_out] = (ops_relation[id][_in] - ops_relation[id][_kill]) | ops_relation[id][_gen]
+                # Clean the tensor that have been consumed, since there may have some tensor have been consumed by the operation in other branch
+                need_remove = []
+                for tensor_id in ops_relation[id][_out]:
+                    if tensor_wait_consume.get(tensor_id, 0) == 0:
+                        need_remove.append(tensor_id)
+                for tensor_id in need_remove:
+                    ops_relation[id][_out].remove(tensor_id)
                 # Mem-need
                 for tensor_id in ops_relation[id][_in]:
                     if self.need_allocate_tensors[tensor_id].memory_storage == Mem_area.SRAM:
-                        mem_need.add(tensor_id)
+                        ops_relation[id][_sram_need].add(tensor_id)
             # Operation that will be compute on NPU
             else:
                 # Update tensor storage
@@ -129,7 +135,7 @@ class memory_allocator:
                 # GEN
                 ops_relation[id][_gen] = set(op_info['outputs'])
                 for output_tensor_id in op_info['outputs']:
-                    wait_consume = len(self.graph.op_lookup_input[output_tensor_id])
+                    wait_consume = len(self.graph.op_lookup_input.get(output_tensor_id, []))
                     if wait_consume > 0:
                         tensor_wait_consume.update({output_tensor_id: wait_consume})
                 if opcode_type in binary_ops:
@@ -149,26 +155,43 @@ class memory_allocator:
                     ops_relation[id][_gen].remove(-1)
                 # OUT
                 ops_relation[id][_out] = (ops_relation[id][_in] - ops_relation[id][_kill]) | ops_relation[id][_gen]
-                # Mem-need
-                mem_need = set()
+                # Clean the tensor that have been consumed, since there may have some tensor have been consumed by the operation in other branch
+                need_remove = []
+                for tensor_id in ops_relation[id][_out]:
+                    if tensor_wait_consume.get(tensor_id, 0) == 0:
+                        need_remove.append(tensor_id)
+                for tensor_id in need_remove:
+                    ops_relation[id][_out].remove(tensor_id)
+                # SRAM need
                 for tensor_id in ops_relation[id][_in]:
                     if self.need_allocate_tensors[tensor_id].memory_storage == Mem_area.SRAM:
-                        mem_need.add(tensor_id)
-                mem_need = mem_need.union(ops_relation[id][_gen])
+                        ops_relation[id][_sram_need].add(tensor_id)
+                ops_relation[id][_sram_need] = ops_relation[id][_sram_need] | ops_relation[id][_gen]
+                # The case that input tensor is store in DRAM, which will be move to SRAM to wait for the operation
+                ops_relation[id][_sram_need].add(op_info['inputs'][0])
+                if opcode_type in binary_ops:
+                    ops_relation[id][_sram_need].add(op_info['inputs'][1])
+                elif opcode_type in trinary_ops:
+                    ops_relation[id][_sram_need].add(op_info['inputs'][1])
+                    ops_relation[id][_sram_need].add(op_info['inputs'][2])
+                if -1 in ops_relation[id][_sram_need]:
+                    ops_relation[id][_sram_need].remove(-1)
             
+        for id, op in enumerate(ops):
             # Check if the size of tensors exceeds the SRAM's max size
-            mem_need_size = self.compute_mem_need_size(mem_need)
-            if mem_need_size > sram_max_size_per_split_path:
+            sram_usage = self.compute_sram_usage(ops_relation[id][_sram_need])
+            if sram_usage > sram_max_size_per_split_path:
                 print("="*50)
+                op_info = op.info
                 print(f"size exceed at #{id} op: {op_info}")
-                print(f"mem_need: {mem_need}")
+                print(f"sram_need: {ops_relation[id][_sram_need]}")
                 print(f"in: {ops_relation[id][_in]}")
                 print(f"out: {ops_relation[id][_out]}")
                 print(f"gen: {ops_relation[id][_gen]}")
                 print(f"kill: {ops_relation[id][_kill]}")
                 ops_relation[id][_out] = set()
 
-    def compute_mem_need_size(self, mem_need):
+    def compute_sram_usage(self, mem_need):
         mem_need_size = 0
         for tensor_id in mem_need:
             mem_need_size += self.need_allocate_tensors[tensor_id].size

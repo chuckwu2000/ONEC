@@ -138,7 +138,7 @@ class Graph:
             for child in sorted(self.ops[current_id].children, key=lambda op_id: self.ops[op_id].info['outputs'][0]):
                 if child not in DFS_orderred_operators:
                     DFS_ordering(child, DFS_orderred_operators)
-        if self.DFS_ordered == False:
+        if self.pipeline_schedule == False:
             self.DFS_ordered = True
             self.BFS_ordered = False
             # new_operators store the opid
