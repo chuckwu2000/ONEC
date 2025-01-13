@@ -126,7 +126,12 @@ class memory_allocator:
                 for parent_id in op.parents:
                     ops_relation[id][_in] = ops_relation[id][_in].union(ops_relation[parent_id][_out])
                 # KILL
-                for input_tensor_id in op_info['inputs']:
+                # Tensor splitting may introduces some custom operations, which some boundary tensor will append to the input tensor
+                start_id = 0
+                if opcode_type in trinary_ops:
+                    if len(op_info['inputs']) > 3:
+                        start_id = 1
+                for input_tensor_id in op_info['inputs'][start_id:]:
                     if input_tensor_id in tensor_wait_consume:
                         tensor_wait_consume[input_tensor_id] -= 1
                         if tensor_wait_consume[input_tensor_id] == 0:
@@ -176,7 +181,18 @@ class memory_allocator:
                     ops_relation[id][_sram_need].add(op_info['inputs'][2])
                 if -1 in ops_relation[id][_sram_need]:
                     ops_relation[id][_sram_need].remove(-1)
-            
+
+        # for cascade_ops in self.graph.cascade_matched_ops:
+        #     sram_need = set()
+        #     for op in cascade_ops:
+        #         sram_need = sram_need | ops_relation[op][_sram_need]
+        #     sram_usage = self.compute_sram_usage(sram_need)
+        #     if sram_usage > sram_max_size_per_split_path:
+        #         print("="*50)
+        #         print(f"size exceed at cascade_ops: {cascade_ops}")
+        #         print(f"sram_need: {sram_need}")
+        #         print(f"sram_usage: {sram_usage}")
+                    
         for id, op in enumerate(ops):
             # Check if the size of tensors exceeds the SRAM's max size
             sram_usage = self.compute_sram_usage(ops_relation[id][_sram_need])

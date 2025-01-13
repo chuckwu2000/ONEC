@@ -72,8 +72,7 @@ def pipeline_schedule(split_graph: Graph):
                         if estimated_total_cycles < 0:
                             break
                         else:
-                            # Only subtract the estimated_op_cycles, since the intermedia tensor will store in SRAM
-                            estimated_total_cycles -= child_op.estimated_op_cycles
+                            estimated_total_cycles -= child_op.estimated_total_cycles
                         cascade_matched_ops.append(child_op.opid)
                         child_op.have_fully_matched = True
                         now_idx = child_idx

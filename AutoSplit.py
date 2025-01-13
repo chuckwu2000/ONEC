@@ -1,3 +1,4 @@
+from collections import defaultdict
 from MyGraph import Node,Graph
 import copy
 
@@ -76,8 +77,7 @@ class Splitter:
                 self.splittable_opcode_idxes[opcode.get("deprecated_builtin_code", 0)] = i
 
     def perform_split(self, blocks = []) -> Graph:
-        # There may be some manipulation will create new tensors
-        self.split_tensor_table = [list() for _ in range(len(self.tensors) + 10000)]
+        self.split_tensor_table = defaultdict(list)
         self.new_operators = []
 
         input_tile_size = self.split_height

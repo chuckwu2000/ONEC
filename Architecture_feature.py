@@ -23,8 +23,8 @@ class ArchitectureFeatures:
 
     # DRAM's max size is 4GB
     DRAM_MAX_SIZE = 1 << 32
-    # SRAM's max size is 2MB
-    SRAM_MAX_SIZE = 1 << 21
+    # SRAM's max size is 4MB
+    SRAM_MAX_SIZE = 1 << 22
 
     # Output cycles per element (MAC main op, mul, add/sub)
     # Now assune we have 64 MACs
