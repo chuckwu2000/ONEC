@@ -21,6 +21,7 @@ parser.add_argument("--split_height", nargs='?', type=int, default=2)
 parser.add_argument("--token_size", nargs='?', type=int, default=50)
 parser.add_argument("--model_type", nargs='?', type=str, default="bert")
 parser.add_argument("--pad_fusion", action='store_true')
+parser.add_argument("--move_data_layout_op", action='store_true')
 parser.add_argument("--verbose_performance", action='store_true')
 parser.add_argument("--block_based", action='store_true')
 
@@ -101,6 +102,9 @@ ori_graph = Graph(operators, tensors, buffers, new_opcodes, subgraphs[0]['inputs
 splitter = Splitter(ori_graph, args.split_height, model_type, args.token_size)
 if args.pad_fusion and model_type == 1:
     splitter.PaddingFusion()
+# When emcount bert model, try to eliminate some data layout ops
+if args.move_data_layout_op:
+    splitter.Elminate_useless_data_layout_op()
 
 # Decide each block's range from ori_graph (Block: one entry point and one exit point)
 if args.block_based:
@@ -115,6 +119,8 @@ new_graph = splitter.perform_split(blocks)
 # Memory allocation(not perform cache optimization)
 mem_allocator = memory_allocator(new_graph)
 mem_allocator.memory_allocate(use_sram = False)
+# Prepare for pipeline schedule (as the cost of each operator is known)
+mem_allocator.set_cache_storage()
 
 # Set each operator's active engine
 set_active_engine(new_graph)
@@ -136,8 +142,6 @@ set_new_operators(pipeline_new_graph)
 
 # Memory allocation(perform cache optimization)
 mem_allocator = memory_allocator(pipeline_new_graph)
-# Based on our engine concurrent pattern to set cache storage
-mem_allocator.set_cache_storage()
 mem_allocator.memory_allocate(use_sram = True)
 
 # Estimate the performance after pipeline schedule

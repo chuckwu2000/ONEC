@@ -2157,3 +2157,132 @@ class Splitter:
                 raise "int_list_to_byte_list: type error"
             out += [ b for b in (num).to_bytes(length=4, byteorder='little')]
         return out
+    
+    # Customized modify for BERT model
+    def Elminate_useless_data_layout_op(self):
+        pattern = ["RESHAPE", "TRANSPOSE", "RESHAPE", "SPLIT"]
+        have_new_buffer = {"first": False, "id": 0}
+
+        def traversal_dfs(cur_opid, pattern_id, visited, tmp_deprecated, deprecated):
+            # Check visited
+            if visited[cur_opid]:
+                return deprecated
+            visited[cur_opid] = True
+
+            # Is {reshape -> transpose -> reshape -> split} from cur_opid and its children?
+            cur_op = self.ori_graph.ops[cur_opid]
+            opcode_index = cur_op.info.get("opcode_index")
+            opcode_type = self.opcodes[opcode_index].get("builtin_code")
+            in_pattern = opcode_type == pattern[pattern_id]
+            if in_pattern:
+                tmp_deprecated.append(cur_opid)
+                pattern_id += 1
+            else:
+                tmp_deprecated = []
+                pattern_id = 0
+
+            # Target pattern found
+            if pattern_id == 4:
+                # Check whether in V path (which need to stop at transpose)
+                value_path = False
+                deprecated_first_op = self.ori_graph.ops[tmp_deprecated[0]]
+                head_op = self.ori_graph.ops[deprecated_first_op.parents[0]]
+                parent_op = self.ori_graph.ops[head_op.parents[0]]
+                p_output_name = self.tensors[parent_op.info['outputs'][0]]['name']
+                grandparent_op = self.ori_graph.ops[parent_op.parents[0]]
+                gp_output_name = self.tensors[grandparent_op.info['outputs'][0]]['name']
+                if 'value' in p_output_name or 'value' in gp_output_name:
+                    value_path = True
+                # No need to eliminate the split op
+                tmp_deprecated.pop(-1)
+                is_deprecated = 1
+                split_op = cur_op
+                # Traverse each output of the split op
+                for idx, output_id in enumerate(split_op.info['outputs']):
+                    # Record the child order of the split op
+                    child_id = 0
+                    for i, child in enumerate(split_op.children):
+                        if output_id == self.ori_graph.ops[child].info['inputs'][0]:
+                            child_op = self.ori_graph.ops[child]
+                            child_id = i
+                            break
+                    pre_op = split_op
+                    steps = 0
+
+                    while(steps < 3):
+                        opcode_index = child_op.info.get("opcode_index")
+                        opcode_type = self.opcodes[opcode_index].get("builtin_code")
+                        # Can't eliminate the transpose op if in value path
+                        if opcode_type == "TRANSPOSE" and value_path:
+                            # Update the output tensors of the split to the input tensor of the transpose
+                            if pre_op.opid == split_op.opid:
+                                pass
+                            else:
+                                split_op.info['outputs'][idx] = pre_op.info['outputs'][0]
+                                split_op.children[child_id] = child_op.opid
+                                child_op.parents[0] = split_op.opid
+                            # Update the input tensor of the split to the tmp_deprecated[0]'s parent
+                            split_op.info['inputs'][1] = head_op.info['outputs'][0]
+                            split_op.parents[0] = head_op.opid
+                            head_op.children[0] = split_op.opid
+                            break
+                        elif opcode_type == "FULLY_CONNECTED" and not value_path:
+                            # Update the output tensors of the split to the input tensor of the fully_connected
+                            if pre_op.opid == split_op.opid:
+                                pass
+                            else:
+                                split_op.info['outputs'][idx] = pre_op.info['outputs'][0]
+                                split_op.children[child_id] = child_op.opid
+                                for i in range(len(child_op.parents)):
+                                    if child_op.parents[i] == pre_op.opid:
+                                        child_op.parents[i] = split_op.opid
+                            # Update the input tensor of the split to the tmp_deprecated[0]'s parent
+                            split_op.info['inputs'][1] = head_op.info['outputs'][0]
+                            split_op.parents[0] = head_op.opid
+                            head_op.children[0] = split_op.opid
+                            break
+                        else:
+                            tmp_deprecated.append(child_op.opid)
+                            pre_op = child_op
+                            child_op = self.ori_graph.ops[child_op.children[0]]
+                            steps += 1
+                    if steps == 3:
+                        is_deprecated = 0
+                        break
+                if is_deprecated == 1:
+                    # Create new axis tensor and buffer for split dim 2 (multi-head attention usually split this dim)
+                    if not have_new_buffer["first"]:
+                        new_axis_tensor = {
+                            "shape": [],
+                            "type": "INT32",
+                            "buffer": len(self.buffers),
+                            "name": "split_axis_tensor",
+                            "quantization": {},
+                        }
+                        new_axis_buffer = {
+                            "data": self.int_list_to_byte_list([2])
+                        }
+                        self.tensors.append(new_axis_tensor)
+                        self.buffers.append(new_axis_buffer)
+                        have_new_buffer["first"] = True
+                        have_new_buffer["id"] = len(self.tensors) - 1
+                    split_op.info['inputs'][0] = have_new_buffer["id"]
+                    deprecated += tmp_deprecated
+                tmp_deprecated = []
+                pattern_id = 0
+            for child_id in self.ori_graph.ops[cur_opid].children:
+                traversal_dfs(child_id, pattern_id, visited, tmp_deprecated, deprecated)
+            return deprecated
+
+        visited = [False for _ in range(len(self.ori_graph.ops))]
+        deprecated = []
+        for i in range(len(self.ori_graph.root_op_ids)):
+            deprecated_new = []
+            traversal_dfs(self.ori_graph.root_op_ids[i], 0, visited, [], deprecated_new)
+            deprecated += deprecated_new
+        self.ori_graph.buffers = self.buffers
+        self.ori_graph.tensors = self.tensors
+        self.ori_graph.remove_deprecated_op(deprecated)
+        new_buffers, new_tensors, new_inputs, new_outputs, new_operators, new_opcodes = self.ori_graph.export()
+        new_graph = Graph(new_operators, new_tensors, new_buffers, new_opcodes, new_inputs, new_outputs, self.ori_graph.exec_order)
+        self.re_init(new_graph)
