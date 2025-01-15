@@ -2187,11 +2187,10 @@ class Splitter:
                 value_path = False
                 deprecated_first_op = self.ori_graph.ops[tmp_deprecated[0]]
                 head_op = self.ori_graph.ops[deprecated_first_op.parents[0]]
-                parent_op = self.ori_graph.ops[head_op.parents[0]]
-                p_output_name = self.tensors[parent_op.info['outputs'][0]]['name']
-                grandparent_op = self.ori_graph.ops[parent_op.parents[0]]
-                gp_output_name = self.tensors[grandparent_op.info['outputs'][0]]['name']
-                if 'value' in p_output_name or 'value' in gp_output_name:
+                h_output_name = self.tensors[head_op.info['outputs'][0]]['name']
+                head_parent_op = self.ori_graph.ops[head_op.parents[0]]
+                hp_output_name = self.tensors[head_parent_op.info['outputs'][0]]['name']
+                if 'value' in h_output_name or 'value' in hp_output_name:
                     value_path = True
                 # No need to eliminate the split op
                 tmp_deprecated.pop(-1)
