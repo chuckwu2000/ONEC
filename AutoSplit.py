@@ -707,10 +707,8 @@ class Splitter:
         output_shape = self.tensors[outputs[0]]['shape']
 
         # split have multi outputs, each output need to be split
-        axis_buffer = self.buffers[self.tensors[inputs[0]]['buffer']]
-        axis = axis_buffer['data'][0]
-        input_shape = self.tensors[inputs[1]]['shape']
-        for i in range(input_shape[axis]):
+        num_splits = info['builtin_options']['num_splits']
+        for i in range(num_splits):
             if self.model_type == ModelType.BERT:
                 split_dim_value = self.token_size
                 for dim, dim_value in enumerate(output_shape):
@@ -728,7 +726,7 @@ class Splitter:
 
         if len(inputs) != 2:
             raise "wrong input number"
-        elif len(outputs) != input_shape[axis]:
+        elif len(outputs) != num_splits:
             raise "wrong output number"
         else:
             split_op_id = len(self.nodes)
@@ -737,7 +735,7 @@ class Splitter:
                 new_op_info = copy.deepcopy(info)
                 new_op_info['inputs'][1] = a
                 new_op_output = []
-                for idx2 in range(input_shape[axis]):
+                for idx2 in range(num_splits):
                     b = self.split_tensor_table[outputs[idx2]][idx1]
                     new_op_output.append(b)
                 new_op_info['outputs'] = new_op_output

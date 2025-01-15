@@ -103,7 +103,7 @@ splitter = Splitter(ori_graph, args.split_height, model_type, args.token_size)
 if args.pad_fusion and model_type == 1:
     splitter.PaddingFusion()
 # When emcount bert model, try to eliminate some data layout ops
-if args.move_data_layout_op:
+if args.move_data_layout_op and model_type == 0:
     splitter.Elminate_useless_data_layout_op()
 
 # Decide each block's range from ori_graph (Block: one entry point and one exit point)
