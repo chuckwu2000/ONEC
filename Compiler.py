@@ -7,6 +7,7 @@ from Block import Block
 from AutoSplit import Splitter
 import tempfile
 from pipeline_schedule import set_active_engine
+from pipeline_schedule import weight_reuse_schedule
 from pipeline_schedule import pipeline_schedule
 from pipeline_schedule import set_new_operators
 from performance import simulator
@@ -118,20 +119,24 @@ new_graph = splitter.perform_split(blocks)
 
 # Memory allocation(not perform cache optimization)
 mem_allocator = memory_allocator(new_graph)
-mem_allocator.memory_allocate(use_sram = False)
-# Prepare for pipeline schedule (as the cost of each operator is known)
-mem_allocator.set_cache_storage()
 
 # Set each operator's active engine
 set_active_engine(new_graph)
 
 # Estimate the performance before pipeline schedule
-model_sim = simulator(new_graph, mem_allocator.allocated_tensors)
+model_sim = simulator(new_graph, mem_allocator.need_allocate_tensors)
 if args.verbose_performance:
     split_dma_cycles, split_op_cycles, split_total_cycles, engine_idle_cycles = model_sim.estimate_model(pipeline = False)
     print(f"Before pipeline schedule: dma cycles = {split_dma_cycles :.1f}, op cycles = {split_op_cycles :.1f}, total cycles = {split_total_cycles :.1f}")
     print(f"mac_idle_cycles: {engine_idle_cycles[0]}, elem_wise_idle_cycles: {engine_idle_cycles[1]}")
 ##############################################
+
+################## WEIGHTS REUSE ##################
+# Prepare for weight reuse schedule (as the cost of each operator is known)
+mem_allocator.set_cache_storage()
+same_layer_ops = splitter.same_layer_split_opids
+weights_sharing_graph = weight_reuse_schedule(new_graph, same_layer_ops, mem_allocator)
+###################################################
 
 ################## PIPELINE SCHEDULE ##################
 # Perform software pipeline schedule
@@ -141,12 +146,11 @@ pipeline_new_graph = pipeline_schedule(new_graph)
 set_new_operators(pipeline_new_graph)
 
 # Memory allocation(perform cache optimization)
-mem_allocator = memory_allocator(pipeline_new_graph)
 mem_allocator.memory_allocate(use_sram = True)
 
 # Estimate the performance after pipeline schedule
 if args.verbose_performance:
-    model_sim = simulator(pipeline_new_graph, mem_allocator.allocated_tensors)
+    model_sim = simulator(pipeline_new_graph, mem_allocator.need_allocate_tensors)
     pipeline_dma_cycles, pipeline_op_cycles, pipeline_total_cycles, engine_idle_cycles = model_sim.estimate_model(pipeline = True)
     model_sim.print_performance()
     print(f"cascade ops = {pipeline_new_graph.cascade_matched_ops}")
