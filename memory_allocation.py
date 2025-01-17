@@ -10,6 +10,7 @@ fall_back_cpu_ops = data_layout_ops + reduce_ops
 # The input of the operation
 binary_ops = ["ADD", "SUB", "MUL", "SQUARED_DIFFERENCE", "BATCH_MATMUL"]
 trinary_ops = ["CONV_2D", "DEPTHWISE_CONV_2D", "FULLY_CONNECTED"]
+weight_reuse_ops = trinary_ops
 
 class tensor_memory:
     def __init__(self, tensor_id):
@@ -28,6 +29,7 @@ class memory_allocator:
         self.allocated_tensors = defaultdict(tensor_memory)
         self.init_all_tensors()
         self.ops_relation = [[set(), set(), set(), set(), set()] for _ in range(len(self.graph.ops))]
+        self.visited = [False for _ in range(len(self.graph.ops))]
 
     def init_all_tensors(self):
         operators = self.graph.operators
@@ -60,7 +62,7 @@ class memory_allocator:
         size = element * (elem_size // 8)
         return size
 
-    def set_cache_storage(self):
+    def weight_reuse_schedule_and_set_cache_storage(self, same_layer_next_opids):
         # IN: store the tensor_id of the tensor which store in SRAM before the operation
         # OUT: store the tensor_id of the tensor which store in SRAM after the operation
         # GEN: store the tensor_id of the tensor which will be placed in SRAM after the operation
@@ -77,9 +79,16 @@ class memory_allocator:
         # Number of input
         _binary, _trinary = 2, 3
 
-        ops = self.graph.ops
-        for id, op in enumerate(ops):
+        weights_reuse_mapping = defaultdict(int)
+        weights_reuse_order = 0
+        weights_in_sram = set()
+        block_start_order = 0
+        ordered_ops = self.graph.ordered_ops
+        for order, op in enumerate(ordered_ops):
+            if self.visited[op.opid]:
+                continue
             op_info = op.info
+            id = op.opid
             opcode_index = op_info.get("opcode_index")
             opcode_type = self.graph.opcodes[opcode_index].get("builtin_code")
             # Check if the operation will be fall back to CPU
@@ -121,6 +130,11 @@ class memory_allocator:
                 # Update tensor storage
                 for tensor_id in op_info['outputs']:
                     self.need_allocate_tensors[tensor_id].memory_storage = Mem_area.SRAM
+                # Assume the constant tensor can fetch from SRAM
+                # TODO: Need to deicde when to fetch the constant tensor from DRAM  
+                if opcode_type in weight_reuse_ops:
+                    for tensor_id in op_info['inputs'][1: _trinary]:
+                        self.need_allocate_tensors[tensor_id].memory_storage = Mem_area.SRAM
                 # IN
                 for parent_id in op.parents:
                     self.ops_relation[id][_in] = self.ops_relation[id][_in].union(self.ops_relation[parent_id][_out])
@@ -148,12 +162,15 @@ class memory_allocator:
                         buffer = self.graph.buffers[self.graph.tensors[tensor_id]['buffer']]
                         if len(buffer) != 0:
                             self.ops_relation[id][_gen].add(tensor_id)
-                elif opcode_type in trinary_ops:
+                elif opcode_type in weight_reuse_ops:
                     for tensor_id in op_info['inputs'][1: _trinary]:
                         # Need to record the constant tensor
                         buffer = self.graph.buffers[self.graph.tensors[tensor_id]['buffer']]
                         if len(buffer) != 0:
                             self.ops_relation[id][_gen].add(tensor_id)
+                            # The weights or bias that we can reuse on other split path, set the tensor_wait_consume to the max value
+                            tensor_wait_consume.update({tensor_id: 2147483647})
+                            weights_in_sram.add(tensor_id)
                 # Ex: no bias, then the tensor_id of bias will be -1
                 if -1 in self.ops_relation[id][_gen]:
                     self.ops_relation[id][_gen].remove(-1)
@@ -180,6 +197,70 @@ class memory_allocator:
                     self.ops_relation[id][_sram_need].add(op_info['inputs'][2])
                 if -1 in self.ops_relation[id][_sram_need]:
                     self.ops_relation[id][_sram_need].remove(-1)
+            # Check whether the block depth should stop in this op
+            (over_use, stop_id) = self.check_depth(id)
+            if over_use:
+                # Need to reschedule, but in here we just record the mapping of the opid and the weight reuse order
+                block_end_order = self.graph.ops[stop_id].schedule_order
+                self.weight_reuse_schedule(block_start_order, block_end_order, same_layer_next_opids, weights_reuse_mapping, weights_reuse_order)
+                block_start_order = order
+                # Clean the weights in SRAM
+                for tensor_id in weights_in_sram:
+                    tensor_wait_consume.pop(tensor_id)
+                    if tensor_id in self.ops_relation[id][_out]:
+                        self.ops_relation[id][_out].remove(tensor_id)
+                weights_in_sram.clear()
+            else:
+                weights_reuse_mapping[id] = weights_reuse_order
+                weights_reuse_order += 1
+        return weights_reuse_mapping
+
+    def check_depth(self, id) -> tuple:
+        # Decide the depth of the weight reuse
+        _sram_need = 4
+        sram_max_size_per_split_path = ArchitectureFeatures.SRAM_MAX_SIZE
+        ops = self.graph.ops
+        ops_relation = self.ops_relation
+        # Check if the size of tensors exceeds the SRAM's max size
+        sram_usage = self.compute_sram_usage(ops_relation[id][_sram_need])
+        if sram_usage > sram_max_size_per_split_path:
+            print(f"overuse in op_info: {ops[id].info}")
+            print(f"_sram_need: {ops_relation[id][4]}")
+            # Stop in ops[id]'s last parent, then the exec-order will become BF
+            schedule_order = -1
+            stop_id = -1
+            for parent_id in ops[id].parents:
+                # Choose the last order of the parent
+                if ops[parent_id].schedule_order > schedule_order:
+                    schedule_order = ops[parent_id].schedule_order
+                    stop_id = parent_id
+            return (True, stop_id)
+        return (False, -1)
+    
+    def weight_reuse_schedule(self, block_start_order, block_end_order, same_layer_next_opids, weights_reuse_mapping, weights_reuse_order):
+        ops_on_next_path = []
+        for op in self.graph.ordered_ops[block_start_order: block_end_order + 1]:
+            next_opid = same_layer_next_opids.get(op.opid, -1)
+            if next_opid != -1:
+                ops_on_next_path.append(next_opid)
+        while len(ops_on_next_path) > 0:
+            next_opid = ops_on_next_path.pop(0)
+            if self.visited[next_opid]:
+                continue
+            self.visited[next_opid] = True
+            next_op = self.graph.ops[next_opid]
+            weights_reuse_mapping[next_opid] = weights_reuse_order
+            weights_reuse_order += 1
+            next_opid = same_layer_next_opids.get(next_op.opid, -1)
+            if next_opid != -1:
+                ops_on_next_path.append(next_opid)
+    
+    def compute_sram_usage(self, mem_need):
+        need_allocate_tensors = self.need_allocate_tensors
+        mem_need_size = 0
+        for tensor_id in mem_need:
+            mem_need_size += need_allocate_tensors[tensor_id].size
+        return mem_need_size
 
     def memory_allocate(self, use_sram = False):
         # Compute tensor's live range

@@ -27,35 +27,9 @@ def set_active_engine(graph: Graph):
             op.is_mac_main_op = False
             op.is_elem_wise_main_op = False
 
-# TODO: Implement the weight reuse schedule
-def weight_reuse_schedule(split_graph: Graph, same_layer_ops: dict, mem_allocator):
-    # Decide the depth of the weight reuse
-    # Enumerate with in, out, gen, kill
-    _in, _out, _gen, _kill, _sram_need = 0, 1, 2, 3, 4
-    sram_max_size_per_split_path = ArchitectureFeatures.SRAM_MAX_SIZE
-    ops = split_graph.ops
-    ops_relation = mem_allocator.ops_relation
-    for id, op in enumerate(ops):
-        # Check if the size of tensors exceeds the SRAM's max size
-        sram_usage = compute_sram_usage(ops_relation[id][_sram_need], mem_allocator)
-        if sram_usage > sram_max_size_per_split_path:
-            print("="*50)
-            op_info = op.info
-            print(f"size exceed at #{id} op: {op_info}")
-            print(f"sram_need: {ops_relation[id][_sram_need]}")
-            print(f"in: {ops_relation[id][_in]}")
-            print(f"out: {ops_relation[id][_out]}")
-            print(f"gen: {ops_relation[id][_gen]}")
-            print(f"kill: {ops_relation[id][_kill]}")
-            # ops_relation[id][_out] = set()
+# TODO: Finish here
+def weight_reuse_schedule(split_graph: Graph, weight_reuse_mapping):
     return split_graph
-
-def compute_sram_usage(mem_need, mem_allocator):
-    need_allocate_tensors = mem_allocator.need_allocate_tensors
-    mem_need_size = 0
-    for tensor_id in mem_need:
-        mem_need_size += need_allocate_tensors[tensor_id].size
-    return mem_need_size
 
 def pipeline_schedule(split_graph: Graph):
     # First priority schedule:
