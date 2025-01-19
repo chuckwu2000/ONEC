@@ -29,6 +29,14 @@ def set_active_engine(graph: Graph):
 
 # TODO: Finish here
 def weight_reuse_schedule(split_graph: Graph, weight_reuse_mapping):
+    for op in split_graph.ops:
+        op.schedule_order = weight_reuse_mapping[op.opid]
+    # Update the schedule order in the ordered_ops
+    split_graph.ordered_ops = sorted(split_graph.ops, key=lambda x: x.schedule_order)
+    # Update the operators in the split_graph
+    split_graph.operators = []
+    for op in split_graph.ordered_ops:
+        split_graph.operators.append(op.info)
     return split_graph
 
 def pipeline_schedule(split_graph: Graph):
