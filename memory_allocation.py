@@ -30,6 +30,8 @@ class memory_allocator:
         self.init_all_tensors()
         self.ops_relation = [[set(), set(), set(), set(), set()] for _ in range(len(self.graph.ops))]
         self.visited = [False for _ in range(len(self.graph.ops))]
+        self.weights_reuse_order = 0
+        self.weights_reuse_mapping = defaultdict(int)
 
     def init_all_tensors(self):
         operators = self.graph.operators
@@ -79,14 +81,13 @@ class memory_allocator:
         # Number of input
         _binary, _trinary = 2, 3
 
-        weights_reuse_mapping = defaultdict(int)
-        weights_reuse_order = 0
         weights_in_sram = set()
         block_start_order = 0
         ordered_ops = self.graph.ordered_ops
         for order, op in enumerate(ordered_ops):
             if self.visited[op.opid]:
                 continue
+            self.visited[op.opid] = True
             op_info = op.info
             id = op.opid
             opcode_index = op_info.get("opcode_index")
@@ -202,8 +203,10 @@ class memory_allocator:
             if over_use:
                 # Need to reschedule, but in here we just record the mapping of the opid and the weight reuse order
                 block_end_order = self.graph.ops[stop_id].schedule_order
-                self.weight_reuse_schedule(block_start_order, block_end_order, same_layer_next_opids, weights_reuse_mapping, weights_reuse_order)
+                self.weight_reuse_schedule(block_start_order, block_end_order, same_layer_next_opids)
                 block_start_order = order
+                self.weights_reuse_mapping[id] = self.weights_reuse_order
+                self.weights_reuse_order += 1
                 # Clean the weights in SRAM
                 for tensor_id in weights_in_sram:
                     tensor_wait_consume.pop(tensor_id)
@@ -211,9 +214,9 @@ class memory_allocator:
                         self.ops_relation[id][_out].remove(tensor_id)
                 weights_in_sram.clear()
             else:
-                weights_reuse_mapping[id] = weights_reuse_order
-                weights_reuse_order += 1
-        return weights_reuse_mapping
+                self.weights_reuse_mapping[id] = self.weights_reuse_order
+                self.weights_reuse_order += 1
+        return self.weights_reuse_mapping
 
     def check_depth(self, id) -> tuple:
         # Decide the depth of the weight reuse
@@ -237,23 +240,25 @@ class memory_allocator:
             return (True, stop_id)
         return (False, -1)
     
-    def weight_reuse_schedule(self, block_start_order, block_end_order, same_layer_next_opids, weights_reuse_mapping, weights_reuse_order):
+    def weight_reuse_schedule(self, block_start_order, block_end_order, same_layer_next_opids):
         ops_on_next_path = []
         for op in self.graph.ordered_ops[block_start_order: block_end_order + 1]:
             next_opid = same_layer_next_opids.get(op.opid, -1)
             if next_opid != -1:
                 ops_on_next_path.append(next_opid)
         while len(ops_on_next_path) > 0:
-            next_opid = ops_on_next_path.pop(0)
-            if self.visited[next_opid]:
-                continue
-            self.visited[next_opid] = True
-            next_op = self.graph.ops[next_opid]
-            weights_reuse_mapping[next_opid] = weights_reuse_order
-            weights_reuse_order += 1
-            next_opid = same_layer_next_opids.get(next_op.opid, -1)
-            if next_opid != -1:
-                ops_on_next_path.append(next_opid)
+            new_list = []
+            for now_opid in ops_on_next_path:
+                now_op = self.graph.ops[now_opid]
+                next_opid = same_layer_next_opids.get(now_op.opid, -1)
+                if next_opid != -1:
+                    new_list.append(next_opid)
+                if self.visited[now_opid]:
+                    continue
+                self.visited[now_opid] = True
+                self.weights_reuse_mapping[now_opid] = self.weights_reuse_order
+                self.weights_reuse_order += 1
+            ops_on_next_path = new_list
     
     def compute_sram_usage(self, mem_need):
         need_allocate_tensors = self.need_allocate_tensors

@@ -27,7 +27,6 @@ def set_active_engine(graph: Graph):
             op.is_mac_main_op = False
             op.is_elem_wise_main_op = False
 
-# TODO: Finish here
 def weight_reuse_schedule(split_graph: Graph, weight_reuse_mapping):
     for op in split_graph.ops:
         op.schedule_order = weight_reuse_mapping[op.opid]

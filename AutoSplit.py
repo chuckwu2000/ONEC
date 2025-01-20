@@ -176,8 +176,8 @@ class Splitter:
                 for end_id in end_ids:
                     self.traverse_til_end(end_id)
                 for end_id in end_ids:
-                    self.concat_block_output(end_id)  
-        
+                    self.concat_block_output(end_id)
+
         new_graph = Graph ( self.new_operators, self.tensors, self.buffers,
                             self.opcodes, self.ori_graph.inputs, self.ori_graph.outputs, self.ori_graph.exec_order)
 
@@ -507,9 +507,9 @@ class Splitter:
 
         # Record the split opid in the same layer
         pre_opid = self.nodes[opid].split_id[0]
-        for opid in self.nodes[opid].split_id[1:]:
-            self.same_layer_next_opids[pre_opid] = opid
-            pre_opid = opid
+        for now_opid in self.nodes[opid].split_id[1:]:
+            self.same_layer_next_opids[pre_opid] = now_opid
+            pre_opid = now_opid
 
     def split_pad(self, opid, output_split):
         info = self.nodes[opid].node.info
@@ -526,7 +526,7 @@ class Splitter:
         elif len(outputs) != 1:
             raise "wrong output number"
         else:
-            split_op_id = len(self.nodes)
+            split_op_id = len(self.new_operators)
             i_len = len(self.split_tensor_table[inputs[0]])
             for a, b, c in zip(self.split_tensor_table[inputs[0]],
                                [inputs[1] for i in range(i_len)],
@@ -541,9 +541,6 @@ class Splitter:
                 new_op_info = copy.deepcopy(info)
                 new_op_info['inputs'] = [a, b]
                 new_op_info['outputs'] = [c]
-                op = Node(new_op_info, split_op_id)
-
-                self.nodes.append(SplitterNode(op))
                 self.new_operators.append(new_op_info)
                 self.nodes[opid].split_id.append(split_op_id)
                 split_op_id+=1
@@ -611,14 +608,12 @@ class Splitter:
         elif len(outputs) != 1:
             raise "wrong output number"
         else:
-            split_op_id = len(self.nodes)
+            split_op_id = len(self.new_operators)
             for a, b in zip(self.split_tensor_table[inputs[0]],
                             self.split_tensor_table[outputs[0]]):
                 new_op_info = copy.deepcopy(info)
                 new_op_info['inputs'][0] = a
                 new_op_info['outputs'] = [b]
-                op = Node(new_op_info, split_op_id)
-                self.nodes.append(SplitterNode(op))
                 self.new_operators.append(new_op_info)
                 self.nodes[opid].split_id.append(split_op_id)
                 split_op_id+=1
@@ -660,14 +655,12 @@ class Splitter:
         elif len(outputs) != 1:
             raise "wrong output number"
         else:
-            split_op_id = len(self.nodes)
+            split_op_id = len(self.new_operators)
             for a, b in zip(self.split_tensor_table[inputs[0]],
                             self.split_tensor_table[outputs[0]]):
                 new_op_info = copy.deepcopy(info)
                 new_op_info['inputs'][0] = a
                 new_op_info['outputs'] = [b]
-                op = Node(new_op_info, split_op_id)
-                self.nodes.append(SplitterNode(op))
                 self.new_operators.append(new_op_info)
                 self.nodes[opid].split_id.append(split_op_id)
                 split_op_id+=1
@@ -695,14 +688,12 @@ class Splitter:
         elif len(outputs) != 1:
             raise "wrong output number"
         else:
-            split_op_id = len(self.nodes)
+            split_op_id = len(self.new_operators)
             for a, b in zip(self.split_tensor_table[inputs[0]],
                             self.split_tensor_table[outputs[0]]):
                 new_op_info = copy.deepcopy(info)
                 new_op_info['inputs'] = [a]
                 new_op_info['outputs'] = [b]
-                op = Node(new_op_info, split_op_id)
-                self.nodes.append(SplitterNode(op))
                 self.new_operators.append(new_op_info)
                 self.nodes[opid].split_id.append(split_op_id)
                 split_op_id+=1
@@ -736,8 +727,7 @@ class Splitter:
         elif len(outputs) != num_splits:
             raise "wrong output number"
         else:
-            split_op_id = len(self.nodes)
-            
+            split_op_id = len(self.new_operators)
             for idx1, a in enumerate(self.split_tensor_table[inputs[1]]):
                 new_op_info = copy.deepcopy(info)
                 new_op_info['inputs'][1] = a
@@ -746,8 +736,6 @@ class Splitter:
                     b = self.split_tensor_table[outputs[idx2]][idx1]
                     new_op_output.append(b)
                 new_op_info['outputs'] = new_op_output
-                op = Node(new_op_info, split_op_id)
-                self.nodes.append(SplitterNode(op))
                 self.new_operators.append(new_op_info)
                 self.nodes[opid].split_id.append(split_op_id)
                 split_op_id+=1
@@ -770,8 +758,7 @@ class Splitter:
         elif len(outputs) != size_splits:
             raise "wrong output number"
         else:
-            split_op_id = len(self.nodes)
-            
+            split_op_id = len(self.new_operators)
             for idx1, a in enumerate(self.split_tensor_table[inputs[0]]):
                 new_op_info = copy.deepcopy(info)
                 new_op_info['inputs'][0] = a
@@ -780,8 +767,6 @@ class Splitter:
                     b = self.split_tensor_table[outputs[idx2]][idx1]
                     new_op_output.append(b)
                 new_op_info['outputs'] = new_op_output
-                op = Node(new_op_info, split_op_id)
-                self.nodes.append(SplitterNode(op))
                 self.new_operators.append(new_op_info)
                 self.nodes[opid].split_id.append(split_op_id)
                 split_op_id+=1
@@ -798,8 +783,7 @@ class Splitter:
         elif len(outputs) != 1:
             raise "wrong output number"
         else:
-            split_op_id = len(self.nodes)
-            
+            split_op_id = len(self.new_operators)
             # Need to order the batch matmul's input tensor
             a_step = self.tensors[info['outputs'][0]]['shape'][2] / output_split
             b_step = self.tensors[info['outputs'][0]]['shape'][3] / output_split
@@ -812,8 +796,6 @@ class Splitter:
                 new_op_info = copy.deepcopy(info)
                 new_op_info['inputs'] = [a, b]
                 new_op_info['outputs'] = [c]
-                op = Node(new_op_info, split_op_id)
-                self.nodes.append(SplitterNode(op))
                 self.new_operators.append(new_op_info)
                 self.nodes[opid].split_id.append(split_op_id)
                 split_op_id += 1
@@ -839,8 +821,7 @@ class Splitter:
         elif len(outputs) != 1:
             raise "wrong output number"
         else:
-            split_op_id = len(self.nodes)
-
+            split_op_id = len(self.new_operators)
             in_shape = self.tensors[inputs[0]]['shape']
             out_shape = self.tensors[outputs[0]]['shape']
             ker_shape = self.tensors[inputs[1]]['shape']
@@ -901,8 +882,6 @@ class Splitter:
                 new_op_info['outputs'] = [self.split_tensor_table[outputs[0]][int(out_y)//input_split]]
 
                 self.new_operators.append(new_op_info)
-                op = Node(new_op_info, split_op_id)
-                self.nodes.append(SplitterNode(op))
                 self.nodes[opid].split_id.append(split_op_id)
                 split_op_id += 1
 
@@ -919,8 +898,7 @@ class Splitter:
         elif len(outputs) != 1:
             raise "wrong output number"
         else:
-            split_op_id = len(self.nodes)
-
+            split_op_id = len(self.new_operators)
             in_shape = self.tensors[inputs[0]]['shape']
             out_shape = self.tensors[outputs[0]]['shape']
             ker_shape = self.tensors[inputs[1]]['shape']
@@ -984,8 +962,6 @@ class Splitter:
                 new_op_info['outputs'] = [self.split_tensor_table[outputs[0]][out_y//input_split]]
 
                 self.new_operators.append(new_op_info)
-                op = Node(new_op_info, split_op_id)
-                self.nodes.append(SplitterNode(op))
                 self.nodes[opid].split_id.append(split_op_id)
                 split_op_id += 1
 
@@ -1045,8 +1021,7 @@ class Splitter:
         elif len(outputs) != 1:
             raise "wrong output number"
         else:
-            split_op_id = len(self.nodes)
-
+            split_op_id = len(self.new_operators)
             if is_value_fc:
                 # For V's FC, we decide to avoid split, perform fake concatenate
                 for a in self.split_tensor_table[outputs[0]]:
@@ -1054,8 +1029,6 @@ class Splitter:
                     for b in self.split_tensor_table[inputs[0]]:
                         new_op_info['inputs'].append(b)
                     new_op_info['outputs'] = [a]
-                    op = Node(new_op_info,split_op_id)
-                    self.nodes.append(SplitterNode(op))
                     self.new_operators.append(new_op_info)
                     self.nodes[opid].split_id.append(split_op_id)
                     split_op_id += 1
@@ -1067,8 +1040,6 @@ class Splitter:
                     new_op_info['inputs'][0] = a
                     new_op_info['inputs'][1] = b
                     new_op_info['outputs'] = [c]
-                    op = Node(new_op_info,split_op_id)
-                    self.nodes.append(SplitterNode(op))
                     self.new_operators.append(new_op_info)
                     self.nodes[opid].split_id.append(split_op_id)
                     split_op_id += 1
@@ -1086,8 +1057,6 @@ class Splitter:
                     new_op_info['inputs'][0] = a
                     new_op_info['inputs'][1] = b
                     new_op_info['outputs'] = [c]
-                    op = Node(new_op_info, split_op_id)
-                    self.nodes.append(SplitterNode(op))
                     self.new_operators.append(new_op_info)
                     self.nodes[opid].split_id.append(split_op_id)
                     split_op_id += 1
@@ -1107,8 +1076,6 @@ class Splitter:
                     new_op_info = copy.deepcopy(info)
                     new_op_info['inputs'][0] = a
                     new_op_info['outputs'] = [b]
-                    op = Node(new_op_info,split_op_id)
-                    self.nodes.append(SplitterNode(op))
                     self.new_operators.append(new_op_info)
                     self.nodes[opid].split_id.append(split_op_id)
                     split_op_id += 1
@@ -1129,8 +1096,7 @@ class Splitter:
         elif len(outputs) != 1:
             raise "wrong output number"
         else:
-            split_op_id = len(self.nodes)
-
+            split_op_id = len(self.new_operators)
             in_shape = self.tensors[inputs[0]]['shape']
             out_shape = self.tensors[outputs[0]]['shape']
             ker_shape = (info['builtin_options']['filter_height'], info['builtin_options']['filter_width'])
@@ -1178,8 +1144,6 @@ class Splitter:
                 new_op_info['outputs'] = [self.split_tensor_table[outputs[0]][int(out_y)//input_split]]
 
                 self.new_operators.append(new_op_info)
-                op = Node(new_op_info, split_op_id)
-                self.nodes.append(SplitterNode(op))
                 self.nodes[opid].split_id.append(split_op_id)
                 split_op_id += 1
 
@@ -1240,7 +1204,7 @@ class Splitter:
         elif not have_constant and len(self.split_tensor_table[inputs[0]]) != len(self.split_tensor_table[inputs[1]]):
             raise BaseException("split number of two operand is not equal")
         else:
-            split_op_id = len(self.nodes)
+            split_op_id = len(self.new_operators)
             # We don't split the constant value, if it need to be broadcast
             if have_constant and not have_split_constant:
                 if input1_is_constant:
@@ -1249,8 +1213,6 @@ class Splitter:
                         new_op_info = copy.deepcopy(info)
                         new_op_info['inputs'][1] = a
                         new_op_info['outputs'] = [b]
-                        op = Node(new_op_info,split_op_id)
-                        self.nodes.append(SplitterNode(op))
                         self.new_operators.append(new_op_info)
                         self.nodes[opid].split_id.append(split_op_id)
                         split_op_id+=1
@@ -1260,8 +1222,6 @@ class Splitter:
                         new_op_info = copy.deepcopy(info)
                         new_op_info['inputs'][0] = a
                         new_op_info['outputs'] = [b]
-                        op = Node(new_op_info,split_op_id)
-                        self.nodes.append(SplitterNode(op))
                         self.new_operators.append(new_op_info)
                         self.nodes[opid].split_id.append(split_op_id)
                         split_op_id+=1
@@ -1272,8 +1232,6 @@ class Splitter:
                     new_op_info = copy.deepcopy(info)
                     new_op_info['inputs'] = [a,b]
                     new_op_info['outputs'] = [c]
-                    op = Node(new_op_info,split_op_id)
-                    self.nodes.append(SplitterNode(op))
                     self.new_operators.append(new_op_info)
                     self.nodes[opid].split_id.append(split_op_id)
                     split_op_id+=1
@@ -1326,7 +1284,7 @@ class Splitter:
         elif not have_constant and len(self.split_tensor_table[inputs[0]]) != len(self.split_tensor_table[inputs[1]]):
             raise BaseException("split number of two operand is not equal")
         else:
-            split_op_id = len(self.nodes)
+            split_op_id = len(self.new_operators)
             # We don't split the constant value, if it need to be broadcast
             if have_constant and not have_split_constant:
                 if input1_is_constant:
@@ -1335,8 +1293,6 @@ class Splitter:
                         new_op_info = copy.deepcopy(info)
                         new_op_info['inputs'][1] = a
                         new_op_info['outputs'] = [b]
-                        op = Node(new_op_info,split_op_id)
-                        self.nodes.append(SplitterNode(op))
                         self.new_operators.append(new_op_info)
                         self.nodes[opid].split_id.append(split_op_id)
                         split_op_id+=1
@@ -1346,8 +1302,6 @@ class Splitter:
                         new_op_info = copy.deepcopy(info)
                         new_op_info['inputs'][0] = a
                         new_op_info['outputs'] = [b]
-                        op = Node(new_op_info,split_op_id)
-                        self.nodes.append(SplitterNode(op))
                         self.new_operators.append(new_op_info)
                         self.nodes[opid].split_id.append(split_op_id)
                         split_op_id+=1
@@ -1358,8 +1312,6 @@ class Splitter:
                     new_op_info = copy.deepcopy(info)
                     new_op_info['inputs'] = [a,b]
                     new_op_info['outputs'] = [c]
-                    op = Node(new_op_info,split_op_id)
-                    self.nodes.append(SplitterNode(op))
                     self.new_operators.append(new_op_info)
                     self.nodes[opid].split_id.append(split_op_id)
                     split_op_id+=1
@@ -1412,7 +1364,7 @@ class Splitter:
         elif not have_constant and len(self.split_tensor_table[inputs[0]]) != len(self.split_tensor_table[inputs[1]]):
             raise BaseException("split number of two operand is not equal")
         else:
-            split_op_id = len(self.nodes)
+            split_op_id = len(self.new_operators)
             # We don't split the constant value, if it need to be broadcast
             if have_constant and not have_split_constant:
                 if input1_is_constant:
@@ -1421,8 +1373,6 @@ class Splitter:
                         new_op_info = copy.deepcopy(info)
                         new_op_info['inputs'][1] = a
                         new_op_info['outputs'] = [b]
-                        op = Node(new_op_info,split_op_id)
-                        self.nodes.append(SplitterNode(op))
                         self.new_operators.append(new_op_info)
                         self.nodes[opid].split_id.append(split_op_id)
                         split_op_id+=1
@@ -1432,8 +1382,6 @@ class Splitter:
                         new_op_info = copy.deepcopy(info)
                         new_op_info['inputs'][0] = a
                         new_op_info['outputs'] = [b]
-                        op = Node(new_op_info,split_op_id)
-                        self.nodes.append(SplitterNode(op))
                         self.new_operators.append(new_op_info)
                         self.nodes[opid].split_id.append(split_op_id)
                         split_op_id+=1
@@ -1444,8 +1392,6 @@ class Splitter:
                     new_op_info = copy.deepcopy(info)
                     new_op_info['inputs'] = [a,b]
                     new_op_info['outputs'] = [c]
-                    op = Node(new_op_info,split_op_id)
-                    self.nodes.append(SplitterNode(op))
                     self.new_operators.append(new_op_info)
                     self.nodes[opid].split_id.append(split_op_id)
                     split_op_id+=1
@@ -1465,14 +1411,12 @@ class Splitter:
         elif len(outputs) != 1:
             raise "wrong output number"
         else:
-            split_op_id = len(self.nodes)
+            split_op_id = len(self.new_operators)
             for a,b in zip(self.split_tensor_table[inputs[0]],
                             self.split_tensor_table[outputs[0]]):
                 new_op_info = copy.deepcopy(info)
                 new_op_info['inputs'] = [a]
                 new_op_info['outputs'] = [b]
-                op = Node(new_op_info,split_op_id)
-                self.nodes.append(SplitterNode(op))
                 self.new_operators.append(new_op_info)
                 self.nodes[opid].split_id.append(split_op_id)
                 split_op_id+=1
@@ -1500,14 +1444,12 @@ class Splitter:
         elif len(outputs) != 1:
             raise "wrong output number"
         else:
-            split_op_id = len(self.nodes)
+            split_op_id = len(self.new_operators)
             for a,b in zip(self.split_tensor_table[inputs[0]],
                             self.split_tensor_table[outputs[0]]):
                 new_op_info = copy.deepcopy(info)
                 new_op_info['inputs'][0] = a
                 new_op_info['outputs'] = [b]
-                op = Node(new_op_info,split_op_id)
-                self.nodes.append(SplitterNode(op))
                 self.new_operators.append(new_op_info)
                 self.nodes[opid].split_id.append(split_op_id)
                 split_op_id+=1
@@ -1537,15 +1479,13 @@ class Splitter:
         elif len(self.split_tensor_table[inputs[0]]) != len(self.split_tensor_table[inputs[1]]):
             raise BaseException("split number of two operand is not equal")
         else:
-            split_op_id = len(self.nodes)
+            split_op_id = len(self.new_operators)
             for a,b,c in zip(self.split_tensor_table[inputs[0]],
                             self.split_tensor_table[inputs[1]],
                             self.split_tensor_table[outputs[0]]):
                 new_op_info = copy.deepcopy(info)
                 new_op_info['inputs'] = [a,b]
                 new_op_info['outputs'] = [c]
-                op = Node(new_op_info,split_op_id)
-                self.nodes.append(SplitterNode(op))
                 self.new_operators.append(new_op_info)
                 self.nodes[opid].split_id.append(split_op_id)
                 split_op_id+=1
@@ -1573,14 +1513,12 @@ class Splitter:
         elif len(outputs) != 1:
             raise "wrong output number"
         else:
-            split_op_id = len(self.nodes)
+            split_op_id = len(self.new_operators)
             for a,b in zip(self.split_tensor_table[inputs[0]],
                             self.split_tensor_table[outputs[0]]):
                 new_op_info = copy.deepcopy(info)
                 new_op_info['inputs'] = [a]
                 new_op_info['outputs'] = [b]
-                op = Node(new_op_info,split_op_id)
-                self.nodes.append(SplitterNode(op))
                 self.new_operators.append(new_op_info)
                 self.nodes[opid].split_id.append(split_op_id)
                 split_op_id+=1
@@ -1608,14 +1546,12 @@ class Splitter:
         elif len(outputs) != 1:
             raise "wrong output number"
         else:
-            split_op_id = len(self.nodes)
+            split_op_id = len(self.new_operators)
             for a,b in zip(self.split_tensor_table[inputs[0]],
                             self.split_tensor_table[outputs[0]]):
                 new_op_info = copy.deepcopy(info)
                 new_op_info['inputs'] = [a]
                 new_op_info['outputs'] = [b]
-                op = Node(new_op_info,split_op_id)
-                self.nodes.append(SplitterNode(op))
                 self.new_operators.append(new_op_info)
                 self.nodes[opid].split_id.append(split_op_id)
                 split_op_id+=1
@@ -1643,14 +1579,12 @@ class Splitter:
         elif len(outputs) != 1:
             raise "wrong output number"
         else:
-            split_op_id = len(self.nodes)
+            split_op_id = len(self.new_operators)
             for a, b in zip(self.split_tensor_table[inputs[0]],
                             self.split_tensor_table[outputs[0]]):
                 new_op_info = copy.deepcopy(info)
                 new_op_info['inputs'][0] = a
                 new_op_info['outputs'] = [b]
-                op = Node(new_op_info,split_op_id)
-                self.nodes.append(SplitterNode(op))
                 self.new_operators.append(new_op_info)
                 self.nodes[opid].split_id.append(split_op_id)
                 split_op_id += 1
@@ -1678,14 +1612,12 @@ class Splitter:
         elif len(outputs) != 1:
             raise "wrong output number"
         else:
-            split_op_id = len(self.nodes)
+            split_op_id = len(self.new_operators)
             for a, b in zip(self.split_tensor_table[inputs[0]],
                             self.split_tensor_table[outputs[0]]):
                 new_op_info = copy.deepcopy(info)
                 new_op_info['inputs'] = [a]
                 new_op_info['outputs'] = [b]
-                op = Node(new_op_info,split_op_id)
-                self.nodes.append(SplitterNode(op))
                 self.new_operators.append(new_op_info)
                 self.nodes[opid].split_id.append(split_op_id)
                 split_op_id += 1
@@ -1713,14 +1645,12 @@ class Splitter:
         elif len(outputs) != 1:
             raise "wrong output number"
         else:
-            split_op_id = len(self.nodes)
+            split_op_id = len(self.new_operators)
             for a,b in zip(self.split_tensor_table[inputs[0]],
                             self.split_tensor_table[outputs[0]]):
                 new_op_info = copy.deepcopy(info)
                 new_op_info['inputs'] = [a]
                 new_op_info['outputs'] = [b]
-                op = Node(new_op_info,split_op_id)
-                self.nodes.append(SplitterNode(op))
                 self.new_operators.append(new_op_info)
                 self.nodes[opid].split_id.append(split_op_id)
                 split_op_id+=1
@@ -1749,14 +1679,12 @@ class Splitter:
         elif len(outputs) != 1:
             raise "wrong output number"
         else:
-            split_op_id = len(self.nodes)
+            split_op_id = len(self.new_operators)
             for a,b in zip(self.split_tensor_table[inputs[0]],
                             self.split_tensor_table[outputs[0]]):
                 new_op_info = copy.deepcopy(info)
                 new_op_info['inputs'] = [a]
                 new_op_info['outputs'] = [b]
-                op = Node(new_op_info,split_op_id)
-                self.nodes.append(SplitterNode(op))
                 self.new_operators.append(new_op_info)
                 self.nodes[opid].split_id.append(split_op_id)
                 split_op_id+=1
@@ -1777,14 +1705,12 @@ class Splitter:
         elif len(outputs) != 1:
             raise "wrong output number"
         else:
-            split_op_id = len(self.nodes)
+            split_op_id = len(self.new_operators)
             for a,b in zip(self.split_tensor_table[inputs[0]],
                             self.split_tensor_table[outputs[0]]):
                 new_op_info = copy.deepcopy(info)
                 new_op_info['inputs'][0] = a
                 new_op_info['outputs'] = [b]
-                op = Node(new_op_info,split_op_id)
-                self.nodes.append(SplitterNode(op))
                 self.new_operators.append(new_op_info)
                 self.nodes[opid].split_id.append(split_op_id)
                 split_op_id+=1
@@ -1812,14 +1738,12 @@ class Splitter:
         elif len(outputs) != 1:
             raise "wrong output number"
         else:
-            split_op_id = len(self.nodes)
+            split_op_id = len(self.new_operators)
             for a,b in zip(self.split_tensor_table[inputs[0]],
                             self.split_tensor_table[outputs[0]]):
                 new_op_info = copy.deepcopy(info)
                 new_op_info['inputs'][0] = a
                 new_op_info['outputs'] = [b]
-                op = Node(new_op_info,split_op_id)
-                self.nodes.append(SplitterNode(op))
                 self.new_operators.append(new_op_info)
                 self.nodes[opid].split_id.append(split_op_id)
                 split_op_id+=1
@@ -1838,8 +1762,7 @@ class Splitter:
         if len(outputs) != 1:
             raise "wrong output number"
         else:
-            split_op_id = len(self.nodes)
-
+            split_op_id = len(self.new_operators)
             for idx, c in enumerate(self.split_tensor_table[outputs[0]]):
                 new_op_input = []
                 for input_idx in inputs:
@@ -1847,8 +1770,6 @@ class Splitter:
                 new_op_info = copy.deepcopy(info)
                 new_op_info['inputs'] = new_op_input
                 new_op_info['outputs'] = [c]
-                op = Node(new_op_info,split_op_id)
-                self.nodes.append(SplitterNode(op))
                 self.new_operators.append(new_op_info)
                 self.nodes[opid].split_id.append(split_op_id)
                 split_op_id+=1
@@ -1875,8 +1796,7 @@ class Splitter:
         if len(outputs) != 1:
             raise "wrong output number"
         else:
-            split_op_id = len(self.nodes)
-
+            split_op_id = len(self.new_operators)
             for idx, c in enumerate(self.split_tensor_table[outputs[0]]):
                 new_op_info = copy.deepcopy(info)
 
@@ -1886,8 +1806,6 @@ class Splitter:
                 
                 new_op_info['inputs'] = new_op_input
                 new_op_info['outputs'] = [c]
-                op = Node(new_op_info,split_op_id)
-                self.nodes.append(SplitterNode(op))
                 self.new_operators.append(new_op_info)
                 self.nodes[opid].split_id.append(split_op_id)
                 split_op_id+=1
