@@ -18,10 +18,11 @@ binary_elementwise_ops = ["ADD", "SUB", "MUL", "SQUARED_DIFFERENCE"]
 elementwise_ops = unary_elementwise_ops + binary_elementwise_ops
 
 # The operation that need requantization
-need_requant_ops = ["CONV_2D", "DEPTHWISE_CONV_2D", "FULLY_CONNECTED", "BATCH_MATMUL", "LOGISTIC", "SOFTMAX", "TANH", "GELU", "ADD", "SUB", "MUL", "SQUARED_DIFFERENCE"]
+need_requant_ops = ["CONV_2D", "DEPTHWISE_CONV_2D", "FULLY_CONNECTED", "BATCH_MATMUL", "LOGISTIC", "SOFTMAX", "RSQRT", "TANH", \
+                    "GELU", "ADD", "SUB", "MUL", "SQUARED_DIFFERENCE"]
 
 # The operation that need dequantization
-need_dequant_ops = ["LOGISTIC", "SOFTMAX", "TANH", "GELU"]
+need_dequant_ops = ["LOGISTIC", "SOFTMAX", "RSQRT", "TANH", "GELU"]
 
 class simulator:
     def __init__(self, model: Graph, tensors_info):

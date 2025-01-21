@@ -18,6 +18,14 @@ class tensor_memory:
         self.size = -1
         self.memory_storage = Mem_area.DRAM
         self.live_range = defaultdict(dict)
+        self.tensors = []
+
+class tensor_metadata:
+    def __init__(self, pid, cid):
+        # pid: parent opid, cid: child opid
+        self.pid = pid
+        self.cid = cid
+        self.memory_storage = Mem_area.DRAM
         self.start_address = -1
         self.end_address = -1
 
@@ -34,12 +42,38 @@ class memory_allocator:
         self.weights_reuse_mapping = defaultdict(int)
 
     def init_all_tensors(self):
-        operators = self.graph.operators
-        for op_info in operators:
-            for tensor_id in op_info['inputs'] + op_info['outputs']:
+        ops = self.graph.ordered_ops
+        for op in ops:
+            for tensor_id in op.info['inputs']:
+                # Add the new tensor_memory to the need_allocate_tensors
                 if tensor_id not in self.need_allocate_tensor_ids:
                     self.need_allocate_tensor_ids.append(tensor_id)
                     self.need_allocate_tensors[tensor_id] = tensor_memory(tensor_id)
+                # Add the new tensor_metadata to the tensor_memory's tensors
+                for parent_id in op.parents:
+                    tensor_metadata_allocated = False
+                    # Check if the tensor_metadata is already allocated
+                    for tensor in self.need_allocate_tensors[tensor_id].tensors:
+                        if tensor.cid == op.opid and tensor.pid == parent_id:
+                            tensor_metadata_allocated = True
+                            break
+                    if not tensor_metadata_allocated:
+                        self.need_allocate_tensors[tensor_id].tensors.append(tensor_metadata(parent_id, op.opid))
+            for tensor_id in op.info['outputs']:
+                # Add the new tensor_memory to the need_allocate_tensors
+                if tensor_id not in self.need_allocate_tensor_ids:
+                    self.need_allocate_tensor_ids.append(tensor_id)
+                    self.need_allocate_tensors[tensor_id] = tensor_memory(tensor_id)
+                # Add the new tensor_metadata to the tensor_memory's tensors
+                for child_id in op.children:
+                    tensor_metadata_allocated = False
+                    # Check if the tensor_metadata is already allocated
+                    for tensor in self.need_allocate_tensors[tensor_id].tensors:
+                        if tensor.pid == op.opid and tensor.cid == child_id:
+                            tensor_metadata_allocated = True
+                            break
+                    if not tensor_metadata_allocated:
+                        self.need_allocate_tensors[tensor_id].tensors.append(tensor_metadata(op.opid, child_id))
 
         # Compute tensor size
         total_size = 0
@@ -95,8 +129,14 @@ class memory_allocator:
             # Check if the operation will be fall back to CPU
             if opcode_type in fall_back_cpu_ops:
                 # Update tensor storage
-                for tensor_id in op_info['inputs'] + op_info['outputs']:
-                    self.need_allocate_tensors[tensor_id].memory_storage = Mem_area.DRAM
+                for tensor_id in op_info['inputs']:
+                    for tensor in self.need_allocate_tensors[tensor_id].tensors:
+                        if tensor.cid == id:
+                            tensor.memory_storage = Mem_area.DRAM
+                for tensor_id in op_info['outputs']:
+                    for tensor in self.need_allocate_tensors[tensor_id].tensors:
+                        if tensor.pid == id:
+                            tensor.memory_storage = Mem_area.DRAM
                 # IN
                 for parent_id in op.parents:
                     self.ops_relation[id][_in] = self.ops_relation[id][_in].union(self.ops_relation[parent_id][_out])
@@ -130,11 +170,23 @@ class memory_allocator:
             else:
                 # Update tensor storage
                 for tensor_id in op_info['outputs']:
+                    for tensor in self.need_allocate_tensors[tensor_id].tensors:
+                        if tensor.pid == id:
+                            tensor.memory_storage = Mem_area.SRAM
                     self.need_allocate_tensors[tensor_id].memory_storage = Mem_area.SRAM
-                # Assume the constant tensor can fetch from SRAM
-                # TODO: Need to deicde when to fetch the constant tensor from DRAM  
+                # Handle the memory storage of the constant tensor
                 if opcode_type in weight_reuse_ops:
                     for tensor_id in op_info['inputs'][1: _trinary]:
+                        # Check whether is the first time to fetch the constant tensor from DRAM
+                        if tensor_id not in weights_in_sram:
+                            for tensor in self.need_allocate_tensors[tensor_id].tensors:
+                                if tensor.cid == id:
+                                    tensor.memory_storage = Mem_area.DRAM
+                                    break
+                            continue
+                        for tensor in self.need_allocate_tensors[tensor_id].tensors:
+                            if tensor.cid == id:
+                                tensor.memory_storage = Mem_area.SRAM
                         self.need_allocate_tensors[tensor_id].memory_storage = Mem_area.SRAM
                 # IN
                 for parent_id in op.parents:
@@ -207,6 +259,23 @@ class memory_allocator:
                 block_start_order = order
                 self.weights_reuse_mapping[id] = self.weights_reuse_order
                 self.weights_reuse_order += 1
+                # Set the wait_consume's tensor's tensor metadata's storage to DRAM
+                for tensor_id in tensor_wait_consume:
+                    # Check whether the tensor's visited[cid] is False, which means it didn't be consumed by the operation
+                    for tensor in self.need_allocate_tensors[tensor_id].tensors:
+                        if self.visited[tensor.cid] == False:
+                            tensor.memory_storage = Mem_area.DRAM
+                # Set the stop_id's output tensor(also is id's input tensor)'s tensor metadata's storage to DRAM
+                # Collect same_layer_next_opids from the stop_id
+                same_layer_id_opids = []
+                tmp_id = id
+                while tmp_id != -1:
+                    same_layer_id_opids.append(id)
+                    tmp_id = same_layer_next_opids.get(tmp_id, -1)
+                for tensor_id in self.graph.ops[stop_id].info['outputs']:
+                    for tensor in self.need_allocate_tensors[tensor_id].tensors:
+                        if tensor.cid in same_layer_id_opids:
+                            tensor.memory_storage = Mem_area.DRAM
                 # Clean the weights in SRAM
                 for tensor_id in weights_in_sram:
                     tensor_wait_consume.pop(tensor_id)
