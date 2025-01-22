@@ -50,15 +50,30 @@ class memory_allocator:
                     self.need_allocate_tensor_ids.append(tensor_id)
                     self.need_allocate_tensors[tensor_id] = tensor_memory(tensor_id)
                 # Add the new tensor_metadata to the tensor_memory's tensors
-                for parent_id in op.parents:
-                    tensor_metadata_allocated = False
-                    # Check if the tensor_metadata is already allocated
-                    for tensor in self.need_allocate_tensors[tensor_id].tensors:
-                        if tensor.cid == op.opid and tensor.pid == parent_id:
-                            tensor_metadata_allocated = True
-                            break
-                    if not tensor_metadata_allocated:
-                        self.need_allocate_tensors[tensor_id].tensors.append(tensor_metadata(parent_id, op.opid))
+                buffer = self.graph.buffers[self.graph.tensors[tensor_id]['buffer']]
+                if len(buffer) != 0:
+                    # Constant tensor
+                    self.need_allocate_tensors[tensor_id].tensors.append(tensor_metadata(op.opid, op.opid))
+                else:
+                    # Non-constant tensor
+                    for parent_id in op.parents:
+                        # Check if the parent op is the tensor's parent
+                        find_tensor_parent = False
+                        parent_op = self.graph.ops[parent_id]
+                        for tid in parent_op.info['outputs']:
+                            if tid == tensor_id:
+                                find_tensor_parent = True
+                                break
+                        if not find_tensor_parent:
+                            continue
+                        # Check if the tensor_metadata is already allocated
+                        tensor_metadata_allocated = False
+                        for tensor in self.need_allocate_tensors[tensor_id].tensors:
+                            if tensor.cid == op.opid and tensor.pid == parent_id:
+                                tensor_metadata_allocated = True
+                                break
+                        if not tensor_metadata_allocated:
+                            self.need_allocate_tensors[tensor_id].tensors.append(tensor_metadata(parent_id, op.opid))
             for tensor_id in op.info['outputs']:
                 # Add the new tensor_memory to the need_allocate_tensors
                 if tensor_id not in self.need_allocate_tensor_ids:
@@ -66,14 +81,8 @@ class memory_allocator:
                     self.need_allocate_tensors[tensor_id] = tensor_memory(tensor_id)
                 # Add the new tensor_metadata to the tensor_memory's tensors
                 for child_id in op.children:
-                    tensor_metadata_allocated = False
-                    # Check if the tensor_metadata is already allocated
-                    for tensor in self.need_allocate_tensors[tensor_id].tensors:
-                        if tensor.pid == op.opid and tensor.cid == child_id:
-                            tensor_metadata_allocated = True
-                            break
-                    if not tensor_metadata_allocated:
-                        self.need_allocate_tensors[tensor_id].tensors.append(tensor_metadata(op.opid, child_id))
+                    # It seems no need to check duplicate tensor_metadata in output (maybe is the traversal order we pick)
+                    self.need_allocate_tensors[tensor_id].tensors.append(tensor_metadata(op.opid, child_id))
 
         # Compute tensor size
         total_size = 0
@@ -113,7 +122,7 @@ class memory_allocator:
         # Enumerate with in, out, gen, kill
         _in, _out, _gen, _kill, _sram_need = 0, 1, 2, 3, 4
         # Number of input
-        _binary, _trinary = 2, 3
+        _trinary = 3
 
         weights_in_sram = set()
         block_start_order = 0
@@ -210,7 +219,7 @@ class memory_allocator:
                     if wait_consume > 0:
                         tensor_wait_consume.update({output_tensor_id: wait_consume})
                 if opcode_type in binary_ops:
-                    for tensor_id in op_info['inputs'][1: _binary]:
+                    for tensor_id in op_info['inputs']:
                         # Need to record the constant tensor
                         buffer = self.graph.buffers[self.graph.tensors[tensor_id]['buffer']]
                         if len(buffer) != 0:
@@ -266,21 +275,23 @@ class memory_allocator:
                         if self.visited[tensor.cid] == False:
                             tensor.memory_storage = Mem_area.DRAM
                 # Set the stop_id's output tensor(also is id's input tensor)'s tensor metadata's storage to DRAM
-                # Collect same_layer_next_opids from the stop_id
+                # First, collect same_layer_next_opids from the id's head
                 same_layer_id_opids = []
-                tmp_id = id
+                head_id = same_layer_next_opids.get(id, (-1, -1))[0]
+                tmp_id = head_id
                 while tmp_id != -1:
-                    same_layer_id_opids.append(id)
-                    tmp_id = same_layer_next_opids.get(tmp_id, -1)
+                    same_layer_id_opids.append(tmp_id)
+                    tmp_id = same_layer_next_opids.get(tmp_id, (-1, -1))[1]
                 for tensor_id in self.graph.ops[stop_id].info['outputs']:
                     for tensor in self.need_allocate_tensors[tensor_id].tensors:
                         if tensor.cid in same_layer_id_opids:
                             tensor.memory_storage = Mem_area.DRAM
-                # Clean the weights in SRAM
+                # Clean the weights in SRAM & update the out relation
                 for tensor_id in weights_in_sram:
                     tensor_wait_consume.pop(tensor_id)
-                    if tensor_id in self.ops_relation[id][_out]:
-                        self.ops_relation[id][_out].remove(tensor_id)
+                    for id in same_layer_id_opids:
+                        if tensor_id in self.ops_relation[id][_out]:
+                            self.ops_relation[id][_out].remove(tensor_id)
                 weights_in_sram.clear()
             else:
                 self.weights_reuse_mapping[id] = self.weights_reuse_order
@@ -312,14 +323,14 @@ class memory_allocator:
     def weight_reuse_schedule(self, block_start_order, block_end_order, same_layer_next_opids):
         ops_on_next_path = []
         for op in self.graph.ordered_ops[block_start_order: block_end_order + 1]:
-            next_opid = same_layer_next_opids.get(op.opid, -1)
+            next_opid = same_layer_next_opids.get(op.opid, (-1, -1))[1]
             if next_opid != -1:
                 ops_on_next_path.append(next_opid)
         while len(ops_on_next_path) > 0:
             new_list = []
             for now_opid in ops_on_next_path:
                 now_op = self.graph.ops[now_opid]
-                next_opid = same_layer_next_opids.get(now_op.opid, -1)
+                next_opid = same_layer_next_opids.get(now_op.opid, (-1, -1))[1]
                 if next_opid != -1:
                     new_list.append(next_opid)
                 if self.visited[now_opid]:

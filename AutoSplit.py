@@ -30,7 +30,8 @@ class Splitter:
         self.model_type = model_type
         # For BERT model, let the token size decided by user
         self.token_size = token_size
-        self.same_layer_next_opids = defaultdict(int)
+        # same_layer_next_opids[x] = (x's head_opid, x's next_opid) 
+        self.same_layer_next_opids = defaultdict(tuple)
         for i, opcode in enumerate(self.opcodes):
             # 0: ADD
             # 2: CONCATENATION
@@ -507,8 +508,9 @@ class Splitter:
 
         # Record the split opid in the same layer
         pre_opid = self.nodes[opid].split_id[0]
+        head_opid = self.nodes[opid].split_id[0]
         for now_opid in self.nodes[opid].split_id[1:]:
-            self.same_layer_next_opids[pre_opid] = now_opid
+            self.same_layer_next_opids[pre_opid] = (head_opid, now_opid)
             pre_opid = now_opid
 
     def split_pad(self, opid, output_split):
