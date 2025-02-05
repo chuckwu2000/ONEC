@@ -1030,6 +1030,7 @@ class Splitter:
                     new_op_info = copy.deepcopy(info)
                     for b in self.split_tensor_table[inputs[0]]:
                         new_op_info['inputs'].append(b)
+                    new_op_info['inputs'][0] = self.split_tensor_table[inputs[0]][0]
                     new_op_info['outputs'] = [a]
                     self.new_operators.append(new_op_info)
                     self.nodes[opid].split_id.append(split_op_id)

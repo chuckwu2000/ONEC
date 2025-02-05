@@ -23,8 +23,14 @@ class ArchitectureFeatures:
 
     # DRAM's max size is 4GB
     DRAM_MAX_SIZE = 1 << 32
-    # SRAM's max size is 4MB
-    SRAM_MAX_SIZE = 1 << 22
+    # MAC engine's SRAM total size is 4MB
+    ME_INPUT_BUFFER_SIZE = int(1024 * 1024 * 1.5 / 2)
+    ME_OUTPUT_BUFFER_SIZE = int(1024 * 1024 * 1.5 / 2)
+    ME_WEIGHT_BUFFER_SIZE = int(1024 * 1024 * 1 / 2)
+    # Element-wise engine's SRAM total size is 6MB
+    EE_INPUT1_BUFFER_SIZE = int(1024 * 1024 * 2 / 2)
+    EE_INPUT2_BUFFER_SIZE = int(1024 * 1024 * 2 / 2)
+    EE_OUTPUT_BUFFER_SIZE = int(1024 * 1024 * 2 / 2)
 
     # Output cycles per element (MAC main op, mul, add/sub)
     # Now assune we have 64 MACs

@@ -1,3 +1,5 @@
+# This simulator is referenced from Planaria's implementation
+
 from MyGraph import Graph
 from Architecture_feature import Mem_area
 from Architecture_feature import ArchitectureFeatures
@@ -33,6 +35,7 @@ class simulator:
         self.opcodes = model.opcodes
         self.tensor_info = tensors_info
         
+    # Based on the elementwise engine's architecture, one tile will perform VECTOR_LEN elements' operations
     def estimate_elementwise_op_cycles(self, opid: int, op_type: str) -> int:
         tensors = self.tensors
         info = self.ops[opid].info
@@ -40,6 +43,8 @@ class simulator:
         outputs = info.get("outputs")
         need_requant = False
 
+        initial_dram_reads = 0
+        final_dram_writes = 0
         dram_transfer_cycles = 0
         sram_transfer_cycles = 0
         op_cycles = 0
@@ -65,21 +70,31 @@ class simulator:
             # Data transfer cycles
             # Our elementwise engine adopts a SIMD vector design
             # IFM's data transfer
-            if self.tensor_info[inputs[0]].memory_storage == Mem_area.DRAM:
-                dram_transfer_cycles += self.estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, self.tensor_info[inputs[0]].size)
-                one_element_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm_elem_size / 8)
-                sram_transfer_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
-            else:
-                one_element_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm_elem_size / 8)
-                sram_transfer_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
+            for tensor_metadata in self.tensor_info[inputs[0]].tensors:
+                # Find the corresponding tensor metadata
+                if tensor_metadata.cid == opid:
+                    if tensor_metadata.memory_storage == Mem_area.DRAM:
+                        initial_dram_reads += ArchitectureFeatures.VECTOR_LEN * (ifm_elem_size / 8)
+                        dram_transfer_cycles += self.estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, self.tensor_info[inputs[0]].size)
+                        one_element_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm_elem_size / 8)
+                        sram_transfer_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
+                    else:
+                        one_element_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm_elem_size / 8)
+                        sram_transfer_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
+                    break
             # OFM's data transfer
-            if self.tensor_info[outputs[0]].memory_storage == Mem_area.DRAM:
-                dram_transfer_cycles += self.estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, self.tensor_info[outputs[0]].size)
-                one_element_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
-                sram_transfer_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
-            else:
-                one_element_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
-                sram_transfer_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
+            for tensor_metadata in self.tensor_info[outputs[0]].tensors:
+                # Find the corresponding tensor metadata
+                if tensor_metadata.pid == opid:
+                    if tensor_metadata.memory_storage == Mem_area.DRAM:
+                        final_dram_writes += ArchitectureFeatures.VECTOR_LEN * (ofm_elem_size / 8)
+                        dram_transfer_cycles += self.estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, self.tensor_info[outputs[0]].size)
+                        one_element_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
+                        sram_transfer_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
+                    else:
+                        one_element_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
+                        sram_transfer_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
+                    break
 
             # Computations cycles
             # Element-wise operation will speedup by vectorization
@@ -145,32 +160,45 @@ class simulator:
             for dim in ofm_shape:
                 ofm_elems *= dim
 
-            # Data transfer cycles
-            # Our elementwise engine adopts a SIMD vector design
             # IFM1's data transfer
-            if self.tensor_info[inputs[0]].memory_storage == Mem_area.DRAM:
-                dram_transfer_cycles += self.estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, self.tensor_info[inputs[0]].size)
-                one_element_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm1_elem_size / 8)
-                sram_transfer_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
-            else:
-                one_element_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm1_elem_size / 8)
-                sram_transfer_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
+            for tensor_metadata in self.tensor_info[inputs[0]].tensors:
+                # Find the corresponding tensor metadata
+                if tensor_metadata.cid == opid:
+                    if tensor_metadata.memory_storage == Mem_area.DRAM:
+                        initial_dram_reads += ArchitectureFeatures.VECTOR_LEN * (ifm1_elem_size / 8)
+                        dram_transfer_cycles += self.estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, self.tensor_info[inputs[0]].size)
+                        one_element_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm1_elem_size / 8)
+                        sram_transfer_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
+                    else:
+                        one_element_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm1_elem_size / 8)
+                        sram_transfer_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
+                    break
             # IFM2's data transfer
-            if self.tensor_info[inputs[1]].memory_storage == Mem_area.DRAM:
-                dram_transfer_cycles += self.estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, self.tensor_info[inputs[1]].size)
-                one_element_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm2_elem_size / 8)
-                sram_transfer_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
-            else:
-                one_element_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm2_elem_size / 8)
-                sram_transfer_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
+            for tensor_metadata in self.tensor_info[inputs[1]].tensors:
+                # Find the corresponding tensor metadata
+                if tensor_metadata.cid == opid:
+                    if tensor_metadata.memory_storage == Mem_area.DRAM:
+                        initial_dram_reads += ArchitectureFeatures.VECTOR_LEN * (ifm2_elem_size / 8)
+                        dram_transfer_cycles += self.estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, self.tensor_info[inputs[1]].size)
+                        one_element_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm2_elem_size / 8)
+                        sram_transfer_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
+                    else:
+                        one_element_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm2_elem_size / 8)
+                        sram_transfer_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
+                    break
             # OFM's data transfer
-            if self.tensor_info[outputs[0]].memory_storage == Mem_area.DRAM:
-                dram_transfer_cycles += self.estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, self.tensor_info[outputs[0]].size)
-                one_element_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
-                sram_transfer_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
-            else:
-                one_element_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
-                sram_transfer_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
+            for tensor_metadata in self.tensor_info[outputs[0]].tensors:
+                # Find the corresponding tensor metadata
+                if tensor_metadata.pid == opid:
+                    if self.tensor_info[outputs[0]].memory_storage == Mem_area.DRAM:
+                        final_dram_writes += ArchitectureFeatures.VECTOR_LEN * (ofm_elem_size / 8)
+                        dram_transfer_cycles += self.estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, self.tensor_info[outputs[0]].size)
+                        one_element_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
+                        sram_transfer_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
+                    else:
+                        one_element_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
+                        sram_transfer_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
+                    break
             
             # Computations cycles
             # Element-wise operation will speedup by vectorization
@@ -191,8 +219,12 @@ class simulator:
                 cycle_per_elem += ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"]
             op_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
 
-        dma_transfer_cycles = dram_transfer_cycles + sram_transfer_cycles
-        total_cycles = dma_transfer_cycles + op_cycles
+        dram_bandwidth = (ArchitectureFeatures.axi_bit_width / 8) * ArchitectureFeatures.Dram_burst_length
+        # First tile's read from DRAM & last tile's write to DRAM can't be overlapped
+        latency = math.ceil(initial_dram_reads / float(dram_bandwidth)) + math.ceil(final_dram_writes / float(dram_bandwidth))
+        dram_transfer_cycles -= (initial_dram_reads + final_dram_writes)
+        dma_transfer_cycles = max(0, dram_transfer_cycles - op_cycles) + sram_transfer_cycles + latency
+        total_cycles = op_cycles + dma_transfer_cycles
         return dma_transfer_cycles, op_cycles, total_cycles
     
     # Refer to Planaria's implementation
@@ -206,9 +238,11 @@ class simulator:
         ofm = tensors[outputs[0]]
         ofm_shape = ofm.get("shape")
         if ofm.get("type") == "INT8":
+            ifm_elem_size = 8
             ofm_elem_size = 8
             need_requant = True
         else:
+            ifm_elem_size = 32
             ofm_elem_size = 32
         
         # OFM's size (bytes) & elements
@@ -218,116 +252,118 @@ class simulator:
         
         weight_storge_size = 0
         bias_storge_size = 0
+        # Now only support batch = 1
+        B = 1
         if op_type == "CONV_2D":
-            oh = ofm_shape[1]
-            ow = ofm_shape[2]
+            OH = ofm_shape[1]
+            OW = ofm_shape[2]
             filter = tensors[inputs[1]]
             filter_shape = filter.get("shape")
-            fh = filter_shape[1]
-            fw = filter_shape[2]
-            ic = filter_shape[3]
-            oc = filter_shape[0]
+            FH = filter_shape[1]
+            FW = filter_shape[2]
+            IC = filter_shape[3]
+            OC = filter_shape[0]
             stride = info["builtin_options"]["stride_h"]
-
-            # Filter's size (bytes)
-            weight_storge_size = 1
-            for dim in filter_shape:
-                weight_storge_size *= dim
-            weight_storge_size *= (ofm_elem_size / 8)
-
-            # Bias's size (bytes)
-            bias = tensors[inputs[2]]
-            bias_shape = bias.get("shape")
-            bias_storge_size = 1
-            for dim in bias_shape:
-                bias_storge_size *= dim
-            bias_storge_size *= (ofm_elem_size / 8)
         elif op_type == "DEPTHWISE_CONV_2D":
-            oh = ofm_shape[1]
-            ow = ofm_shape[2]
+            OH = ofm_shape[1]
+            OW = ofm_shape[2]
             filter = tensors[inputs[1]]
             filter_shape = filter.get("shape")
-            fh = filter_shape[1]
-            fw = filter_shape[2]
-            ic = 1
-            oc = 1
+            FH = filter_shape[1]
+            FW = filter_shape[2]
+            IC = 1
+            OC = 1
             stride = info["builtin_options"]["stride_h"]
-            # Filter's size (bytes)
-            weight_storge_size = 1
-            for dim in filter_shape:
-                weight_storge_size *= dim
-            weight_storge_size *= (ofm_elem_size / 8)
-            # Bias's size (bytes)
-            bias = tensors[inputs[2]]
-            bias_shape = bias.get("shape")
-            bias_storge_size = 1
-            for dim in bias_shape:
-                bias_storge_size *= dim
-            bias_storge_size *= (ofm_elem_size / 8)
         elif op_type == "FULLY_CONNECTED":
             ifm = tensors[inputs[0]]
             ifm_shape = ifm.get("shape")
-            oh = ifm_shape[-2]
-            ow = 1
-            fh = 1
-            fw = 1
+            OH = ifm_shape[-2]
+            OW = 1
+            FH = 1
+            FW = 1
             weight = tensors[inputs[1]]
             weight_shape = weight.get("shape")
-            ic = weight_shape[1]
-            oc = weight_shape[0]
+            IC = weight_shape[1]
+            OC = weight_shape[0]
             stride = 1
-            # Weight's size (bytes)
-            weight_storge_size = 1
-            for dim in weight_shape:
-                weight_storge_size *= dim
-            weight_storge_size *= (ofm_elem_size / 8)
         elif op_type == "MEAN":
-            oh = ofm_shape[0]
-            ow = ofm_shape[1]
-            fh = 1
-            fw = 1
-            ifm = tensors[inputs[0]]
-            ifm_shape = ifm.get("shape")
+            OH = ofm_shape[0]
+            OW = ofm_shape[1]
+            FH = 1
+            FW = 1
             axis_tensor = self.tensors[inputs[1]]
             axis = self.buffers[axis_tensor['buffer']]['data'][0]
-            ic = ifm_shape[axis]
-            oc = 1
+            ifm = tensors[inputs[0]]
+            ifm_shape = ifm.get("shape")
+            IC = ifm_shape[axis]
+            OC = 1
             stride = 1
-            # Weight's size (bytes)
-            weight_storge_size = ifm_shape[axis] * (ofm_elem_size / 8)
         elif op_type == "MAX_POOL_2D":
-            oh = ofm_shape[1]
-            ow = ofm_shape[2]
-            fh = info["builtin_options"]["filter_height"]
-            fw = info["builtin_options"]["filter_width"]
-            ic = ofm_shape[3]
-            oc = ofm_shape[3]
+            OH = ofm_shape[1]
+            OW = ofm_shape[2]
+            FH = info["builtin_options"]["filter_height"]
+            FW = info["builtin_options"]["filter_width"]
+            IC = ofm_shape[3]
+            OC = ofm_shape[3]
             stride = info["builtin_options"]["stride_h"]
         # This estimation is not accurate
         elif op_type == "BATCH_MATMUL":
-            oh = ofm_shape[1]
-            ow = ofm_shape[2]
-            fh = 1
-            fw = 1
-            ic = ofm_shape[3]
-            oc = ofm_shape[3]
+            OH = ofm_shape[1]
+            OW = ofm_shape[2]
+            FH = 1
+            FW = 1
+            IC = ofm_shape[3]
+            OC = ofm_shape[3]
             stride = 1
 
-        ih = fh + (oh - 1) * stride
-        iw = fw + (ow - 1) * stride
-        ifm_storge_size = ic * ih * iw * (ofm_elem_size / 8)
+        # Based on systolic array's architecture, compute how many tiles are needed
+        tiling = self.tiling_compute(IC, OH, OW, OC, FH, FW, B)
+        num_b, b = tiling['B/b']
+        num_ic, ic = tiling['IC/ic']
+        num_oh, oh = tiling['OH/oh']
+        num_ow, ow = tiling['OW/ow']
+        num_oc, oc = tiling['OC/oc']
+        num_tiles = num_b * num_ic * num_oh * num_ow * num_oc
 
-        # Data transfer cycles
-        # Filter and bias are fetched from DRAM
-        dram_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, weight_storge_size + bias_storge_size)
-        if self.tensor_info[inputs[0]].memory_storage == Mem_area.DRAM:
-            dram_transfer_cycles += self.estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, ifm_storge_size)
-            dram_transfer_cycles += self.estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, self.tensor_info[outputs[0]].size)
-        dma_transfer_cycles = dram_transfer_cycles
+        ih = (oh - 1) * stride + FH
+        iw = (ow - 1) * stride + FW
+        # Compute ifm storage size
+        ifm_storge_size = b * ih * iw * ic * (ifm_elem_size / 8)
+        # Compute ofm storage size
+        ofm_storge_size = b * oh * ow * oc * (ofm_elem_size / 8)
+        # Compute weight storage size
+        if op_type == "CONV_2D" or op_type == "DEPTHWISE_CONV_2D":
+            weight_storge_size = oc * FH * FW * ic * (ofm_elem_size / 8)
+            bias_storage_size = oh * ow * oc * (32 / 8)
+        if op_type == "FULLY_CONNECTED":
+            weight_storge_size = oc * 1 * 1 * ic * (ofm_elem_size / 8)
+        if op_type == "MEAN":
+            # All the weights are 1 (same to the ofm's data type)
+            weight_storge_size = ic * (ofm_elem_size / 8)
+        
+        # SRAM's writes and reads
+        writes = {}
+        reads = {}
+        writes['input_buffer'] = ifm_storge_size
+        # Perform bias addition in output buffer
+        writes['output_buffer'] = ofm_storge_size + bias_storage_size
+        writes['weight_buffer'] = weight_storge_size
+        reads['output_buffer'] = ofm_storge_size
+
+
+        if op_type == "DEPTHWISE_CONV_2D":
+            for namespace in writes:
+                writes[namespace] *= IC
+            for namespace in reads:
+                reads[namespace] *= IC
+
+        # Compute the dram access cycles
+        dram_transfer_cycles, latency = self.estimate_mac_engine_dram_access(tiling, writes, reads)
 
         # Computations cycles
-        op_cycles = math.ceil(oc / ArchitectureFeatures.MAC_width) * oh * ow * math.ceil(ic / ArchitectureFeatures.MAC_height) * fh * fw
+        op_cycles = math.ceil(oc / ArchitectureFeatures.MAC_width) * oh * ow * math.ceil(ic / ArchitectureFeatures.MAC_height) * FH * FW
         op_cycles *= ArchitectureFeatures.output_cycles_per_elem["MAC"]
+        op_cycles *= num_tiles
         # Depthwise convolution will multiply the output channel
         if op_type == "DEPTHWISE_CONV_2D":
             op_cycles *= ofm_shape[3]
@@ -339,7 +375,8 @@ class simulator:
             cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"]
             op_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
 
-        total_cycles = dma_transfer_cycles + op_cycles
+        dma_transfer_cycles = max(0, dram_transfer_cycles - op_cycles) + latency
+        total_cycles = op_cycles + dma_transfer_cycles
         return dma_transfer_cycles, op_cycles, total_cycles
 
     # Estimate the number of cycles for memory to memory transfer
@@ -351,6 +388,90 @@ class simulator:
             bws_per_cycle = (ArchitectureFeatures.axi_bit_width / 8) * ArchitectureFeatures.Sram_burst_length * ArchitectureFeatures.Sram_clock_scale
             transfer_cycles = math.ceil(transfer_size / bws_per_cycle)
         return transfer_cycles
+    
+    # Based on the systolic array's architecture, compute how many tiles are needed
+    def tiling_compute(self, IC, OH, OW, OC, FH, FW, B):
+        tiling_dict = {'B/b': (1, B), 'IC/ic': (1, IC), 'OH/oh': (1, OH), 'OW/ow': (1, OW), 'OC/oc': (1, OC)}
+        per_ic = max(math.floor(ArchitectureFeatures.MAC_height / (FH * FW)), 1)
+        oc_num = max(math.floor(OC / ArchitectureFeatures.MAC_width), 1)
+        # Get max ic per tile
+        for ic in range(per_ic, 0, -1):
+            if IC % ic == 0:
+                tiling_dict['IC/ic'] = (IC // ic, ic)
+                break
+        # Get max oc per tile
+        for oc in range(oc_num, 0, -1):
+            if OC % oc == 0:
+                tiling_dict['OC/oc'] = (OC // oc, oc)
+                break
+        # In here, we assume that the tile's input/output won't exceed the buffer size
+        return tiling_dict
+
+    # Planaria's DRAM access    
+    def estimate_mac_engine_dram_access(self, tiling, writes, reads) -> int:
+        # If tile loop depends on the namespace index, make the read size larger
+        tile_deps = {}
+        tile_deps['B/b']   = {'act': True, 'wgt': False, 'out': True}
+        tile_deps['OW/ow'] = {'act': True, 'wgt': False, 'out': True}
+        tile_deps['OH/oh'] = {'act': True, 'wgt': False, 'out': True}
+        tile_deps['IC/ic'] = {'act': True, 'wgt': True, 'out': False}
+        tile_deps['OC/oc'] = {'act': False, 'wgt': True, 'out': True}
+        # Best order
+        best_order = ('OW/ow', 'OH/oh', 'IC/ic', 'OC/oc', 'B/b')
+        # 
+        write_promote = {'WGT': True, 'IFM': True, 'OFM': True}
+        read_promote = {'OFM': True}
+
+        # max: needed for the op(include all the tiles)
+        # initial: needed for the first tile
+        max_write_size = {}
+        max_read_size = {}
+        for namespace in writes:
+            max_write_size[namespace] = writes[namespace]
+        for namespace in reads:
+            max_read_size[namespace] = reads[namespace]
+
+        for loop in best_order:
+            num_tiles, tile_size = tiling[loop]
+            # Promote all writes
+            for namespace in writes:
+                # Promote is true
+                if write_promote[namespace]:
+                    if tile_deps[loop][namespace]:
+                        writes[namespace] *= num_tiles
+                        max_write_size[namespace] = writes[namespace]
+                else:
+                    writes[namespace] *= num_tiles
+            # Promote all reads
+            for namespace in reads:
+                # Promote is true
+                if read_promote[namespace]:
+                    if tile_deps[loop][namespace]:
+                        reads[namespace] *= num_tiles
+                        max_read_size[namespace] = reads[namespace]
+                else:
+                    reads[namespace] *= num_tiles
+
+        initial_dram_reads = 0
+        final_dram_writes = 0
+        for namespace in max_write_size:
+            initial_dram_reads += max_write_size[namespace]
+        for namespace in max_read_size:
+            final_dram_writes += max_read_size[namespace]
+        total_dram_reads = 0
+        total_dram_writes = 0
+        for namespace in writes:
+            total_dram_reads += writes[namespace]
+        for namespace in reads:
+            total_dram_writes += reads[namespace]
+        total_dram_accesses = total_dram_writes + total_dram_reads
+        middle_dram_accesses = total_dram_accesses - initial_dram_reads - final_dram_writes
+
+        # Compute the latency (fisrt tile's read & last tile's write can't be overlapped)
+        dram_bandwidth = (ArchitectureFeatures.axi_bit_width / 8) * ArchitectureFeatures.Dram_burst_length
+        latency = math.ceil(initial_dram_reads / float(dram_bandwidth)) + math.ceil(final_dram_writes / float(dram_bandwidth))
+        memory_cycles_required = int(math.ceil(float(middle_dram_accesses) / dram_bandwidth))
+        return memory_cycles_required, latency
 
     # Estimate the number of cycles for a given operation
     def estimate_op_cycles(self, opid: int) -> int:
