@@ -30,7 +30,7 @@ class Splitter:
         self.model_type = model_type
         # For BERT model, let the token size decided by user
         self.token_size = token_size
-        # same_layer_next_opids[x] = (x's head_opid, x's next_opid) 
+        # same_layer_next_opids[x] = (#ops in layer, x's head_opid, x's next_opid) 
         self.same_layer_next_opids = defaultdict(tuple)
         for i, opcode in enumerate(self.opcodes):
             # 0: ADD

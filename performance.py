@@ -73,7 +73,7 @@ class simulator:
             for tensor_metadata in self.tensor_info[inputs[0]].tensors:
                 # Find the corresponding tensor metadata
                 if tensor_metadata.cid == opid:
-                    if tensor_metadata.memory_storage == Mem_area.DRAM:
+                    if tensor_metadata.in_DRAM:
                         initial_dram_reads += ArchitectureFeatures.VECTOR_LEN * (ifm_elem_size / 8)
                         dram_transfer_cycles += self.estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, self.tensor_info[inputs[0]].size)
                         one_element_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm_elem_size / 8)
@@ -86,7 +86,7 @@ class simulator:
             for tensor_metadata in self.tensor_info[outputs[0]].tensors:
                 # Find the corresponding tensor metadata
                 if tensor_metadata.pid == opid:
-                    if tensor_metadata.memory_storage == Mem_area.DRAM:
+                    if tensor_metadata.in_DRAM:
                         final_dram_writes += ArchitectureFeatures.VECTOR_LEN * (ofm_elem_size / 8)
                         dram_transfer_cycles += self.estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, self.tensor_info[outputs[0]].size)
                         one_element_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
@@ -164,7 +164,7 @@ class simulator:
             for tensor_metadata in self.tensor_info[inputs[0]].tensors:
                 # Find the corresponding tensor metadata
                 if tensor_metadata.cid == opid:
-                    if tensor_metadata.memory_storage == Mem_area.DRAM:
+                    if tensor_metadata.in_DRAM:
                         initial_dram_reads += ArchitectureFeatures.VECTOR_LEN * (ifm1_elem_size / 8)
                         dram_transfer_cycles += self.estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, self.tensor_info[inputs[0]].size)
                         one_element_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm1_elem_size / 8)
@@ -177,7 +177,7 @@ class simulator:
             for tensor_metadata in self.tensor_info[inputs[1]].tensors:
                 # Find the corresponding tensor metadata
                 if tensor_metadata.cid == opid:
-                    if tensor_metadata.memory_storage == Mem_area.DRAM:
+                    if tensor_metadata.in_DRAM:
                         initial_dram_reads += ArchitectureFeatures.VECTOR_LEN * (ifm2_elem_size / 8)
                         dram_transfer_cycles += self.estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, self.tensor_info[inputs[1]].size)
                         one_element_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm2_elem_size / 8)
@@ -190,7 +190,7 @@ class simulator:
             for tensor_metadata in self.tensor_info[outputs[0]].tensors:
                 # Find the corresponding tensor metadata
                 if tensor_metadata.pid == opid:
-                    if self.tensor_info[outputs[0]].memory_storage == Mem_area.DRAM:
+                    if tensor_metadata.in_DRAM:
                         final_dram_writes += ArchitectureFeatures.VECTOR_LEN * (ofm_elem_size / 8)
                         dram_transfer_cycles += self.estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, self.tensor_info[outputs[0]].size)
                         one_element_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
@@ -250,8 +250,8 @@ class simulator:
         for dim in ofm_shape:
             ofm_elems *= dim
         
-        weight_storge_size = 0
-        bias_storge_size = 0
+        weights_storage_size = 0
+        bias_storage_size = 0
         # Now only support batch = 1
         B = 1
         if op_type == "CONV_2D":
@@ -333,13 +333,13 @@ class simulator:
         ofm_storge_size = b * oh * ow * oc * (ofm_elem_size / 8)
         # Compute weight storage size
         if op_type == "CONV_2D" or op_type == "DEPTHWISE_CONV_2D":
-            weight_storge_size = oc * FH * FW * ic * (ofm_elem_size / 8)
+            weights_storage_size = oc * FH * FW * ic * (ofm_elem_size / 8)
             bias_storage_size = oh * ow * oc * (32 / 8)
         if op_type == "FULLY_CONNECTED":
-            weight_storge_size = oc * 1 * 1 * ic * (ofm_elem_size / 8)
+            weights_storage_size = oc * 1 * 1 * ic * (ofm_elem_size / 8)
         if op_type == "MEAN":
             # All the weights are 1 (same to the ofm's data type)
-            weight_storge_size = ic * (ofm_elem_size / 8)
+            weights_storage_size = ic * (ofm_elem_size / 8)
         
         # SRAM's writes and reads
         writes = {}
@@ -347,7 +347,7 @@ class simulator:
         writes['input_buffer'] = ifm_storge_size
         # Perform bias addition in output buffer
         writes['output_buffer'] = ofm_storge_size + bias_storage_size
-        writes['weight_buffer'] = weight_storge_size
+        writes['weight_buffer'] = weights_storage_size
         reads['output_buffer'] = ofm_storge_size
 
 
@@ -411,16 +411,16 @@ class simulator:
     def estimate_mac_engine_dram_access(self, tiling, writes, reads) -> int:
         # If tile loop depends on the namespace index, make the read size larger
         tile_deps = {}
-        tile_deps['B/b']   = {'act': True, 'wgt': False, 'out': True}
-        tile_deps['OW/ow'] = {'act': True, 'wgt': False, 'out': True}
-        tile_deps['OH/oh'] = {'act': True, 'wgt': False, 'out': True}
-        tile_deps['IC/ic'] = {'act': True, 'wgt': True, 'out': False}
-        tile_deps['OC/oc'] = {'act': False, 'wgt': True, 'out': True}
+        tile_deps['B/b']   = {'input_buffer': True, 'weight_buffer': False, 'output_buffer': True}
+        tile_deps['OW/ow'] = {'input_buffer': True, 'weight_buffer': False, 'output_buffer': True}
+        tile_deps['OH/oh'] = {'input_buffer': True, 'weight_buffer': False, 'output_buffer': True}
+        tile_deps['IC/ic'] = {'input_buffer': True, 'weight_buffer': True, 'output_buffer': False}
+        tile_deps['OC/oc'] = {'input_buffer': False, 'weight_buffer': True, 'output_buffer': True}
         # Best order
         best_order = ('OW/ow', 'OH/oh', 'IC/ic', 'OC/oc', 'B/b')
         # 
-        write_promote = {'WGT': True, 'IFM': True, 'OFM': True}
-        read_promote = {'OFM': True}
+        write_promote = {'weight_buffer': True, 'input_buffer': True, 'output_buffer': True}
+        read_promote = {'output_buffer': True}
 
         # max: needed for the op(include all the tiles)
         # initial: needed for the first tile
