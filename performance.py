@@ -14,6 +14,11 @@ fall_back_cpu_ops = data_layout_ops + reduce_ops
 # MAC main operation
 mac_ops = ["CONV_2D", "DEPTHWISE_CONV_2D", "FULLY_CONNECTED", "MEAN", "MAX_POOL_2D", "BATCH_MATMUL"]
 
+# The operation that need weights
+need_weights_ops = ["CONV_2D", "DEPTHWISE_CONV_2D", "FULLY_CONNECTED", "BATCH_MATMUL"]
+# The operation that need bias
+need_bias_ops = ["CONV_2D", "DEPTHWISE_CONV_2D", "FULLY_CONNECTED"]
+
 # Element-wise main operation
 unary_elementwise_ops = ["LOGISTIC", "SOFTMAX", "RSQRT", "POW", "TANH", "GELU", "QUANTIZE", "DEQUANTIZE"]
 binary_elementwise_ops = ["ADD", "SUB", "MUL", "SQUARED_DIFFERENCE"]
@@ -235,6 +240,9 @@ class simulator:
         outputs = info.get("outputs")
         need_requant = False
 
+        # print(f"*"*50)
+        # print(f"op info: {info}")
+
         ofm = tensors[outputs[0]]
         ofm_shape = ofm.get("shape")
         if ofm.get("type") == "INT8":
@@ -327,6 +335,7 @@ class simulator:
 
         ih = (oh - 1) * stride + FH
         iw = (ow - 1) * stride + FW
+        # print(f"ih: {ih}, iw: {iw}, ic: {ic}, oh: {oh}, ow: {ow}, oc: {oc}, FH: {FH}, FW: {FW}")
         # Compute ifm storage size
         ifm_storge_size = b * ih * iw * ic * (ifm_elem_size / 8)
         # Compute ofm storage size
@@ -340,6 +349,43 @@ class simulator:
         if op_type == "MEAN":
             # All the weights are 1 (same to the ofm's data type)
             weights_storage_size = ic * (ofm_elem_size / 8)
+
+        # Check whether the tensors need to move from DRAM to SRAM
+        # Check input tensor (transformer's V's FC needs additional handle)
+        for tensor_metadata in self.tensor_info[inputs[0]].tensors:
+            if tensor_metadata.cid == opid:
+                if not tensor_metadata.in_DRAM:
+                    ifm_storge_size = 0
+                break
+        if op_type == "FULLY_CONNECTED" and len(inputs) > 3:
+            # input[0] is equal to input[3]
+            for idx in range(4, len(inputs)):
+                tensor = self.tensor_info[inputs[idx]]
+                for tensor_metadata in tensor.tensors:
+                    if tensor_metadata.cid == opid:
+                        if not tensor_metadata.in_DRAM:
+                            ifm_storge_size -= tensor.size
+                        break
+        # Check weight tensor
+        if op_type in need_weights_ops:
+            for tensor_metadata in self.tensor_info[inputs[1]].tensors:
+                if tensor_metadata.cid == opid:
+                    if not tensor_metadata.in_DRAM:
+                        weights_storage_size = 0
+                    break
+        # Check bias tensor
+        if op_type in need_bias_ops:
+            for tensor_metadata in self.tensor_info[inputs[2]].tensors:
+                if tensor_metadata.cid == opid:
+                    if not tensor_metadata.in_DRAM:
+                        bias_storage_size = 0
+                    break
+        # Check output tensor
+        for tensor_metadata in self.tensor_info[outputs[0]].tensors:
+            if tensor_metadata.pid == opid:
+                if not tensor_metadata.in_DRAM:
+                    ofm_storge_size = 0
+                break
         
         # SRAM's writes and reads
         writes = {}
@@ -375,6 +421,7 @@ class simulator:
             cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"]
             op_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
 
+        # print(f"dma_transfer_cycles: {dram_transfer_cycles}, op_cycles: {op_cycles}, latency: {latency}")
         dma_transfer_cycles = max(0, dram_transfer_cycles - op_cycles) + latency
         total_cycles = op_cycles + dma_transfer_cycles
         return dma_transfer_cycles, op_cycles, total_cycles

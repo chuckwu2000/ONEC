@@ -32,7 +32,7 @@ class ArchitectureFeatures:
     # DRAM's max size is 4GB
     DRAM_MAX_SIZE = 1 << 32
     # MAC engine's SRAM total size is 8MB
-    double_buffer = 2
+    double_buffer = 1
     ME_INPUT_BUFFER_SIZE = int(1024 * 1024 * 3 / double_buffer)
     ME_WEIGHT_BUFFER_SIZE = int(1024 * 1024 * 2 / double_buffer)
     ME_OUTPUT_BUFFER_SIZE = int(1024 * 1024 * 3 / double_buffer)
