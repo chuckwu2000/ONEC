@@ -26,7 +26,6 @@ class tensor_metadata:
         self.pid = pid
         self.cid = cid
         self.in_DRAM = True
-        self.internal_memory_storage = set()
         self.start_address = -1
         self.end_address = -1
 

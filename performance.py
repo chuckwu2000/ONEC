@@ -240,9 +240,6 @@ class simulator:
         outputs = info.get("outputs")
         need_requant = False
 
-        # print(f"*"*50)
-        # print(f"op info: {info}")
-
         ofm = tensors[outputs[0]]
         ofm_shape = ofm.get("shape")
         if ofm.get("type") == "INT8":
@@ -335,7 +332,6 @@ class simulator:
 
         ih = (oh - 1) * stride + FH
         iw = (ow - 1) * stride + FW
-        # print(f"ih: {ih}, iw: {iw}, ic: {ic}, oh: {oh}, ow: {ow}, oc: {oc}, FH: {FH}, FW: {FW}")
         # Compute ifm storage size
         ifm_storge_size = b * ih * iw * ic * (ifm_elem_size / 8)
         # Compute ofm storage size
@@ -396,7 +392,6 @@ class simulator:
         writes['weight_buffer'] = weights_storage_size
         reads['output_buffer'] = ofm_storge_size
 
-
         if op_type == "DEPTHWISE_CONV_2D":
             for namespace in writes:
                 writes[namespace] *= IC
@@ -421,7 +416,6 @@ class simulator:
             cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"]
             op_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
 
-        # print(f"dma_transfer_cycles: {dram_transfer_cycles}, op_cycles: {op_cycles}, latency: {latency}")
         dma_transfer_cycles = max(0, dram_transfer_cycles - op_cycles) + latency
         total_cycles = op_cycles + dma_transfer_cycles
         return dma_transfer_cycles, op_cycles, total_cycles
@@ -437,20 +431,21 @@ class simulator:
         return transfer_cycles
     
     # Based on the systolic array's architecture, compute how many tiles are needed
+    # Modify by own self
     def tiling_compute(self, IC, OH, OW, OC, FH, FW, B):
         tiling_dict = {'B/b': (1, B), 'IC/ic': (1, IC), 'OH/oh': (1, OH), 'OW/ow': (1, OW), 'OC/oc': (1, OC)}
-        per_ic = max(math.floor(ArchitectureFeatures.MAC_height / (FH * FW)), 1)
-        oc_num = max(math.floor(OC / ArchitectureFeatures.MAC_width), 1)
+        ic_num = math.ceil(IC / ArchitectureFeatures.MAC_height)
+        oc_num = math.ceil(OC / ArchitectureFeatures.MAC_width)
         # Get max ic per tile
-        for ic in range(per_ic, 0, -1):
-            if IC % ic == 0:
-                tiling_dict['IC/ic'] = (IC // ic, ic)
-                break
+        tiling_dict['IC/ic'] = (ic_num, ArchitectureFeatures.MAC_height)
         # Get max oc per tile
-        for oc in range(oc_num, 0, -1):
-            if OC % oc == 0:
-                tiling_dict['OC/oc'] = (OC // oc, oc)
-                break
+        tiling_dict['OC/oc'] = (oc_num, ArchitectureFeatures.MAC_width)
+
+        # Since we had perform tensor tiling, there is no risk to exceed the buffer size
+        # We choose 1 to be each tile's ow, oh
+        tiling_dict["OH/oh"] = (OH, 1)
+        tiling_dict["OW/ow"] = (OW, 1)
+        
         # In here, we assume that the tile's input/output won't exceed the buffer size
         return tiling_dict
 
@@ -486,18 +481,12 @@ class simulator:
                 if write_promote[namespace]:
                     if tile_deps[loop][namespace]:
                         writes[namespace] *= num_tiles
-                        max_write_size[namespace] = writes[namespace]
-                else:
-                    writes[namespace] *= num_tiles
             # Promote all reads
             for namespace in reads:
                 # Promote is true
                 if read_promote[namespace]:
                     if tile_deps[loop][namespace]:
                         reads[namespace] *= num_tiles
-                        max_read_size[namespace] = reads[namespace]
-                else:
-                    reads[namespace] *= num_tiles
 
         initial_dram_reads = 0
         final_dram_writes = 0
@@ -582,19 +571,19 @@ class simulator:
                 op2_estimated_total_cycles = 0
                 for op_id in range(1, len(cascade_matched_op)):
                     op2 = self.ops[cascade_matched_op[op_id]]
-                    op2_estimated_DMA_cycles += op2.estimated_DMA_cycles
+                    # op2_estimated_DMA_cycles += op2.estimated_DMA_cycles
                     op2_estimated_op_cycles += op2.estimated_op_cycles
                     op2_estimated_total_cycles += op2.estimated_total_cycles
                 if op1.estimated_total_cycles > op2_estimated_total_cycles:
-                    total_dma_cycles -= op2_estimated_DMA_cycles
+                    # total_dma_cycles -= op2_estimated_DMA_cycles
                     total_op_cycles -= op2_estimated_op_cycles
-                    total_cycles -= op2_estimated_total_cycles
+                    total_cycles -= op2_estimated_op_cycles
                     if op1.is_mac_main_op == True:
                         elem_wise_idle_cycles -= op2.estimated_op_cycles
                 else:
-                    total_dma_cycles -= op1.estimated_DMA_cycles
+                    # total_dma_cycles -= op1.estimated_DMA_cycles
                     total_op_cycles -= op1.estimated_op_cycles
-                    total_cycles -= op1.estimated_total_cycles
+                    total_cycles -= op1.estimated_op_cycles
                     if op1.is_elem_wise_main_op == True:
                         mac_idle_cycles -= op2.estimated_op_cycles
             matched_ops = self.model.matched_ops
@@ -606,17 +595,17 @@ class simulator:
                 op2_estimated_total_cycles = 0
                 for op_id in range(1, len(matched_op)):
                     op2 = self.ops[matched_op[op_id]]
-                    op2_estimated_DMA_cycles += op2.estimated_DMA_cycles
+                    # op2_estimated_DMA_cycles += op2.estimated_DMA_cycles
                     op2_estimated_op_cycles += op2.estimated_op_cycles
                     op2_estimated_total_cycles += op2.estimated_total_cycles
                 if op1.estimated_total_cycles > op2_estimated_total_cycles:
-                    total_dma_cycles -= op2_estimated_DMA_cycles
+                    # total_dma_cycles -= op2_estimated_DMA_cycles
                     total_op_cycles -= op2_estimated_op_cycles
-                    total_cycles -= op2_estimated_total_cycles
+                    total_cycles -= op2_estimated_op_cycles
                 else:
-                    total_dma_cycles -= op1.estimated_DMA_cycles
+                    # total_dma_cycles -= op1.estimated_DMA_cycles
                     total_op_cycles -= op1.estimated_op_cycles
-                    total_cycles -= op1.estimated_total_cycles
+                    total_cycles -= op1.estimated_op_cycles
         return total_dma_cycles, total_op_cycles, total_cycles, (mac_idle_cycles, elem_wise_idle_cycles)
 
     def print_performance(self):

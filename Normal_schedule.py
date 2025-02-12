@@ -13,43 +13,31 @@ unary_ops = ["LOGISTIC", "RSQRT", "SOFTMAX", "GELU", "LEAKY_RELU", "REDUCE_MAX",
 binary_ops = ["ADD", "SUB", "MUL", "SQUARED_DIFFERENCE", "BATCH_MATMUL"]
 trinary_ops = ["CONV_2D", "DEPTHWISE_CONV_2D", "FULLY_CONNECTED"]
 
-class Weight_reuse_scheduler:
-    def __init__(self, graph, need_allocate_tensors, same_layer_next_opids, fragment_ratio = 0.15):
+class Normal_scheduler:
+    def __init__(self, graph, need_allocate_tensors, fragment_ratio = 0.15):
         self.graph = graph
         self.need_allocate_tensors = need_allocate_tensors
-        self.same_layer_next_opids = same_layer_next_opids
         # When the DF order stop at the operation, those wait consume tensors need to be store back to DRAM
         self.tensors_wait_consume = {}
         self.fragment_ratio = fragment_ratio
-        self.visited = [False for _ in range(len(self.graph.ops))]
-        self.scheduled = [False for _ in range(len(self.graph.ops))]
-        self.new_order = 0
-        self.weights_reuse_mapping = {}
         # Since our memory allocation adapt greedy allocation, we need to reserve space for the fragmentation (default: 15%)
         reserved_ratio = 1 - self.fragment_ratio
+        self.visited = [False for _ in range(len(self.graph.ops))]
         # NPU's SRAM limits
         self.sram_buffer_size = math.floor(ArchitectureFeatures.SRAM_MAX_SIZE * reserved_ratio)
 
     # Based on the DF order, but consider the limited SRAM size
-    def weight_reuse_schedule(self):
-        # Record the start of the block
-        block_start_order = 0
-        # Traverse the DF order to reschedule
+    def normal_schedule(self):
+        # Traverse the DF order
         ordered_ops = self.graph.ordered_ops
-        for order, op in enumerate(ordered_ops):
+        for op in ordered_ops:
             if self.visited[op.opid]:
-                # Some operations be set to visited because the tensor usage had been counted, in here we need to update the tensor's wait_consume
-                self.update_tensor_wait_consume(op)
-                self.clean_useless_tensors()
                 continue
             self.visited[op.opid] = True
             opid = op.opid
             op_info = op.info
             opcode_index = op_info.get('opcode_index')
             opcode_type = self.graph.opcodes[opcode_index].get('builtin_code')
-
-            # The number of the operation in the same layer
-            num_of_op_in_layer = self.same_layer_next_opids.get(op.opid, [-1, -1, 1])[2]
 
             # Operation that will execute in CPU
             if opcode_type in fall_back_cpu_ops:
@@ -90,19 +78,19 @@ class Weight_reuse_scheduler:
                         # Reuse the tensor in NPU's SRAM
                         if tensor_id in self.tensors_wait_consume:
                             ############################################################
-                            # EX: When execute the Mul operation, the conv's output tensor had allocated in the EE_INPUT_BUFFER
+                            # EX: When execute the Mul operation, the conv's output tensor had allocated in the SRAM
                             #    Conv
                             #    /  |
                             #  Add  |
                             #   |  /
                             #   Mul
                             ############################################################
-                            # EX: When execute the Mul operation, the add's output tensor had allocated in the EE_OUTPUT_BUFFER
+                            # EX: When execute the Mul operation, the add's output tensor had allocated in the SRAM
                             #   Add
                             #    |
                             #   Mul
                             ############################################################
-                            # EX: When execute the Add operation, the conv's output tensor had allocated in the ME_OUTPUT_BUFFER
+                            # EX: When execute the Add operation, the conv's output tensor had allocated in the SRAM
                             #   Conv
                             #    |
                             #   Add
@@ -112,7 +100,7 @@ class Weight_reuse_scheduler:
                             self.tensors_wait_consume[tensor_id] -= 1
                         # Load the tensor from DRAM to SRAM
                         else:
-                            ############################################################
+                            ############################################################ 
                             # EX: When execute the Add operation, the input tensor had allocated in the DRAM
                             #   Transpose
                             #       |
@@ -120,8 +108,8 @@ class Weight_reuse_scheduler:
                             ############################################################
                             # Constant tensor
                             ############################################################
- 
-                            self.sram_buffer_size -= (self.need_allocate_tensors[tensor_id].size * num_of_op_in_layer)
+
+                            self.sram_buffer_size -= self.need_allocate_tensors[tensor_id].size
                             # Update the tensor metadata
                             for tensor in self.need_allocate_tensors[tensor_id].tensors:
                                 if tensor.cid == opid:
@@ -132,7 +120,7 @@ class Weight_reuse_scheduler:
                                 self.tensors_wait_consume.update({tensor_id: wait_consume - 1})
                     # Output tensor
                     for tensor_id in op_info['outputs']:
-                        self.sram_buffer_size -= (self.need_allocate_tensors[tensor_id].size * num_of_op_in_layer)
+                        self.sram_buffer_size -= self.need_allocate_tensors[tensor_id].size
                         # Update the tensor metadata
                         for tensor in self.need_allocate_tensors[tensor_id].tensors:
                             if tensor.pid == opid:
@@ -155,7 +143,7 @@ class Weight_reuse_scheduler:
                         # Reuse the tensor in NPU's SRAM
                         if tensor_id in self.tensors_wait_consume:
                             ############################################################
-                            # EX: When execute the Conv2 operation, the conv1's output tensor had allocated in the SRAM
+                            # EX: When execute the Conv2 operation, the conv1's output tensor had allocated in the ME_OUTPUT_BUFFER
                             #   Conv1
                             #     |
                             #   Conv2
@@ -165,7 +153,7 @@ class Weight_reuse_scheduler:
                             #    |
                             #   Conv
                             ############################################################
-                            
+
                             # Update the tensors_wait_consume
                             self.tensors_wait_consume[tensor_id] -= 1
                         # Load the tensor from DRAM to SRAM
@@ -178,15 +166,19 @@ class Weight_reuse_scheduler:
                             ############################################################
                             # Constant tensor (ex: weight)
                             ############################################################
-                            
-                            self.sram_buffer_size -= (self.need_allocate_tensors[tensor_id].size * num_of_op_in_layer)
+
+                            # Sometimes the empty tensor will be set to -1 default (ex: bias)
+                            if tensor_id == -1:
+                                continue
+                            # Load tensor from DRAM to SRAM
+                            self.sram_buffer_size -= self.need_allocate_tensors[tensor_id].size
                             # Update the tensors_wait_consume
                             wait_consume = len(self.graph.op_lookup_input[tensor_id])
                             if wait_consume > 0:
                                 self.tensors_wait_consume.update({tensor_id: wait_consume - 1})
                     # Output tensor
                     for tensor_id in op_info['outputs']:
-                        self.sram_buffer_size -= (self.need_allocate_tensors[tensor_id].size * num_of_op_in_layer)
+                        self.sram_buffer_size -= self.need_allocate_tensors[tensor_id].size
                         # Update the tensor metadata
                         for tensor in self.need_allocate_tensors[tensor_id].tensors:
                             if tensor.pid == opid:
@@ -195,19 +187,10 @@ class Weight_reuse_scheduler:
                         wait_consume = len(self.graph.op_lookup_input[tensor_id])
                         if wait_consume > 0:
                             self.tensors_wait_consume.update({tensor_id: wait_consume})
-            # Update the visited, since we had already count the tensor usage in the same layer
-            self.update_visited(op)
             # Check whether concat this operation will overuse the SRAM
             can_keep_in_block = self.check_buffer_overuse()
             # If overuse the SRAM, order turn to weight reuse schedule
             if not can_keep_in_block:
-                # TODO: may need to check the stop opid whether is layer's head, it may have diff aspects on the memory overuse
-                self.weights_reuse_mapping[opid] = self.new_order
-                self.new_order += 1
-                self.scheduled[opid] = True
-                block_end_order = order
-                self.perform_weight_reuse(block_start_order, block_end_order)
-                block_start_order = order + 1
                 # Set the wait_consume's tensor's tensor metadata's storage to DRAM
                 for tensor_id in self.tensors_wait_consume:
                     # Update the tensor metadata
@@ -218,51 +201,10 @@ class Weight_reuse_scheduler:
                     # Update the tensors_wait_consume (set all the tensor's wait_consume to 0)
                     self.tensors_wait_consume.update({tensor_id: 0})
             else:
-                self.weights_reuse_mapping[opid] = self.new_order
-                self.new_order += 1
-                self.scheduled[opid] = True
+                pass
             # Clean the useless tensors
             self.clean_useless_tensors()
-        # Update the order of the operations
-        for op in self.graph.ops:
-            op.schedule_order = self.weights_reuse_mapping[op.opid]
-        # Update the schedule order in the ordered_ops
-        self.graph.ordered_ops = sorted(self.graph.ops, key=lambda x: x.schedule_order)
-        # Update the operators in the split_graph
-        self.graph.operators = []
-        for op in self.graph.ordered_ops:
-            self.graph.operators.append(op.info)
         return self.graph
-    
-    # Update the visited op's tensor's wait_consume
-    def update_tensor_wait_consume(self, op):
-        op_info = op.info
-        consume_set = set()
-        produce_set = set()
-        for tensor_id in op_info['inputs']:
-            consume_set.add(tensor_id)
-        for tensor_id in op_info['outputs']:
-            produce_set.add(tensor_id)
-        if -1 in consume_set:
-            consume_set.remove(-1)
-        for tensor_id in consume_set:
-            if tensor_id in self.tensors_wait_consume:
-                self.tensors_wait_consume[tensor_id] -= 1
-        for tensor_id in produce_set:
-            wait_consume = len(self.graph.op_lookup_input[tensor_id])
-            if wait_consume > 0:
-                self.tensors_wait_consume.update({tensor_id: wait_consume})
-
-    # Update sibling operation's visited
-    def update_visited(self, op):
-        now_opid = op.opid
-        head_opid = self.same_layer_next_opids.get(now_opid, [-1, -1, 1])[0]
-        if head_opid == -1:
-            return
-        tmp_opid = head_opid
-        while tmp_opid != -1:
-            self.visited[tmp_opid] = True
-            tmp_opid = self.same_layer_next_opids.get(tmp_opid, [-1, -1, 1])[1]
 
     # Clean the useless tensors in the tensors_wait_consume
     def clean_useless_tensors(self):
@@ -285,57 +227,3 @@ class Weight_reuse_scheduler:
         if self.sram_buffer_size < 0:
             return False
         return True
-
-    # Perform the weight reuse schedule
-    def perform_weight_reuse(self, block_start_order, block_end_order):
-        # Store all the operations that on the one of the path in the block
-        ops_on_next_path = []
-        for op in self.graph.ordered_ops[block_start_order: block_end_order + 1]:
-            # same_layer_next_opids[x] = (#ops in layer, x's head_opid, x's next_opid, #ops in layer)
-            next_opid = self.same_layer_next_opids.get(op.opid, [-1, -1, 1])[1]
-            if next_opid != -1:
-                ops_on_next_path.append(next_opid)
-        while len(ops_on_next_path) > 0:
-            new_list = []
-            for now_opid in ops_on_next_path:
-                now_op = self.graph.ops[now_opid]
-                next_opid = self.same_layer_next_opids.get(now_op.opid, [-1, -1, 1])[1]
-                if next_opid != -1:
-                    new_list.append(next_opid)
-                if self.scheduled[now_opid]:
-                    continue
-                # Update the now_op's tensor metadata same as the head_op's tensor metadata
-                head_opid = self.same_layer_next_opids.get(now_op.opid, [-1, -1, 1])[0]
-                if head_opid != -1:
-                    self.update_tensor_metadata(head_opid, now_opid)
-                self.weights_reuse_mapping[now_opid] = self.new_order
-                self.new_order += 1
-                self.scheduled[now_opid] = True
-            ops_on_next_path = new_list
-
-    # Update the tensor metadata of the sibling operation
-    def update_tensor_metadata(self, head_opid, now_opid):
-        # Update the input tensor metadata
-        for head_tensor_id, now_tensor_id in zip(self.graph.ops[head_opid].info['inputs'], self.graph.ops[now_opid].info['inputs']):
-            # For store the head_tensor's metadata
-            head_in_DRAM = True
-            # Fetch the metadata of the head_tensor (focus on the in_DRAM and internal_memory_storage)
-            for tensor in self.need_allocate_tensors[head_tensor_id].tensors:
-                if tensor.cid == head_opid:
-                    head_in_DRAM = tensor.in_DRAM
-                    break
-            for tensor in self.need_allocate_tensors[now_tensor_id].tensors:
-                if tensor.cid == now_opid:
-                    tensor.in_DRAM = head_in_DRAM
-                    break
-        # Update the output tensor metadata
-        for head_tensor_id, now_tensor_id in zip(self.graph.ops[head_opid].info['outputs'], self.graph.ops[now_opid].info['outputs']):
-            head_in_DRAM = True
-            # Fetch the metadata of the head_tensor (focus on the in_DRAM and internal_memory_storage)
-            for tensor in self.need_allocate_tensors[head_tensor_id].tensors:
-                if tensor.pid == head_opid:
-                    head_in_DRAM = tensor.in_DRAM
-                    break
-            for tensor in self.need_allocate_tensors[now_tensor_id].tensors:
-                if tensor.pid == now_opid:
-                    tensor.in_DRAM = head_in_DRAM
