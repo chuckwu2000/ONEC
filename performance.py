@@ -611,8 +611,9 @@ class simulator:
     def print_performance(self):
         for order, op in enumerate(self.model.ordered_ops):
             opcode_index = op.info.get("opcode_index")
+            opid = op.opid
             opcode_type = self.opcodes[opcode_index].get("builtin_code")
             dma_cycles = op.estimated_DMA_cycles
             op_cycles = op.estimated_op_cycles
             op_total_cycles = op.estimated_total_cycles
-            print(f"order: {order}, opcode_type: {opcode_type}, DMA cycles: {dma_cycles}, OP cycles: {op_cycles}, Total cycles: {op_total_cycles}")
+            print(f"order: {order}, opid: {opid}, opcode_type: {opcode_type}, DMA cycles: {dma_cycles}, OP cycles: {op_cycles}, Total cycles: {op_total_cycles}")
