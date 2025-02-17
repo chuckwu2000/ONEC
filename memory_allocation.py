@@ -36,10 +36,6 @@ class memory_allocator:
         self.need_allocate_tensor_ids = []
         self.allocated_tensors = defaultdict(tensor_memory)
         self.init_all_tensors()
-        self.ops_relation = [[set(), set(), set(), set(), set()] for _ in range(len(self.graph.ops))]
-        self.visited = [False for _ in range(len(self.graph.ops))]
-        self.weights_reuse_order = 0
-        self.weights_reuse_mapping = defaultdict(int)
 
     def init_all_tensors(self):
         ops = self.graph.ordered_ops
@@ -81,6 +77,14 @@ class memory_allocator:
                     self.need_allocate_tensors[tensor_id] = tensor_memory(tensor_id)
                 # Add the new tensor_metadata to the tensor_memory's tensors
                 for child_id in op.children:
+                    find_tensor_child = False
+                    child_op = self.graph.ops[child_id]
+                    for tid in child_op.info['inputs']:
+                        if tid == tensor_id:
+                            find_tensor_child = True
+                            break
+                    if not find_tensor_child:
+                        continue
                     # It seems no need to check duplicate tensor_metadata in output (maybe is the traversal order we pick)
                     self.need_allocate_tensors[tensor_id].tensors.append(tensor_metadata(op.opid, child_id))
 
