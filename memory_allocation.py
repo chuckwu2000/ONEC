@@ -18,6 +18,9 @@ class tensor_memory:
         self.size = -1
         self.memory_storage = Mem_area.DRAM
         self.live_range = defaultdict(dict)
+        # May different to tensor_metadata's start_address and end_address, because the storage space of each tensor metadata is different
+        self.start_addr = -1
+        self.end_addr = -1
         self.tensors = []
 
 class tensor_metadata:
