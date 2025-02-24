@@ -104,15 +104,19 @@ class Weight_reuse_scheduler:
                             for tensor_metadata in self.tensor_info[tensor_id].tensors:
                                 if tensor_metadata.cid == opid:
                                     tensor_metadata.in_DRAM = False
+                        # The tensor may cross the block (in previous block in_DRAM := False), so need to set the tensor's in_DRAM
                         else:
+                            for tensor_metadata in self.tensor_info[tensor_id].tensors:
+                                if tensor_metadata.cid == opid:
+                                    tensor_metadata.in_DRAM = True
                             self.tensor_in_SRAM.add(tensor_id)
                     # Output tensor
                     for tensor_id in op_info['outputs']:
-                        self.tensor_in_SRAM.add(tensor_id)
                         # Update the tensor metadata
-                        for tensor in self.tensor_info[tensor_id].tensors:
-                            if tensor.pid == opid:
-                                tensor.in_DRAM = False
+                        for tensor_metadata in self.tensor_info[tensor_id].tensors:
+                            if tensor_metadata.pid == opid:
+                                tensor_metadata.in_DRAM = False
+                        self.tensor_in_SRAM.add(tensor_id)
             # Operation that will execute in NPU's MAC unit
             elif opcode_type in mac_ops:
                 for opid in same_layer_opids:
@@ -135,15 +139,19 @@ class Weight_reuse_scheduler:
                             for tensor_metadata in self.tensor_info[tensor_id].tensors:
                                 if tensor_metadata.cid == opid:
                                     tensor_metadata.in_DRAM = False
+                        # The tensor may cross the block (in previous block in_DRAM := False), so need to set the tensor's in_DRAM
                         else:
+                            for tensor_metadata in self.tensor_info[tensor_id].tensors:
+                                if tensor_metadata.cid == opid:
+                                    tensor_metadata.in_DRAM = True
                             self.tensor_in_SRAM.add(tensor_id)
                     # Output tensor
                     for tensor_id in op_info['outputs']:
-                        self.tensor_in_SRAM.add(tensor_id)
                         # Update the tensor metadata
-                        for tensor in self.tensor_info[tensor_id].tensors:
-                            if tensor.pid == opid:
-                                tensor.in_DRAM = False
+                        for tensor_metadata in self.tensor_info[tensor_id].tensors:
+                            if tensor_metadata.pid == opid:
+                                tensor_metadata.in_DRAM = False
+                        self.tensor_in_SRAM.add(tensor_id)
         # Last block's weight reuse schedule mapping
         re_order_opids = sorted(self.opids_in_block, key=lambda x: self.graph.ops[x].schedule_order)
         for opid in re_order_opids:
@@ -165,7 +173,7 @@ class Weight_reuse_scheduler:
         collect_opids = []
         head_opid = self.same_layer_next_opids.get(opid, [-1, -1, 1])[0]
 
-        # Some case, like split or concat in TS model, won't get splitted, so its head_opid is -1
+        # Non splitted op's head_opid is -1
         if head_opid == -1 and not self.scheduled[opid]:
             collect_opids.append(opid)
             self.visited[opid] = True
@@ -202,7 +210,7 @@ class Weight_reuse_scheduler:
 
             # Step 2: Initialize memory allocation
             total_used_size = 0
-            size_non_inc_allocated_tensors = []
+            ordered_allocated_tensors = []
 
             # Step 3: Greedy by size
             # Step 3.1: Sort tensors by size
@@ -213,7 +221,7 @@ class Weight_reuse_scheduler:
                 best_start = None
                 smallest_gap = ArchitectureFeatures.SRAM_MAX_SIZE
 
-                for allocated_tensor in size_non_inc_allocated_tensors:
+                for allocated_tensor in ordered_allocated_tensors:
                     max_first_op = max(tensor_info[tensor_id].live_range['first_time_used'], tensor_info[allocated_tensor].live_range['first_time_used'])
                     min_last_op = min(tensor_info[tensor_id].live_range['last_time_used'], tensor_info[allocated_tensor].live_range['last_time_used'])
                     # Live range has overlap (try to find the gap between this tensor's start address & previous start)
@@ -233,7 +241,9 @@ class Weight_reuse_scheduler:
                 # Check total used size whether over the SRAM's size
                 if total_used_size > ArchitectureFeatures.SRAM_MAX_SIZE:
                     return True
-                size_non_inc_allocated_tensors.append(tensor_id)
+                ordered_allocated_tensors.append(tensor_id)
+                # Sort the allocated tensors by start address(ascending) and if the start address is the same, sort by size(descending)
+                ordered_allocated_tensors = sorted(ordered_allocated_tensors, key=lambda t: (tensor_info[t].start_addr, -tensor_info[t].size))
             # The tensors of this block can be greedy allocated without overuse the SRAM
             # Update the tensor metadata (set the SRAM address of the tensors in the block)
             self.update_tensor_metadata(tensor_info, opids)
