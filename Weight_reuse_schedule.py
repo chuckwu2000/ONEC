@@ -1,4 +1,3 @@
-import copy
 from Architecture_feature import ArchitectureFeatures
 
 # The elementwise main op
