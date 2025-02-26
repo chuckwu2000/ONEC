@@ -50,8 +50,7 @@ class simulator:
 
         initial_dram_reads = 0
         final_dram_writes = 0
-        dram_transfer_cycles = 0
-        sram_transfer_cycles = 0
+        dram_transfer_size = 0
         op_cycles = 0
         if op_type in unary_elementwise_ops:
             ifm = tensors[inputs[0]]
@@ -67,7 +66,11 @@ class simulator:
                 ifm_elem_size = 32
                 ofm_elem_size = 32
 
-            # ofm's size (bytes) & elements
+            # ifm's elements
+            ifm_elems = 1
+            for dim in ifm_shape:
+                ifm_elems *= dim
+            # ofm's elements
             ofm_elems = 1
             for dim in ofm_shape:
                 ofm_elems *= dim
@@ -79,27 +82,17 @@ class simulator:
                 # Find the corresponding tensor metadata
                 if tensor_metadata.cid == opid:
                     if tensor_metadata.in_DRAM:
-                        initial_dram_reads += ArchitectureFeatures.VECTOR_LEN * (ifm_elem_size / 8)
-                        dram_transfer_cycles += self.estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, self.tensor_info[inputs[0]].size)
-                        one_element_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm_elem_size / 8)
-                        sram_transfer_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
-                    else:
-                        one_element_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm_elem_size / 8)
-                        sram_transfer_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
-                    break
+                        initial_dram_reads += min(ifm_elems, ArchitectureFeatures.VECTOR_LEN) * (ifm_elem_size / 8)
+                        dram_transfer_size += self.tensor_info[inputs[0]].size
+                        break
             # OFM's data transfer
             for tensor_metadata in self.tensor_info[outputs[0]].tensors:
                 # Find the corresponding tensor metadata
                 if tensor_metadata.pid == opid:
                     if tensor_metadata.in_DRAM:
-                        final_dram_writes += ArchitectureFeatures.VECTOR_LEN * (ofm_elem_size / 8)
-                        dram_transfer_cycles += self.estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, self.tensor_info[outputs[0]].size)
-                        one_element_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
-                        sram_transfer_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
-                    else:
-                        one_element_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
-                        sram_transfer_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
-                    break
+                        final_dram_writes += min(ofm_elems, ArchitectureFeatures.VECTOR_LEN) * (ofm_elem_size / 8)
+                        dram_transfer_size += self.tensor_info[outputs[0]].size
+                        break
 
             # Computations cycles
             # Element-wise operation will speedup by vectorization
@@ -148,6 +141,8 @@ class simulator:
             ifm1 = tensors[inputs[0]]
             ifm2 = tensors[inputs[1]]
             ofm = tensors[outputs[0]]
+            ifm1_shape = ifm1.get("shape")
+            ifm2_shape = ifm2.get("shape")
             ofm_shape = ofm.get("shape")
 
             if ifm1.get("type") == "INT8" and ifm2.get("type") == "INT8" and ofm.get("type") == "INT8":
@@ -160,7 +155,15 @@ class simulator:
                 ifm2_elem_size = 32
                 ofm_elem_size = 32
 
-            # ofm's size (bytes) & elements
+            # ifm1's elements
+            ifm1_elems = 1
+            for dim in ifm1_shape:
+                ifm1_elems *= dim
+            # ifm2's elements
+            ifm2_elems = 1
+            for dim in ifm2_shape:
+                ifm2_elems *= dim
+            # ofm's elements
             ofm_elems = 1
             for dim in ofm_shape:
                 ofm_elems *= dim
@@ -170,40 +173,25 @@ class simulator:
                 # Find the corresponding tensor metadata
                 if tensor_metadata.cid == opid:
                     if tensor_metadata.in_DRAM:
-                        initial_dram_reads += ArchitectureFeatures.VECTOR_LEN * (ifm1_elem_size / 8)
-                        dram_transfer_cycles += self.estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, self.tensor_info[inputs[0]].size)
-                        one_element_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm1_elem_size / 8)
-                        sram_transfer_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
-                    else:
-                        one_element_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm1_elem_size / 8)
-                        sram_transfer_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
-                    break
+                        initial_dram_reads += min(ifm1_elems, ArchitectureFeatures.VECTOR_LEN) * (ifm1_elem_size / 8)
+                        dram_transfer_size += self.tensor_info[inputs[0]].size
+                        break
             # IFM2's data transfer
             for tensor_metadata in self.tensor_info[inputs[1]].tensors:
                 # Find the corresponding tensor metadata
                 if tensor_metadata.cid == opid:
                     if tensor_metadata.in_DRAM:
-                        initial_dram_reads += ArchitectureFeatures.VECTOR_LEN * (ifm2_elem_size / 8)
-                        dram_transfer_cycles += self.estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, self.tensor_info[inputs[1]].size)
-                        one_element_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm2_elem_size / 8)
-                        sram_transfer_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
-                    else:
-                        one_element_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ifm2_elem_size / 8)
-                        sram_transfer_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
-                    break
+                        initial_dram_reads += min(ifm2_elems ,ArchitectureFeatures.VECTOR_LEN) * (ifm2_elem_size / 8)
+                        dram_transfer_size += self.tensor_info[inputs[1]].size
+                        break
             # OFM's data transfer
             for tensor_metadata in self.tensor_info[outputs[0]].tensors:
                 # Find the corresponding tensor metadata
                 if tensor_metadata.pid == opid:
                     if tensor_metadata.in_DRAM:
-                        final_dram_writes += ArchitectureFeatures.VECTOR_LEN * (ofm_elem_size / 8)
-                        dram_transfer_cycles += self.estimate_mem2mem_cycles(Mem_area.DRAM, Mem_area.SRAM, self.tensor_info[outputs[0]].size)
-                        one_element_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
-                        sram_transfer_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
-                    else:
-                        one_element_transfer_cycles = self.estimate_mem2mem_cycles(Mem_area.SRAM, Mem_area.PE, ofm_elem_size / 8)
-                        sram_transfer_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * one_element_transfer_cycles
-                    break
+                        final_dram_writes += min(ofm_elems, ArchitectureFeatures.VECTOR_LEN) * (ofm_elem_size / 8)
+                        dram_transfer_size += self.tensor_info[outputs[0]].size
+                        break
             
             # Computations cycles
             # Element-wise operation will speedup by vectorization
@@ -224,11 +212,12 @@ class simulator:
                 cycle_per_elem += ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"]
             op_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
 
+        dram_transfer_size -= (initial_dram_reads + final_dram_writes)
         dram_bandwidth = (ArchitectureFeatures.axi_bit_width / 8) * ArchitectureFeatures.Dram_burst_length
         # First tile's read from DRAM & last tile's write to DRAM can't be overlapped
         latency = math.ceil(initial_dram_reads / float(dram_bandwidth)) + math.ceil(final_dram_writes / float(dram_bandwidth))
-        dram_transfer_cycles -= (initial_dram_reads + final_dram_writes)
-        dma_transfer_cycles = max(0, dram_transfer_cycles - op_cycles) + sram_transfer_cycles + latency
+        dram_transfer_cycles = math.ceil(dram_transfer_size / float(dram_bandwidth))
+        dma_transfer_cycles = max(0, dram_transfer_cycles - op_cycles) + latency
         total_cycles = op_cycles + dma_transfer_cycles
         return dma_transfer_cycles, op_cycles, total_cycles
     
@@ -419,16 +408,6 @@ class simulator:
         dma_transfer_cycles = max(0, dram_transfer_cycles - op_cycles) + latency
         total_cycles = op_cycles + dma_transfer_cycles
         return dma_transfer_cycles, op_cycles, total_cycles
-
-    # Estimate the number of cycles for memory to memory transfer
-    def estimate_mem2mem_cycles(self, src_tensor_mem_area, dst_tensor_mem_area, transfer_size) -> int:
-        if src_tensor_mem_area == Mem_area.DRAM and dst_tensor_mem_area == Mem_area.SRAM:
-            bws_per_cycle = (ArchitectureFeatures.axi_bit_width / 8) * ArchitectureFeatures.Dram_burst_length * ArchitectureFeatures.Dram_clock_scale
-            transfer_cycles = math.ceil(transfer_size / bws_per_cycle)
-        elif src_tensor_mem_area == Mem_area.SRAM and dst_tensor_mem_area == Mem_area.PE:
-            bws_per_cycle = (ArchitectureFeatures.axi_bit_width / 8) * ArchitectureFeatures.Sram_burst_length * ArchitectureFeatures.Sram_clock_scale
-            transfer_cycles = math.ceil(transfer_size / bws_per_cycle)
-        return transfer_cycles
     
     # Based on the systolic array's architecture, compute how many tiles are needed
     # Modify by own self
@@ -460,7 +439,6 @@ class simulator:
         tile_deps['OC/oc'] = {'input_buffer': False, 'weight_buffer': True, 'output_buffer': True}
         # Best order
         best_order = ('OW/ow', 'OH/oh', 'IC/ic', 'OC/oc', 'B/b')
-        # 
         write_promote = {'weight_buffer': True, 'input_buffer': True, 'output_buffer': True}
         read_promote = {'output_buffer': True}
 
@@ -616,4 +594,4 @@ class simulator:
             dma_cycles = op.estimated_DMA_cycles
             op_cycles = op.estimated_op_cycles
             op_total_cycles = op.estimated_total_cycles
-            print(f"order: {order}, opid: {opid}, opcode_type: {opcode_type}, DMA cycles: {dma_cycles}, OP cycles: {op_cycles}, Total cycles: {op_total_cycles}")
+            print(f"order: {order}, opid: {opid}, opcode_type: {opcode_type}, DMA cycles: {dma_cycles}, OP cycles: {op_cycles}, Total cycles: {op_total_cycles}, out_id: {op.info['outputs'][0]}")
