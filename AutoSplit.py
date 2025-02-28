@@ -3,10 +3,10 @@ from MyGraph import Node,Graph
 import copy
 
 # bert prefer split token
-# yolo prefer split height
+# CNN prefer split height
 class ModelType:
     BERT = 0
-    YOLO = 1
+    CNN = 1
 
 class SplitterNode:
     def __init__(self, node:Node):
@@ -891,7 +891,10 @@ class Splitter:
 
     def split_dwconv(self, opid, input_split, output_split):
         info = self.nodes[opid].node.info
-        self.split_tensor_by_n(info['outputs'][0], output_split, 1)
+        split_dim = self.nodes[opid].node.split_dim
+        self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
+        for child in self.nodes[opid].node.children:
+            self.nodes[child].node.split_dim = self.nodes[opid].node.split_dim
 
         inputs = info['inputs']
         outputs = info['outputs']
@@ -1013,6 +1016,7 @@ class Splitter:
                         self.split_tensor_by_n(info['outputs'][0], output_split, dim)
                     break
         else:
+            is_value_fc = False
             if need_split_nxn:
                 self.split_tensor_by_nxn(info['outputs'][0], output_split, split_dim, split_dim + 1)
             else:
@@ -1096,7 +1100,7 @@ class Splitter:
         outputs = info['outputs']
         new_op_info_base = copy.deepcopy(info)
 
-        if len(inputs) != 1:
+        if len(inputs) not in [1,2]:
             raise "wrong input number"
         elif len(outputs) != 1:
             raise "wrong output number"
@@ -1179,14 +1183,14 @@ class Splitter:
         input2_is_constant = False
         if len(self.buffers[self.tensors[info['inputs'][0]]['buffer']]) != 0:
             input1_is_constant = True
-            if self.split_tensor_table[info['inputs'][0]] == []:
+            if self.split_tensor_table[info['inputs'][0]] == [] and self.tensors[info['inputs'][0]]['shape'] == 4:
                 if self.nodes[opid].avoid_split:
                     self.split_tensor_by_n_with_same_info(info['inputs'][0], output_split, split_dim)
                 else:
                     self.split_constant_tensor_by_n(info['inputs'][0], output_split, split_dim)
         if len(self.buffers[self.tensors[info['inputs'][1]]['buffer']]) != 0:
             input2_is_constant = True
-            if self.split_tensor_table[info['inputs'][1]] == []:
+            if self.split_tensor_table[info['inputs'][1]] == [] and self.tensors[info['inputs'][1]]['shape'] == 4:
                 if self.nodes[opid].avoid_split:
                     self.split_tensor_by_n_with_same_info(info['inputs'][0], output_split, split_dim)
                 else:
@@ -1204,7 +1208,7 @@ class Splitter:
             raise "wrong input number"
         elif len(outputs) != 1:
             raise "wrong output number"
-        elif len(self.tensors[info['inputs'][0]]['shape']) != len(self.tensors[info['inputs'][1]]['shape']):
+        elif not have_constant and len(self.tensors[info['inputs'][0]]['shape']) != len(self.tensors[info['inputs'][1]]['shape']):
             raise BaseException("not support different dim of two operand")
         elif not have_constant and len(self.split_tensor_table[inputs[0]]) != len(self.split_tensor_table[inputs[1]]):
             raise BaseException("split number of two operand is not equal")
@@ -1265,11 +1269,11 @@ class Splitter:
         input2_is_constant = False
         if len(self.buffers[self.tensors[info['inputs'][0]]['buffer']]) != 0:
             input1_is_constant = True
-            if self.split_tensor_table[info['inputs'][0]] == []:
+            if self.split_tensor_table[info['inputs'][0]] == [] and self.tensors[info['inputs'][0]]['shape'] == 4:
                 self.split_constant_tensor_by_n(info['inputs'][0], output_split, split_dim)
         if len(self.buffers[self.tensors[info['inputs'][1]]['buffer']]) != 0:
             input2_is_constant = True
-            if self.split_tensor_table[info['inputs'][1]] == []:
+            if self.split_tensor_table[info['inputs'][1]] == [] and self.tensors[info['inputs'][1]]['shape'] == 4:
                 self.split_constant_tensor_by_n(info['inputs'][1], output_split, split_dim)
         have_constant = input1_is_constant or input2_is_constant
         if have_constant:
@@ -1284,7 +1288,7 @@ class Splitter:
             raise "wrong input number"
         elif len(outputs) != 1:
             raise "wrong output number"
-        elif len(self.tensors[info['inputs'][0]]['shape']) != len(self.tensors[info['inputs'][1]]['shape']):
+        elif not have_constant and len(self.tensors[info['inputs'][0]]['shape']) != len(self.tensors[info['inputs'][1]]['shape']):
             raise BaseException("not support different dim of two operand")
         elif not have_constant and len(self.split_tensor_table[inputs[0]]) != len(self.split_tensor_table[inputs[1]]):
             raise BaseException("split number of two operand is not equal")
@@ -1345,11 +1349,11 @@ class Splitter:
         input2_is_constant = False
         if len(self.buffers[self.tensors[info['inputs'][0]]['buffer']]) != 0:
             input1_is_constant = True
-            if self.split_tensor_table[info['inputs'][0]] == []:
+            if self.split_tensor_table[info['inputs'][0]] == [] and self.tensors[info['inputs'][0]]['shape'] == 4:
                 self.split_constant_tensor_by_n(info['inputs'][0], output_split, split_dim)
         if len(self.buffers[self.tensors[info['inputs'][1]]['buffer']]) != 0:
             input2_is_constant = True
-            if self.split_tensor_table[info['inputs'][1]] == []:
+            if self.split_tensor_table[info['inputs'][1]] == [] and self.tensors[info['inputs'][1]]['shape'] == 4:
                 self.split_constant_tensor_by_n(info['inputs'][1], output_split, split_dim)
         have_constant = input1_is_constant or input2_is_constant
         if have_constant:
@@ -1364,7 +1368,7 @@ class Splitter:
             raise "wrong input number"
         elif len(outputs) != 1:
             raise "wrong output number"
-        elif len(self.tensors[info['inputs'][0]]['shape']) != len(self.tensors[info['inputs'][1]]['shape']):
+        elif not have_constant and len(self.tensors[info['inputs'][0]]['shape']) != len(self.tensors[info['inputs'][1]]['shape']):
             raise BaseException("not support different dim of two operand")
         elif not have_constant and len(self.split_tensor_table[inputs[0]]) != len(self.split_tensor_table[inputs[1]]):
             raise BaseException("split number of two operand is not equal")
@@ -1986,7 +1990,7 @@ class Splitter:
                 raise "asymmetric pad in H or W"
             return int_data[2], int_data[4]
 
-        def apply_fusion(pad_opid, conv_opid):
+        def conv_apply_fusion(pad_opid, conv_opid):
             pad_op_info = self.ori_graph.ops[pad_opid].info
             conv_op_info = self.ori_graph.ops[conv_opid].info
             pad_H, pad_W = get_pad_param(self.buffers[self.tensors[pad_op_info['inputs'][1]]['buffer']]['data'])
@@ -2008,9 +2012,34 @@ class Splitter:
             elif len(conv_op_info['inputs']) == 3:
                 conv_op_info['inputs'].append(self.get_padding_param_tensor(pad_H,pad_W))
             elif len(conv_op_info['inputs']) < 3:
-                 BaseException("worng inputs format: length < 3")
+                BaseException("worng inputs format: length < 3")
             elif len(conv_op_info['inputs']) > 3:
-                 BaseException("overriding padding param already exist")
+                BaseException("overriding padding param already exist")
+
+        def pool_apply_fusion(pad_opid, pool_opid):
+            pad_op_info = self.ori_graph.ops[pad_opid].info
+            pool_op_info = self.ori_graph.ops[pool_opid].info
+            pad_H, pad_W = get_pad_param(self.buffers[self.tensors[pad_op_info['inputs'][1]]['buffer']]['data'])
+
+            outputs = pool_op_info['outputs']
+            in_shape = self.tensors[pad_op_info['inputs'][0]]['shape']
+            out_shape = self.tensors[outputs[0]]['shape']
+            ker_shape = [pool_op_info['builtin_options']['filter_height'], pool_op_info['builtin_options']['filter_width']]
+            stride_h = pool_op_info['builtin_options']['stride_h']
+            total_padding_H = (out_shape[1] - 1) * stride_h + ker_shape[0] - in_shape[1]
+            total_padding_W = (out_shape[2] - 1) * stride_h + ker_shape[1] - in_shape[2]
+            calculated_padding_H = total_padding_H // 2 if total_padding_H > 0 else 0
+            calculated_padding_W = total_padding_W // 2 if total_padding_W > 0 else 0
+
+            pool_op_info['inputs'][0] = pad_op_info['inputs'][0]
+            if calculated_padding_H == pad_H and calculated_padding_W == pad_W:
+                pool_op_info['builtin_options']['padding'] = 'SAME'
+            elif len(pool_op_info['inputs']) == 1:
+                pool_op_info['inputs'].append(self.get_padding_param_tensor(pad_H,pad_W))
+            elif len(pool_op_info['inputs']) < 1:
+                BaseException("worng inputs format: length < 1")
+            elif len(pool_op_info['inputs']) > 1:
+                BaseException("overriding padding param already exist")
 
         def PaddingFusion_dfs(cur_opid, visited, deprecated):
             # check visited
@@ -2023,10 +2052,14 @@ class Splitter:
 
             # visit all children
             is_deprecated = 0
-            need_fusion = []
+            conv_need_fusion = []
+            pool_need_fusion = []
             for child_id in self.ori_graph.ops[cur_opid].children:
                 if(is_pad and self.opcodes[self.ori_graph.ops[child_id].info.get('opcode_index', 0)].get('deprecated_builtin_code', 0) in [3, 4]):
-                    need_fusion.append(child_id)
+                    conv_need_fusion.append(child_id)
+                    is_deprecated = 1 if is_deprecated == 0 else -1
+                elif(is_pad and self.opcodes[self.ori_graph.ops[child_id].info.get('opcode_index', 0)].get('deprecated_builtin_code', 0) == 17):
+                    pool_need_fusion.append(child_id)
                     is_deprecated = 1 if is_deprecated == 0 else -1
                 else:
                     is_deprecated = -1
@@ -2034,8 +2067,10 @@ class Splitter:
 
             if is_deprecated == 1:
                 deprecated.append(cur_opid)
-                for opid in need_fusion:
-                    apply_fusion(cur_opid, opid)
+                for opid in conv_need_fusion:
+                    conv_apply_fusion(cur_opid, opid)
+                for opid in pool_need_fusion:
+                    pool_apply_fusion(cur_opid, opid)
 
             return deprecated
 

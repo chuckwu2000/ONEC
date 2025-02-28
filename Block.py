@@ -95,5 +95,5 @@ class Block:
         # Traverse the graph from the root op
         if self.model_type == ModelType.BERT:
             self.DFS_find_ADD(root_opid)
-        elif self.model_type == ModelType.YOLO:
+        elif self.model_type == ModelType.CNN:
             self.DFS_find_blocks(root_opid)

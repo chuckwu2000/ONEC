@@ -16,6 +16,7 @@ parser.add_argument("--model_type", nargs='?', type=str,
                     default="bert")
 parser.add_argument("--verbose_performance", action='store_true')
 parser.add_argument("--block_based", action='store_true')
+parser.add_argument("--pad_fusion", action='store_true')
 parser.add_argument("--move_data_layout_op", action='store_true')
 args = parser.parse_args()
 rewriter_path = str(args.rewriter_path)
@@ -39,8 +40,9 @@ for split_height in [split_size]:
         cmd =   f"python {rewriter_path} {tflite_path} --schema_path {schema_path}" \
                 f" --exec_order {exec_order} --split_height {split_height} --token_size {token_size}" \
                 f" --model_type {model_type}" \
-                f" --pad_fusion" \
                 f" --out_path {out_path}"
+        if args.pad_fusion:
+            cmd += " --pad_fusion"
         if args.verbose_performance:
             cmd += " --verbose_performance"
         if args.block_based:
