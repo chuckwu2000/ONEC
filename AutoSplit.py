@@ -249,6 +249,15 @@ class Splitter:
                     if child not in end_ids:
                         end_ids.append(child)
                     return None
+                
+            # Check if mean's axis not have 1 (usually is height dim)
+            if opcode_type == "MEAN":
+                info = self.nodes[child].node.info
+                axis_buffer = self.buffers[self.tensors[info['inputs'][1]]['buffer']]
+                if 1 in axis_buffer['data']:
+                    if child not in end_ids:
+                        end_ids.append(child)
+                    return None
 
             # Check if it is splittable op
             if self.nodes[child].node.info.get("opcode_index",0) in self.splittable_opcode_idxes.values():
