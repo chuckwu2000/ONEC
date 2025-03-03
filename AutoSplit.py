@@ -249,15 +249,6 @@ class Splitter:
                     if child not in end_ids:
                         end_ids.append(child)
                     return None
-                
-            # Check if mean's axis not have 1 (usually is height dim)
-            if opcode_type == "MEAN":
-                info = self.nodes[child].node.info
-                axis_buffer = self.buffers[self.tensors[info['inputs'][1]]['buffer']]
-                if 1 in axis_buffer['data']:
-                    if child not in end_ids:
-                        end_ids.append(child)
-                    return None
 
             # Check if it is splittable op
             if self.nodes[child].node.info.get("opcode_index",0) in self.splittable_opcode_idxes.values():
@@ -436,15 +427,26 @@ class Splitter:
             del new_tensor_info_base['shape_signature']
 
         import math
-        for i in range(0, math.ceil(tensor_info['shape'][tile_dim] / tile_size), 1):
-            new_tensor_info = copy.deepcopy(new_tensor_info_base)
-            new_tensor_info['buffer'] = buffer_id
-            new_tensor_info['name'] += '_split_%d' % (i)
-            self.buffers.append({})
-            self.tensors.append(new_tensor_info)
-            self.split_tensor_table[tensor_id_in].append(tensor_id)
-            buffer_id += 1
-            tensor_id += 1
+        if tile_dim >= len(tensor_info['shape']):
+            for i in range(0, 1, 1):
+                new_tensor_info = copy.deepcopy(new_tensor_info_base)
+                new_tensor_info['buffer'] = buffer_id
+                new_tensor_info['name'] += '_split_%d' % (i)
+                self.buffers.append({})
+                self.tensors.append(new_tensor_info)
+                self.split_tensor_table[tensor_id_in].append(tensor_id)
+                buffer_id += 1
+                tensor_id += 1
+        else:
+            for i in range(0, math.ceil(tensor_info['shape'][tile_dim] / tile_size), 1):
+                new_tensor_info = copy.deepcopy(new_tensor_info_base)
+                new_tensor_info['buffer'] = buffer_id
+                new_tensor_info['name'] += '_split_%d' % (i)
+                self.buffers.append({})
+                self.tensors.append(new_tensor_info)
+                self.split_tensor_table[tensor_id_in].append(tensor_id)
+                buffer_id += 1
+                tensor_id += 1
 
     # Set the ops on the path from V to pack(which bert model usually perform multi-head self attention) with avoid_split
     # TODO: may need to handle the case that the pack is not the last op
@@ -1197,28 +1199,37 @@ class Splitter:
         
         # Add with constant value, constant value may also need to be splitted
         have_constant = False
-        have_split_constant = False
         input1_is_constant = False
         input2_is_constant = False
+        need_broadcast = False
+        input1_need_broadcast = False
+        input2_need_broadcast = False
         if len(self.buffers[self.tensors[info['inputs'][0]]['buffer']]) != 0:
             input1_is_constant = True
-            if self.split_tensor_table[info['inputs'][0]] == [] and self.tensors[info['inputs'][0]]['shape'] == 4:
-                if self.nodes[opid].avoid_split:
+            if self.split_tensor_table[info['inputs'][0]] == []:
+                # Consider there have broadcast constant tensors but only have one dimension
+                if split_dim >= len(self.tensors[info['inputs'][0]]['shape']):
                     self.split_tensor_by_n_with_same_info(info['inputs'][0], output_split, split_dim)
                 else:
                     self.split_constant_tensor_by_n(info['inputs'][0], output_split, split_dim)
         if len(self.buffers[self.tensors[info['inputs'][1]]['buffer']]) != 0:
             input2_is_constant = True
-            if self.split_tensor_table[info['inputs'][1]] == [] and self.tensors[info['inputs'][1]]['shape'] == 4:
-                if self.nodes[opid].avoid_split:
-                    self.split_tensor_by_n_with_same_info(info['inputs'][0], output_split, split_dim)
+            if self.split_tensor_table[info['inputs'][1]] == []:
+                # Consider there have broadcast constant tensors but only have one dimension
+                if split_dim >= len(self.tensors[info['inputs'][1]]['shape']):
+                    self.split_tensor_by_n_with_same_info(info['inputs'][1], output_split, split_dim)
                 else:
                     self.split_constant_tensor_by_n(info['inputs'][1], output_split, split_dim)
         have_constant = input1_is_constant or input2_is_constant
         if have_constant:
-            # Check whether splitted constant tensor need to be updated in the node
-            if len(self.split_tensor_table[info['inputs'][0]]) == len(self.split_tensor_table[info['inputs'][1]]):
-                have_split_constant = True
+            input1_split_len = len(self.split_tensor_table[info['inputs'][0]])
+            input2_split_len = len(self.split_tensor_table[info['inputs'][1]])
+            if input1_split_len != input2_split_len:
+                input1_need_broadcast = True if input1_split_len == 1 else False
+                input2_need_broadcast = True if input2_split_len == 1 else False
+                if not input1_need_broadcast and not input2_need_broadcast:
+                    raise BaseException("In add op, split number of two operand is not equal and the min split number is not 1")
+                need_broadcast = True
 
         inputs = info['inputs']
         outputs = info['outputs']
@@ -1234,21 +1245,23 @@ class Splitter:
         else:
             split_op_id = len(self.new_operators)
             # We don't split the constant value, if it need to be broadcast
-            if have_constant and not have_split_constant:
-                if input1_is_constant:
+            if have_constant and need_broadcast:
+                if input1_need_broadcast:
                     for a, b in zip(self.split_tensor_table[inputs[1]],
                                     self.split_tensor_table[outputs[0]]):
                         new_op_info = copy.deepcopy(info)
+                        new_op_info['inputs'][0] = self.split_tensor_table[inputs[0]][0]
                         new_op_info['inputs'][1] = a
                         new_op_info['outputs'] = [b]
                         self.new_operators.append(new_op_info)
                         self.nodes[opid].split_id.append(split_op_id)
                         split_op_id+=1
-                elif input2_is_constant:
+                elif input2_need_broadcast:
                     for a, b in zip(self.split_tensor_table[inputs[0]],
                                     self.split_tensor_table[outputs[0]]):
                         new_op_info = copy.deepcopy(info)
                         new_op_info['inputs'][0] = a
+                        new_op_info['inputs'][1] = self.split_tensor_table[inputs[1]][0]
                         new_op_info['outputs'] = [b]
                         self.new_operators.append(new_op_info)
                         self.nodes[opid].split_id.append(split_op_id)
@@ -1283,22 +1296,37 @@ class Splitter:
 
         # Sub with constant value, constant value may also need to be splitted
         have_constant = False
-        have_split_constant = False
         input1_is_constant = False
         input2_is_constant = False
+        need_broadcast = False
+        input1_need_broadcast = False
+        input2_need_broadcast = False
         if len(self.buffers[self.tensors[info['inputs'][0]]['buffer']]) != 0:
             input1_is_constant = True
-            if self.split_tensor_table[info['inputs'][0]] == [] and self.tensors[info['inputs'][0]]['shape'] == 4:
-                self.split_constant_tensor_by_n(info['inputs'][0], output_split, split_dim)
+            if self.split_tensor_table[info['inputs'][0]] == []:
+                # Consider there have broadcast constant tensors but only have one dimension
+                if split_dim >= len(self.tensors[info['inputs'][0]]['shape']):
+                    self.split_tensor_by_n_with_same_info(info['inputs'][0], output_split, split_dim)
+                else:
+                    self.split_constant_tensor_by_n(info['inputs'][0], output_split, split_dim)
         if len(self.buffers[self.tensors[info['inputs'][1]]['buffer']]) != 0:
             input2_is_constant = True
-            if self.split_tensor_table[info['inputs'][1]] == [] and self.tensors[info['inputs'][1]]['shape'] == 4:
-                self.split_constant_tensor_by_n(info['inputs'][1], output_split, split_dim)
+            if self.split_tensor_table[info['inputs'][1]] == []:
+                # Consider there have broadcast constant tensors but only have one dimension
+                if split_dim >= len(self.tensors[info['inputs'][1]]['shape']):
+                    self.split_tensor_by_n_with_same_info(info['inputs'][1], output_split, split_dim)
+                else:
+                    self.split_constant_tensor_by_n(info['inputs'][1], output_split, split_dim)
         have_constant = input1_is_constant or input2_is_constant
         if have_constant:
-            # Check whether splitted constant tensor need to be updated in the node
-            if len(self.split_tensor_table[info['inputs'][0]]) == len(self.split_tensor_table[info['inputs'][1]]):
-                have_split_constant = True
+            input1_split_len = len(self.split_tensor_table[info['inputs'][0]])
+            input2_split_len = len(self.split_tensor_table[info['inputs'][1]])
+            if input1_split_len != input2_split_len:
+                input1_need_broadcast = True if input1_split_len == 1 else False
+                input2_need_broadcast = True if input2_split_len == 1 else False
+                if not input1_need_broadcast and not input2_need_broadcast:
+                    raise BaseException("In sub op, split number of two operand is not equal and the min split number is not 1")
+                need_broadcast = True
 
         inputs = info['inputs']
         outputs = info['outputs']
@@ -1314,21 +1342,23 @@ class Splitter:
         else:
             split_op_id = len(self.new_operators)
             # We don't split the constant value, if it need to be broadcast
-            if have_constant and not have_split_constant:
-                if input1_is_constant:
+            if have_constant and need_broadcast:
+                if input1_need_broadcast:
                     for a, b in zip(self.split_tensor_table[inputs[1]],
                                     self.split_tensor_table[outputs[0]]):
                         new_op_info = copy.deepcopy(info)
+                        new_op_info['inputs'][0] = self.split_tensor_table[inputs[0]][0]
                         new_op_info['inputs'][1] = a
                         new_op_info['outputs'] = [b]
                         self.new_operators.append(new_op_info)
                         self.nodes[opid].split_id.append(split_op_id)
                         split_op_id+=1
-                elif input2_is_constant:
+                elif input2_need_broadcast:
                     for a, b in zip(self.split_tensor_table[inputs[0]],
                                     self.split_tensor_table[outputs[0]]):
                         new_op_info = copy.deepcopy(info)
                         new_op_info['inputs'][0] = a
+                        new_op_info['inputs'][1] = self.split_tensor_table[inputs[1]][0]
                         new_op_info['outputs'] = [b]
                         self.new_operators.append(new_op_info)
                         self.nodes[opid].split_id.append(split_op_id)
@@ -1363,22 +1393,37 @@ class Splitter:
         
         # Mul with constant value, constant value may also need to be splitted
         have_constant = False
-        have_split_constant = False
         input1_is_constant = False
         input2_is_constant = False
+        need_broadcast = False
+        input1_need_broadcast = False
+        input2_need_broadcast = False
         if len(self.buffers[self.tensors[info['inputs'][0]]['buffer']]) != 0:
             input1_is_constant = True
-            if self.split_tensor_table[info['inputs'][0]] == [] and self.tensors[info['inputs'][0]]['shape'] == 4:
-                self.split_constant_tensor_by_n(info['inputs'][0], output_split, split_dim)
+            if self.split_tensor_table[info['inputs'][0]] == []:
+                # Consider there have broadcast constant tensors but only have one dimension
+                if split_dim >= len(self.tensors[info['inputs'][0]]['shape']):
+                    self.split_tensor_by_n_with_same_info(info['inputs'][0], output_split, split_dim)
+                else:
+                    self.split_constant_tensor_by_n(info['inputs'][0], output_split, split_dim)
         if len(self.buffers[self.tensors[info['inputs'][1]]['buffer']]) != 0:
             input2_is_constant = True
-            if self.split_tensor_table[info['inputs'][1]] == [] and self.tensors[info['inputs'][1]]['shape'] == 4:
-                self.split_constant_tensor_by_n(info['inputs'][1], output_split, split_dim)
+            if self.split_tensor_table[info['inputs'][1]] == []:
+                # Consider there have broadcast constant tensors but only have one dimension
+                if split_dim >= len(self.tensors[info['inputs'][1]]['shape']):
+                    self.split_tensor_by_n_with_same_info(info['inputs'][1], output_split, split_dim)
+                else:
+                    self.split_constant_tensor_by_n(info['inputs'][1], output_split, split_dim)
         have_constant = input1_is_constant or input2_is_constant
         if have_constant:
-            # Check whether splitted constant tensor need to be updated in the node
-            if len(self.split_tensor_table[info['inputs'][0]]) == len(self.split_tensor_table[info['inputs'][1]]):
-                have_split_constant = True
+            input1_split_len = len(self.split_tensor_table[info['inputs'][0]])
+            input2_split_len = len(self.split_tensor_table[info['inputs'][1]])
+            if input1_split_len != input2_split_len:
+                input1_need_broadcast = True if input1_split_len == 1 else False
+                input2_need_broadcast = True if input2_split_len == 1 else False
+                if not input1_need_broadcast and not input2_need_broadcast:
+                    raise BaseException("In mul op, split number of two operand is not equal and the min split number is not 1")
+                need_broadcast = True
 
         inputs = info['inputs']
         outputs = info['outputs']
@@ -1394,21 +1439,23 @@ class Splitter:
         else:
             split_op_id = len(self.new_operators)
             # We don't split the constant value, if it need to be broadcast
-            if have_constant and not have_split_constant:
-                if input1_is_constant:
+            if have_constant and need_broadcast:
+                if input1_need_broadcast:
                     for a, b in zip(self.split_tensor_table[inputs[1]],
                                     self.split_tensor_table[outputs[0]]):
                         new_op_info = copy.deepcopy(info)
+                        new_op_info['inputs'][0] = self.split_tensor_table[inputs[0]][0]
                         new_op_info['inputs'][1] = a
                         new_op_info['outputs'] = [b]
                         self.new_operators.append(new_op_info)
                         self.nodes[opid].split_id.append(split_op_id)
                         split_op_id+=1
-                elif input2_is_constant:
+                elif input2_need_broadcast:
                     for a, b in zip(self.split_tensor_table[inputs[0]],
                                     self.split_tensor_table[outputs[0]]):
                         new_op_info = copy.deepcopy(info)
                         new_op_info['inputs'][0] = a
+                        new_op_info['inputs'][1] = self.split_tensor_table[inputs[1]][0]
                         new_op_info['outputs'] = [b]
                         self.new_operators.append(new_op_info)
                         self.nodes[opid].split_id.append(split_op_id)
@@ -1456,6 +1503,7 @@ class Splitter:
             split_dim_value = self.token_size
             for dim, dim_value in enumerate(output_shape):
                 if dim_value == split_dim_value:
+                    split_dim = dim
                     self.split_tensor_by_n(info['outputs'][0], output_split, dim)
                     break
         else:
@@ -1472,15 +1520,41 @@ class Splitter:
         elif len(outputs) != 1:
             raise "wrong output number"
         else:
-            split_op_id = len(self.new_operators)
-            for a,b in zip(self.split_tensor_table[inputs[0]],
-                            self.split_tensor_table[outputs[0]]):
-                new_op_info = copy.deepcopy(info)
-                new_op_info['inputs'][0] = a
-                new_op_info['outputs'] = [b]
-                self.new_operators.append(new_op_info)
-                self.nodes[opid].split_id.append(split_op_id)
-                split_op_id+=1
+            # Check if mean's reduce axis have split_dim, if so, we need to concat the split tensor first
+            axis_buffer = self.buffers[self.tensors[info['inputs'][1]]['buffer']]
+            if split_dim in axis_buffer['data']:
+                intermediate_tensor = copy.deepcopy(self.tensors[info['inputs'][0]])
+                self.tensors.append(intermediate_tensor)
+                intermediate_tensor_id = len(self.tensors) - 1
+                concate_op_info = {
+                    "opcode_index": self.get_opcode_index(2),
+                    "inputs": copy.deepcopy(self.split_tensor_table[info['inputs'][0]]),
+                    "outputs": [intermediate_tensor_id],
+                    "builtin_options_type": "ConcatenationOptions",
+                    "builtin_options": {
+                        'axis': split_dim
+                    }
+                }
+                self.new_operators.append(concate_op_info)
+
+                split_op_id = len(self.new_operators)
+                for a in self.split_tensor_table[outputs[0]]:
+                    new_op_info = copy.deepcopy(info)
+                    new_op_info['inputs'][0] = intermediate_tensor_id
+                    new_op_info['outputs'] = [a]
+                    self.new_operators.append(new_op_info)
+                    self.nodes[opid].split_id.append(split_op_id)
+                    split_op_id += 1
+            else:
+                split_op_id = len(self.new_operators)
+                for a,b in zip(self.split_tensor_table[inputs[0]],
+                                self.split_tensor_table[outputs[0]]):
+                    new_op_info = copy.deepcopy(info)
+                    new_op_info['inputs'][0] = a
+                    new_op_info['outputs'] = [b]
+                    self.new_operators.append(new_op_info)
+                    self.nodes[opid].split_id.append(split_op_id)
+                    split_op_id += 1
 
     def split_squared_difference(self, opid, output_split):
         info = self.nodes[opid].node.info
