@@ -465,6 +465,8 @@ class simulator:
                 if read_promote[namespace]:
                     if tile_deps[loop][namespace]:
                         reads[namespace] *= num_tiles
+        # Prefer to load full weight buffer
+        max_write_size['weight_buffer'] = writes['weight_buffer']
 
         initial_dram_reads = 0
         final_dram_writes = 0

@@ -166,6 +166,7 @@ class Weight_reuse_scheduler:
         self.graph.operators = []
         for op in self.graph.ordered_ops:
             self.graph.operators.append(op.info)
+        print(f"peak SRAM usage: {self.virtual_tensor_allocator.max_use}")
         return self.graph
 
     def collect_same_layer_opids_in_same_block(self, opid):
@@ -189,6 +190,8 @@ class Weight_reuse_scheduler:
     class virtual_tensor_allocate:
         def __init__(self, graph):
             self.graph = graph
+            # For print the peak SRAM usage
+            self.max_use = 0
             
         # Virtual memory allocation for calculate real SRAM peak usage (give the opids that in weight reuse block)
         def virtual_tensor_allocate(self, opids, tensor_info):
@@ -238,6 +241,7 @@ class Weight_reuse_scheduler:
                 tensor_info[tensor_id].end_addr = best_start + tensor_info[tensor_id].size
                 total_used_size = max(total_used_size, tensor_info[tensor_id].end_addr)
                 # Check total used size whether over the SRAM's size
+                self.max_use = max(self.max_use, total_used_size)
                 if total_used_size > ArchitectureFeatures.SRAM_MAX_SIZE:
                     return True
                 ordered_allocated_tensors.append(tensor_id)

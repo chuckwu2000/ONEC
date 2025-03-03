@@ -866,9 +866,8 @@ class Splitter:
                 guard_inner_y = min(output_split, out_shape[1] - out_y)
 
                 new_inputs = []
-                split_padding_H = paddings_H
-                # split_padding_H = -((out_y) * stride_h - paddings_H)
-                # split_padding_H = 0 if split_padding_H < 0 else split_padding_H
+                split_padding_H = -((out_y) * stride_h - paddings_H)
+                split_padding_H = 0 if split_padding_H < 0 else split_padding_H
 
                 # inference required in_y from this tile
                 required = []
@@ -1122,14 +1121,21 @@ class Splitter:
             stride_w = info['builtin_options']['stride_w']
 
             # calculate padding
-            if info['builtin_options'].get('padding', 'SAME') == 'SAME':
-                total_padding_H = (out_shape[1] - 1) * stride_h + ker_shape[0] - in_shape[1]
-                total_padding_W = (out_shape[2] - 1) * stride_w + ker_shape[1] - in_shape[2]
-                paddings_H = total_padding_H // 2 if total_padding_H > 0 else 0
-                paddings_W = total_padding_W // 2 if total_padding_W > 0 else 0
+            if(len(inputs) == 2):
+                tokens = self.tensors[info['inputs'][1]]['name'].split('_')
+                if(tokens[0] != 'padding'):
+                    raise "wrong custom padding setting tensor data"
+                paddings_H = int(tokens[1])
+                paddings_W = int(tokens[2])
             else:
-                paddings_H = 0
-                paddings_W = 0
+                if info['builtin_options'].get('padding', 'SAME') == 'SAME':
+                    total_padding_H = (out_shape[1] - 1) * stride_h + ker_shape[0] - in_shape[1]
+                    total_padding_W = (out_shape[2] - 1) * stride_w + ker_shape[1] - in_shape[2]
+                    paddings_H = total_padding_H // 2 if total_padding_H > 0 else 0
+                    paddings_W = total_padding_W // 2 if total_padding_W > 0 else 0
+                else:
+                    paddings_H = 0
+                    paddings_W = 0
 
             # generate splitted max_pool for each tile
             for out_y in range(0, out_shape[1], output_split):
@@ -1155,7 +1161,11 @@ class Splitter:
                     new_inputs.append(self.split_tensor_table[inputs[0]][in_y])
 
                 padding_param_tensor = self.get_padding_param_tensor(split_padding_H, paddings_W)
-                new_op_info['inputs'] += [padding_param_tensor] + new_inputs
+                if(len(inputs) == 2):
+                    new_op_info['inputs'][1] = padding_param_tensor
+                    new_op_info['inputs'] += new_inputs
+                else:
+                    new_op_info['inputs'] += [padding_param_tensor] + new_inputs
                 new_op_info['inputs'][0] = new_op_info['inputs'][2]
 
                 # outputs
