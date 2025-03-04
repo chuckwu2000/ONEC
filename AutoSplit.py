@@ -249,6 +249,16 @@ class Splitter:
                     if child not in end_ids:
                         end_ids.append(child)
                     return None
+                
+            # Check if mean's keep_dims is True (if not, it is non-splittable op)
+            if opcode_type == "MEAN":
+                info = self.nodes[child].node.info
+                input_shape = self.tensors[info['inputs'][0]]['shape']
+                output_shape = self.tensors[info['outputs'][0]]['shape']
+                if len(input_shape) != len(output_shape):
+                    if child not in end_ids:
+                        end_ids.append(child)
+                    return None
 
             # Check if it is splittable op
             if self.nodes[child].node.info.get("opcode_index",0) in self.splittable_opcode_idxes.values():
@@ -304,24 +314,6 @@ class Splitter:
                 til_block_end = self.traverse_til_not_splittable_with_end_id(child, splittables, end_id, end_ids)
         return til_block_end
 
-    def split_tensor(self, tensor_id_in):
-        tensor_info = self.tensors[tensor_id_in]
-        buffer_id = len(self.buffers)
-        tensor_id = len(self.tensors)
-        new_tensor_info_base = copy.deepcopy(tensor_info)
-        if 'shape_signature' in new_tensor_info_base:
-            del new_tensor_info_base['shape_signature']
-        new_tensor_info_base['shape'][1] = 1
-        for i in range(tensor_info['shape'][1]):
-            new_tensor_info = copy.deepcopy(new_tensor_info_base)
-            new_tensor_info['buffer'] = buffer_id
-            new_tensor_info['name'] += '_split_%d' % (i)
-            self.buffers.append({})
-            self.tensors.append(new_tensor_info)
-            self.split_tensor_table[tensor_id_in].append(tensor_id)
-            buffer_id += 1
-            tensor_id += 1
-
     def split_constant_tensor_by_n(self, tensor_id_in, tile_size, tile_dim):
         tensor_info = self.tensors[tensor_id_in]
         buffer_id = len(self.buffers)
@@ -342,35 +334,56 @@ class Splitter:
             del new_tensor_info_base['shape_signature']
 
         import math
-        for i in range(0, math.ceil(tensor_info['shape'][tile_dim] / tile_size), 1):
-            guard = min(tile_size, tensor_info['shape'][tile_dim] - i * tile_size)
-            new_tensor_info = copy.deepcopy(new_tensor_info_base)
-            new_tensor_info['shape'][tile_dim] = guard
-            new_tensor_info['buffer'] = buffer_id
-            new_tensor_info['name'] += '_split_%d' % (i)
-            
-            # Extract the data
-            if len(shape) == 4:
-                if tile_dim == 1:
-                    tmp_data = np_arr[:, i * tile_size : i * tile_size + guard, :, :]
-                elif tile_dim == 2:
-                    tmp_data = np_arr[:, :, i * tile_size : i * tile_size + guard, :]
-                elif tile_dim == 3:
-                    tmp_data = np_arr[:, :, :, i * tile_size : i * tile_size + guard]
-            elif len(shape) == 3:
-                if tile_dim == 1:
-                    tmp_data = np_arr[:, i * tile_size : i * tile_size + guard, :]
-                elif tile_dim == 2:
-                    tmp_data = np_arr[:, :, i * tile_size : i * tile_size + guard]
-            # Flatten the data
-            new_data = tmp_data.flatten()
-            new_buffer_data_info['data'] = new_data.tolist()
-            
-            self.buffers.append(new_buffer_data_info)
-            self.tensors.append(new_tensor_info)
-            self.split_tensor_table[tensor_id_in].append(tensor_id)
-            buffer_id += 1
-            tensor_id += 1
+        if tile_dim >= len(tensor_info['shape']):
+            for i in range(0, 1, 1):
+                new_tensor_info = copy.deepcopy(new_tensor_info_base)
+                new_tensor_info['buffer'] = buffer_id
+                new_tensor_info['name'] += '_split_%d' % (i)
+                
+                # Extract the data
+                if len(shape) == 1:
+                    tmp_data = np_arr
+                else:
+                    raise BaseException("The shape of the constant tensor is not supported")
+                # Flatten the data
+                new_data = tmp_data.flatten()
+                new_buffer_data_info['data'] = new_data.tolist()
+                
+                self.buffers.append(new_buffer_data_info)
+                self.tensors.append(new_tensor_info)
+                self.split_tensor_table[tensor_id_in].append(tensor_id)
+                buffer_id += 1
+                tensor_id += 1
+        else:
+            for i in range(0, math.ceil(tensor_info['shape'][tile_dim] / tile_size), 1):
+                guard = min(tile_size, tensor_info['shape'][tile_dim] - i * tile_size)
+                new_tensor_info = copy.deepcopy(new_tensor_info_base)
+                new_tensor_info['shape'][tile_dim] = guard
+                new_tensor_info['buffer'] = buffer_id
+                new_tensor_info['name'] += '_split_%d' % (i)
+                
+                # Extract the data
+                if len(shape) == 4:
+                    if tile_dim == 1:
+                        tmp_data = np_arr[:, i * tile_size : i * tile_size + guard, :, :]
+                    elif tile_dim == 2:
+                        tmp_data = np_arr[:, :, i * tile_size : i * tile_size + guard, :]
+                    elif tile_dim == 3:
+                        tmp_data = np_arr[:, :, :, i * tile_size : i * tile_size + guard]
+                elif len(shape) == 3:
+                    if tile_dim == 1:
+                        tmp_data = np_arr[:, i * tile_size : i * tile_size + guard, :]
+                    elif tile_dim == 2:
+                        tmp_data = np_arr[:, :, i * tile_size : i * tile_size + guard]
+                # Flatten the data
+                new_data = tmp_data.flatten()
+                new_buffer_data_info['data'] = new_data.tolist()
+                
+                self.buffers.append(new_buffer_data_info)
+                self.tensors.append(new_tensor_info)
+                self.split_tensor_table[tensor_id_in].append(tensor_id)
+                buffer_id += 1
+                tensor_id += 1
 
     def split_tensor_by_n(self, tensor_id_in, tile_size, tile_dim):
         tensor_info = self.tensors[tensor_id_in]
@@ -427,26 +440,15 @@ class Splitter:
             del new_tensor_info_base['shape_signature']
 
         import math
-        if tile_dim >= len(tensor_info['shape']):
-            for i in range(0, 1, 1):
-                new_tensor_info = copy.deepcopy(new_tensor_info_base)
-                new_tensor_info['buffer'] = buffer_id
-                new_tensor_info['name'] += '_split_%d' % (i)
-                self.buffers.append({})
-                self.tensors.append(new_tensor_info)
-                self.split_tensor_table[tensor_id_in].append(tensor_id)
-                buffer_id += 1
-                tensor_id += 1
-        else:
-            for i in range(0, math.ceil(tensor_info['shape'][tile_dim] / tile_size), 1):
-                new_tensor_info = copy.deepcopy(new_tensor_info_base)
-                new_tensor_info['buffer'] = buffer_id
-                new_tensor_info['name'] += '_split_%d' % (i)
-                self.buffers.append({})
-                self.tensors.append(new_tensor_info)
-                self.split_tensor_table[tensor_id_in].append(tensor_id)
-                buffer_id += 1
-                tensor_id += 1
+        for i in range(0, math.ceil(tensor_info['shape'][tile_dim] / tile_size), 1):
+            new_tensor_info = copy.deepcopy(new_tensor_info_base)
+            new_tensor_info['buffer'] = buffer_id
+            new_tensor_info['name'] += '_split_%d' % (i)
+            self.buffers.append({})
+            self.tensors.append(new_tensor_info)
+            self.split_tensor_table[tensor_id_in].append(tensor_id)
+            buffer_id += 1
+            tensor_id += 1
 
     # Set the ops on the path from V to pack(which bert model usually perform multi-head self attention) with avoid_split
     # TODO: may need to handle the case that the pack is not the last op
@@ -1207,19 +1209,11 @@ class Splitter:
         if len(self.buffers[self.tensors[info['inputs'][0]]['buffer']]) != 0:
             input1_is_constant = True
             if self.split_tensor_table[info['inputs'][0]] == []:
-                # Consider there have broadcast constant tensors but only have one dimension
-                if split_dim >= len(self.tensors[info['inputs'][0]]['shape']):
-                    self.split_tensor_by_n_with_same_info(info['inputs'][0], output_split, split_dim)
-                else:
-                    self.split_constant_tensor_by_n(info['inputs'][0], output_split, split_dim)
+                self.split_constant_tensor_by_n(info['inputs'][0], output_split, split_dim)
         if len(self.buffers[self.tensors[info['inputs'][1]]['buffer']]) != 0:
             input2_is_constant = True
             if self.split_tensor_table[info['inputs'][1]] == []:
-                # Consider there have broadcast constant tensors but only have one dimension
-                if split_dim >= len(self.tensors[info['inputs'][1]]['shape']):
-                    self.split_tensor_by_n_with_same_info(info['inputs'][1], output_split, split_dim)
-                else:
-                    self.split_constant_tensor_by_n(info['inputs'][1], output_split, split_dim)
+                self.split_constant_tensor_by_n(info['inputs'][1], output_split, split_dim)
         have_constant = input1_is_constant or input2_is_constant
         if have_constant:
             input1_split_len = len(self.split_tensor_table[info['inputs'][0]])
@@ -1304,19 +1298,11 @@ class Splitter:
         if len(self.buffers[self.tensors[info['inputs'][0]]['buffer']]) != 0:
             input1_is_constant = True
             if self.split_tensor_table[info['inputs'][0]] == []:
-                # Consider there have broadcast constant tensors but only have one dimension
-                if split_dim >= len(self.tensors[info['inputs'][0]]['shape']):
-                    self.split_tensor_by_n_with_same_info(info['inputs'][0], output_split, split_dim)
-                else:
-                    self.split_constant_tensor_by_n(info['inputs'][0], output_split, split_dim)
+                self.split_constant_tensor_by_n(info['inputs'][0], output_split, split_dim)
         if len(self.buffers[self.tensors[info['inputs'][1]]['buffer']]) != 0:
             input2_is_constant = True
             if self.split_tensor_table[info['inputs'][1]] == []:
-                # Consider there have broadcast constant tensors but only have one dimension
-                if split_dim >= len(self.tensors[info['inputs'][1]]['shape']):
-                    self.split_tensor_by_n_with_same_info(info['inputs'][1], output_split, split_dim)
-                else:
-                    self.split_constant_tensor_by_n(info['inputs'][1], output_split, split_dim)
+                self.split_constant_tensor_by_n(info['inputs'][1], output_split, split_dim)
         have_constant = input1_is_constant or input2_is_constant
         if have_constant:
             input1_split_len = len(self.split_tensor_table[info['inputs'][0]])
@@ -1401,19 +1387,11 @@ class Splitter:
         if len(self.buffers[self.tensors[info['inputs'][0]]['buffer']]) != 0:
             input1_is_constant = True
             if self.split_tensor_table[info['inputs'][0]] == []:
-                # Consider there have broadcast constant tensors but only have one dimension
-                if split_dim >= len(self.tensors[info['inputs'][0]]['shape']):
-                    self.split_tensor_by_n_with_same_info(info['inputs'][0], output_split, split_dim)
-                else:
-                    self.split_constant_tensor_by_n(info['inputs'][0], output_split, split_dim)
+                self.split_constant_tensor_by_n(info['inputs'][0], output_split, split_dim)
         if len(self.buffers[self.tensors[info['inputs'][1]]['buffer']]) != 0:
             input2_is_constant = True
             if self.split_tensor_table[info['inputs'][1]] == []:
-                # Consider there have broadcast constant tensors but only have one dimension
-                if split_dim >= len(self.tensors[info['inputs'][1]]['shape']):
-                    self.split_tensor_by_n_with_same_info(info['inputs'][1], output_split, split_dim)
-                else:
-                    self.split_constant_tensor_by_n(info['inputs'][1], output_split, split_dim)
+                self.split_constant_tensor_by_n(info['inputs'][1], output_split, split_dim)
         have_constant = input1_is_constant or input2_is_constant
         if have_constant:
             input1_split_len = len(self.split_tensor_table[info['inputs'][0]])
