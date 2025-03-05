@@ -25,7 +25,7 @@ class ArchitectureFeatures:
     DRAM_MAX_SIZE = 1 << 32
     # SRAM's max size is 8MB
     double_buffer = 1
-    SRAM_MAX_SIZE = int(1024 * 1024 * 8 / double_buffer)
+    SRAM_MAX_SIZE = int(1024 * 1024 * 2 / double_buffer)
 
     # Output cycles per element (MAC main op, mul, add/sub)
     # Exponential, Reciprocal, Dequantize, Quantize are perform pipeline in our design

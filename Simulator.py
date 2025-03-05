@@ -58,13 +58,16 @@ class simulator:
             ifm_shape = ifm.get("shape")
             ofm_shape = ofm.get("shape")
 
-            if ifm.get("type") == "INT8" and ofm.get("type") == "INT8":
+            if ifm.get("type") == "INT8":
                 ifm_elem_size = 8
-                ofm_elem_size = 8
-                need_requant = True
             else:
                 ifm_elem_size = 32
+            if ofm.get("type") == "INT8":
+                ofm_elem_size = 8
+            else:
                 ofm_elem_size = 32
+            if ifm_elem_size == 8 and ofm_elem_size == 8:
+                need_requant = True
 
             # ifm's elements
             ifm_elems = 1

@@ -1,5 +1,6 @@
 from collections import defaultdict
 from MyGraph import Node,Graph
+import numpy as np
 import copy
 
 # bert prefer split token
@@ -49,7 +50,9 @@ class Splitter:
             # 39: TRANSPOSE
             # 40: MEAN
             # 41: SUB
+            # 42: DIV
             # 49: SPLIT
+            # 65: SLICE
             # 76: RSQRT
             # 78: POW
             # 82: REDUCE_MAX
@@ -60,7 +63,7 @@ class Splitter:
             # 114: QUANTIZE
             # 126: BATCH_MATMUL
             # 127: GELU
-            split_candidate = [0, 2, 3, 4, 6, 9, 14, 17, 18, 22, 25, 28, 34, 39, 40, 41, 49, 76, 78, 82, 83, 97, 99, 102, 114, 126, 127]
+            split_candidate = [0, 2, 3, 4, 6, 9, 14, 17, 18, 22, 25, 28, 34, 39, 40, 41, 42, 49, 65, 76, 78, 82, 83, 97, 99, 102, 114, 126, 127]
             if opcode.get("deprecated_builtin_code", 0) in split_candidate:
                 self.splittable_opcode_idxes[opcode.get("deprecated_builtin_code", 0)] = i
 
@@ -74,7 +77,7 @@ class Splitter:
         self.splittable_opcode_idxes = {}
         for i, opcode in enumerate(self.opcodes):
             # See the corresponding number in the __init__ function
-            split_candidate = [0, 2, 3, 4, 6, 9, 14, 17, 18, 22, 25, 28, 34, 39, 40, 41, 49, 76, 78, 82, 83, 97, 99, 102, 114, 126, 127]
+            split_candidate = [0, 2, 3, 4, 6, 9, 14, 17, 18, 22, 25, 28, 34, 39, 40, 41, 42, 49, 65, 76, 78, 82, 83, 97, 99, 102, 114, 126, 127]
             if opcode.get("deprecated_builtin_code", 0) in split_candidate:
                 self.splittable_opcode_idxes[opcode.get("deprecated_builtin_code", 0)] = i
 
@@ -315,41 +318,45 @@ class Splitter:
         return til_block_end
 
     def split_constant_tensor_by_n(self, tensor_id_in, tile_size, tile_dim):
+        buffer_info = self.buffers[self.tensors[tensor_id_in]['buffer']]
         tensor_info = self.tensors[tensor_id_in]
         buffer_id = len(self.buffers)
         tensor_id = len(self.tensors)
+        new_buffer_info_base = copy.deepcopy(buffer_info)
         new_tensor_info_base = copy.deepcopy(tensor_info)
 
         # Prepare for copy the buffer data
-        new_buffer_data_info = copy.deepcopy(self.buffers[tensor_info['buffer']])
-        if len(new_buffer_data_info['data']) == 0:
+        ori_buffer_info = new_buffer_info_base
+        if len(ori_buffer_info['data']) == 0:
             raise BaseException("The buffer data is empty, can't split the constant tensor")
-        import numpy as np
-        one_dim_arr = np.array(new_buffer_data_info['data'])
-        shape = tensor_info['shape']
+        # Based on the data type to determine the numpy type
+        if tensor_info.get("type") == 'INT8':
+            np_type = np.int8
+        else:
+            np_type = np.float32
+        # Convert the buffer data to numpy array
+        one_dim_arr = np.frombuffer(bytes(ori_buffer_info['data']), dtype = np_type)
+        # If the buffer only contain one element, let the shape be [1]
+        shape = tensor_info.get("shape", [1])
         # Reshape to the original shape
-        np_arr = one_dim_arr.reshape(tensor_info['shape'])
+        np_arr = one_dim_arr.reshape(shape)
 
         if 'shape_signature' in new_tensor_info_base:
             del new_tensor_info_base['shape_signature']
 
         import math
-        if tile_dim >= len(tensor_info['shape']):
+        if tile_dim >= len(shape):
             for i in range(0, 1, 1):
+                new_buffer_info = copy.deepcopy(new_buffer_info_base)
                 new_tensor_info = copy.deepcopy(new_tensor_info_base)
                 new_tensor_info['buffer'] = buffer_id
                 new_tensor_info['name'] += '_split_%d' % (i)
                 
                 # Extract the data
-                if len(shape) == 1:
-                    tmp_data = np_arr
-                else:
+                if len(shape) != 1:
                     raise BaseException("The shape of the constant tensor is not supported")
-                # Flatten the data
-                new_data = tmp_data.flatten()
-                new_buffer_data_info['data'] = new_data.tolist()
                 
-                self.buffers.append(new_buffer_data_info)
+                self.buffers.append(new_buffer_info)
                 self.tensors.append(new_tensor_info)
                 self.split_tensor_table[tensor_id_in].append(tensor_id)
                 buffer_id += 1
@@ -357,6 +364,7 @@ class Splitter:
         else:
             for i in range(0, math.ceil(tensor_info['shape'][tile_dim] / tile_size), 1):
                 guard = min(tile_size, tensor_info['shape'][tile_dim] - i * tile_size)
+                new_buffer_info = copy.deepcopy(new_buffer_info_base)
                 new_tensor_info = copy.deepcopy(new_tensor_info_base)
                 new_tensor_info['shape'][tile_dim] = guard
                 new_tensor_info['buffer'] = buffer_id
@@ -376,10 +384,10 @@ class Splitter:
                     elif tile_dim == 2:
                         tmp_data = np_arr[:, :, i * tile_size : i * tile_size + guard]
                 # Flatten the data
-                new_data = tmp_data.flatten()
-                new_buffer_data_info['data'] = new_data.tolist()
+                new_data = tmp_data.astype(np_type).tobytes()
+                new_buffer_info['data'] = list(new_data)
                 
-                self.buffers.append(new_buffer_data_info)
+                self.buffers.append(new_buffer_info)
                 self.tensors.append(new_tensor_info)
                 self.split_tensor_table[tensor_id_in].append(tensor_id)
                 buffer_id += 1
@@ -496,8 +504,12 @@ class Splitter:
             self.split_mean(opid, output_split)
         elif opcode_idx == self.splittable_opcode_idxes.get(41, -1):
             self.split_sub(opid, output_split)
+        elif opcode_idx == self.splittable_opcode_idxes.get(42, -1):
+            self.split_div(opid, output_split)
         elif opcode_idx == self.splittable_opcode_idxes.get(49, -1):
             self.split_split(opid, output_split)
+        elif opcode_idx == self.splittable_opcode_idxes.get(65, -1):
+            self.split_slice(opid, output_split)
         elif opcode_idx == self.splittable_opcode_idxes.get(76, -1):
             self.split_rsqrt(opid, output_split)
         elif opcode_idx == self.splittable_opcode_idxes.get(78, -1):
@@ -787,6 +799,56 @@ class Splitter:
                 self.new_operators.append(new_op_info)
                 self.nodes[opid].split_id.append(split_op_id)
                 split_op_id+=1
+
+    def split_slice(self, opid, output_split):
+        info = self.nodes[opid].node.info
+        output_shape = self.tensors[info['outputs'][0]]['shape']
+        if self.model_type == ModelType.BERT:
+            split_dim_value = self.token_size
+            for dim, dim_value in enumerate(output_shape):
+                if dim_value == split_dim_value:
+                    split_dim = dim
+                    self.split_tensor_by_n(info['outputs'][0], output_split, dim)
+                    break
+        else:
+            split_dim = self.nodes[opid].node.split_dim
+            self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
+            for child in self.nodes[opid].node.children:
+                self.nodes[child].node.split_dim = self.nodes[opid].node.split_dim
+
+        inputs = info['inputs']
+        outputs = info['outputs']
+
+        input_shape = self.tensors[inputs[0]]['shape']
+        
+        size_buffer_id = self.tensors[inputs[2]]['buffer']
+        size_buffer = self.buffers[size_buffer_id]
+        # Process buffer structure: [a, 0, 0, 0, b, 0, 0, 0, c, 0, 0, 0, d, 0, 0, 0]
+        if size_buffer['data'][split_dim * 4] != input_shape[split_dim]:
+            raise "split_dim size not equal to input size"
+        
+        for output_idx in range(len(outputs)):
+            self.split_tensor_by_n(info['outputs'][output_idx], output_split, split_dim)
+        for child in self.nodes[opid].node.children:
+            self.nodes[child].node.split_dim = self.nodes[opid].node.split_dim
+
+        if len(inputs) != 3:
+            raise "wrong input number"
+        elif len(outputs) != 1:
+            raise "wrong output number"
+        else:
+            split_op_id = len(self.new_operators)
+            for a, b in zip(self.split_tensor_table[inputs[0]],
+                            self.split_tensor_table[outputs[0]]):
+                new_op_info = copy.deepcopy(info)
+                new_op_info['inputs'][0] = a
+                # Change split_dim's size to output_split
+                input2_buffer = self.buffers[size_buffer_id]
+                input2_buffer['data'][split_dim * 4] = output_split
+                new_op_info['outputs'] = [b]
+                self.new_operators.append(new_op_info)
+                self.nodes[opid].split_id.append(split_op_id)
+                split_op_id += 1
 
     def split_batch_matmul(self, opid, output_split):
         info = self.nodes[opid].node.info
@@ -1449,6 +1511,95 @@ class Splitter:
                     self.nodes[opid].split_id.append(split_op_id)
                     split_op_id+=1
 
+    def split_div(self, opid, output_split):
+        info = self.nodes[opid].node.info
+        split_dim = -1
+        output_shape = self.tensors[info['outputs'][0]]['shape']
+        if self.model_type == ModelType.BERT:
+            split_dim_value = self.token_size
+            for dim, dim_value in enumerate(output_shape):
+                if dim_value == split_dim_value:
+                    self.split_tensor_by_n(info['outputs'][0], output_split, dim)
+                    split_dim = dim
+                    break
+        else:
+            split_dim = self.nodes[opid].node.split_dim
+            self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
+            for child in self.nodes[opid].node.children:
+                self.nodes[child].node.split_dim = self.nodes[opid].node.split_dim
+        
+        # Mul with constant value, constant value may also need to be splitted
+        have_constant = False
+        input1_is_constant = False
+        input2_is_constant = False
+        need_broadcast = False
+        input1_need_broadcast = False
+        input2_need_broadcast = False
+        if len(self.buffers[self.tensors[info['inputs'][0]]['buffer']]) != 0:
+            input1_is_constant = True
+            if self.split_tensor_table[info['inputs'][0]] == []:
+                self.split_constant_tensor_by_n(info['inputs'][0], output_split, split_dim)
+        if len(self.buffers[self.tensors[info['inputs'][1]]['buffer']]) != 0:
+            input2_is_constant = True
+            if self.split_tensor_table[info['inputs'][1]] == []:
+                self.split_constant_tensor_by_n(info['inputs'][1], output_split, split_dim)
+        have_constant = input1_is_constant or input2_is_constant
+        if have_constant:
+            input1_split_len = len(self.split_tensor_table[info['inputs'][0]])
+            input2_split_len = len(self.split_tensor_table[info['inputs'][1]])
+            if input1_split_len != input2_split_len:
+                input1_need_broadcast = True if input1_split_len == 1 else False
+                input2_need_broadcast = True if input2_split_len == 1 else False
+                if not input1_need_broadcast and not input2_need_broadcast:
+                    raise BaseException("In mul op, split number of two operand is not equal and the min split number is not 1")
+                need_broadcast = True
+
+        inputs = info['inputs']
+        outputs = info['outputs']
+
+        if len(inputs) != 2:
+            raise "wrong input number"
+        elif len(outputs) != 1:
+            raise "wrong output number"
+        elif not have_constant and len(self.tensors[info['inputs'][0]]['shape']) != len(self.tensors[info['inputs'][1]]['shape']):
+            raise BaseException("not support different dim of two operand")
+        elif not have_constant and len(self.split_tensor_table[inputs[0]]) != len(self.split_tensor_table[inputs[1]]):
+            raise BaseException("split number of two operand is not equal")
+        else:
+            split_op_id = len(self.new_operators)
+            # We don't split the constant value, if it need to be broadcast
+            if have_constant and need_broadcast:
+                if input1_need_broadcast:
+                    for a, b in zip(self.split_tensor_table[inputs[1]],
+                                    self.split_tensor_table[outputs[0]]):
+                        new_op_info = copy.deepcopy(info)
+                        new_op_info['inputs'][0] = self.split_tensor_table[inputs[0]][0]
+                        new_op_info['inputs'][1] = a
+                        new_op_info['outputs'] = [b]
+                        self.new_operators.append(new_op_info)
+                        self.nodes[opid].split_id.append(split_op_id)
+                        split_op_id+=1
+                elif input2_need_broadcast:
+                    for a, b in zip(self.split_tensor_table[inputs[0]],
+                                    self.split_tensor_table[outputs[0]]):
+                        new_op_info = copy.deepcopy(info)
+                        new_op_info['inputs'][0] = a
+                        new_op_info['inputs'][1] = self.split_tensor_table[inputs[1]][0]
+                        new_op_info['outputs'] = [b]
+                        self.new_operators.append(new_op_info)
+                        self.nodes[opid].split_id.append(split_op_id)
+                        split_op_id+=1
+            else:
+                for a, b, c in zip(self.split_tensor_table[inputs[0]],
+                                self.split_tensor_table[inputs[1]],
+                                self.split_tensor_table[outputs[0]]):
+                    new_op_info = copy.deepcopy(info)
+                    new_op_info['inputs'] = [a,b]
+                    new_op_info['outputs'] = [c]
+                    self.new_operators.append(new_op_info)
+                    self.nodes[opid].split_id.append(split_op_id)
+                    split_op_id+=1
+
     def split_logistic(self, opid, output_split):
         info = self.nodes[opid].node.info
         split_dim = self.nodes[opid].node.split_dim
@@ -1946,16 +2097,24 @@ class Splitter:
 
     def concat_block_output(self, end_opid):
         info = self.nodes[end_opid].node.info
-        new_op_info = {
-            "opcode_index": self.get_opcode_index(2),
-            "inputs": copy.deepcopy(self.split_tensor_table[info['inputs'][0]]),
-            "outputs": [info['inputs'][0]],
-            "builtin_options_type": "ConcatenationOptions",
-            "builtin_options": {
-                'axis': 1
+        number_of_concate = 1
+        # If end_op is Pack, then number of concatenate should be the number of inputs (for gpt2 model)
+        opcode_index = info.get("opcode_index")
+        opcode_type = self.opcodes[opcode_index].get("builtin_code")
+        if opcode_type == 'PACK':
+            number_of_concate = len(info['inputs'])
+
+        for i in range(number_of_concate):
+            new_op_info = {
+                "opcode_index": self.get_opcode_index(2),
+                "inputs": copy.deepcopy(self.split_tensor_table[info['inputs'][i]]),
+                "outputs": [info['inputs'][i]],
+                "builtin_options_type": "ConcatenationOptions",
+                "builtin_options": {
+                    'axis': 1
+                }
             }
-        }
-        self.new_operators.append(new_op_info)
+            self.new_operators.append(new_op_info)
 
     # Parent op(multi output) -> concat -> split -> child op
     def concat_than_split(self, start_opid, output_split, input_idx):
