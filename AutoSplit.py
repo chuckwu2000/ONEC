@@ -1052,17 +1052,10 @@ class Splitter:
         inputs = info['inputs']
         outputs = info['outputs']
 
-        # Check fc's two origin inputs whether need splitted (by experience, it has the number in the name's last character)
-        # TODO: need to fixed the need_split_nxn decide method
+        # Check fc's weight whether had been splitted
         need_split_nxn = True
-        for input in inputs:
-            # If the input is none, skip it
-            if input == -1:
-                continue
-            input_name = self.tensors[input]['name']
-            if not input_name[-1].isdigit():
-                need_split_nxn = False
-                break
+        if(self.split_tensor_table.get(inputs[1]) == None):
+            need_split_nxn = False
 
         split_dim = self.nodes[opid].node.split_dim
         output_shape = self.tensors[info['outputs'][0]]['shape']
