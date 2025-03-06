@@ -81,7 +81,7 @@ class Splitter:
             if opcode.get("deprecated_builtin_code", 0) in split_candidate:
                 self.splittable_opcode_idxes[opcode.get("deprecated_builtin_code", 0)] = i
 
-    def perform_split(self, blocks = []) -> Graph:
+    def perform_split(self) -> Graph:
         self.split_tensor_table = defaultdict(list)
         self.new_operators = []
 
@@ -99,88 +99,21 @@ class Splitter:
                     self.split_block_input(start_id, input_tile_size)
                     self.traverse_til_not_splittable(start_id, splittables, end_ids)
         
-        if len(blocks) == 0:
-            # Then, traverse from the last input
-            start_id = self.traverse_til_splittable(self.ori_graph.root_op_ids[-1])
-            # Get splittable block
-            self.traverse_til_not_splittable(start_id, splittables, end_ids)
-            # Add non-visited op into new_operators
-            for end_id in end_ids:
-                self.traverse_til_end(end_id)
-            # Split block input
-            self.split_block_input(start_id, input_tile_size)
-            # Start split
-            for op in splittables:
-                self.split_one_node(op, input_tile_size, output_tile_size)
-            # Concat block output
-            for end_id in end_ids:
-                self.concat_block_output(end_id)
-        else:
-            # Split the prologue
-            for op in splittables:
-                self.split_one_node(op, input_tile_size, output_tile_size)
-
-            first_block = True
-            epilogue_start_id = None
-            # Perform TS on each block
-            end_ids = []
-            for block in blocks:
-                start_id = block[0]
-                end_id = block[1]
-                splittables = []
-                til_block_end = self.traverse_til_not_splittable_with_end_id(start_id, splittables, end_id, end_ids)
-                # Only first block need to split block input
-                if self.model_type == ModelType.BERT:
-                    if first_block:
-                        self.split_block_input(start_id, input_tile_size)
-                        first_block = False
-                    else:
-                        # Last block had splitted this block's input
-                        splittables.pop(0)
-                else:
-                    if first_block:
-                        self.split_block_input(start_id, input_tile_size)
-                        first_block = False
-                
-                # Start split block
-                for op in splittables:
-                    self.split_one_node(op, input_tile_size, output_tile_size)
-                # If block can't split til the end, no need to perform concat_than_split
-                if not til_block_end:
-                    continue
-                # Concat than split block output
-                outputs = self.nodes[end_id].node.info['outputs']
-                for output in outputs:
-                    output_name = self.tensors[output]['name']
-                    for next_opid in self.nodes[end_id].node.children:
-                        for i, input in enumerate(self.nodes[next_opid].node.info['inputs']):
-                            # Need to match the next op's input tensor name to the output tensor name
-                            if self.tensors[input]['name'] == output_name:
-                                self.concat_than_split(next_opid, output_tile_size, input_idx = i)
-                                break
-                epilogue_start_id = end_id
-
-            # Split the epilogue
-            if self.model_type == ModelType.BERT:
-                splittables = []
-                start_id = epilogue_start_id
-                self.traverse_til_not_splittable(start_id, splittables, end_ids)
-                splittables.pop(0)
-                # No need to split end_ids
-                for op in splittables:
-                    if op in end_ids:
-                        continue
-                    self.split_one_node(op, input_tile_size, output_tile_size)
-                for end_id in end_ids:
-                    self.traverse_til_end(end_id)
-                for end_id in end_ids:
-                    self.concat_block_output(end_id)
-            else:
-                # Add non-visited op into new_operators
-                for end_id in end_ids:
-                    self.traverse_til_end(end_id)
-                for end_id in end_ids:
-                    self.concat_block_output(end_id)
+        # Then, traverse from the last input
+        start_id = self.traverse_til_splittable(self.ori_graph.root_op_ids[-1])
+        # Get splittable block
+        self.traverse_til_not_splittable(start_id, splittables, end_ids)
+        # Add non-visited op into new_operators
+        for end_id in end_ids:
+            self.traverse_til_end(end_id)
+        # Split block input
+        self.split_block_input(start_id, input_tile_size)
+        # Start split
+        for op in splittables:
+            self.split_one_node(op, input_tile_size, output_tile_size)
+        # Concat block output
+        for end_id in end_ids:
+            self.concat_block_output(end_id)
 
         new_graph = Graph ( self.new_operators, self.tensors, self.buffers,
                             self.opcodes, self.ori_graph.inputs, self.ori_graph.outputs, self.ori_graph.exec_order)
@@ -276,6 +209,7 @@ class Splitter:
             end_ids.append(current_opid)
         return None
     
+    # Not use now, idea is prepare for block_based option use (option had been removed in commit #103)
     def traverse_til_not_splittable_with_end_id(self, current_opid, splittables, end_id, end_ids):
         for parent in self.nodes[current_opid].node.parents:
             if self.nodes[parent].visited == False:
@@ -882,7 +816,7 @@ class Splitter:
 
         # Concate the split output tensor & split again from here
         next_opid = self.nodes[opid].node.children[0]
-        self.concat_than_split(next_opid, output_split, input_idx = 0)
+        self.concat_than_split(opid, next_opid, output_split, input_idx = 0)
 
     def split_conv(self, opid, input_split, output_split):
         info = self.nodes[opid].node.info

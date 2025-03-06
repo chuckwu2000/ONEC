@@ -15,7 +15,6 @@ parser.add_argument("--token_size", nargs='?', type=int, default=50)
 parser.add_argument("--model_type", nargs='?', type=str, 
                     default="bert")
 parser.add_argument("--verbose_performance", action='store_true')
-parser.add_argument("--block_based", action='store_true')
 parser.add_argument("--pad_fusion", action='store_true')
 parser.add_argument("--move_data_layout_op", action='store_true')
 args = parser.parse_args()
@@ -45,8 +44,6 @@ for split_height in [split_size]:
             cmd += " --pad_fusion"
         if args.verbose_performance:
             cmd += " --verbose_performance"
-        if args.block_based:
-            cmd += " --block_based"
         if args.move_data_layout_op:
             cmd += " --move_data_layout_op"
         subprocess.run(cmd.split(' '))

@@ -3,7 +3,6 @@ import copy
 import argparse
 import os
 from MyGraph import Graph
-from Block import Block
 from AutoSplit import Splitter
 import tempfile
 from Normal_schedule import Normal_scheduler
@@ -24,7 +23,6 @@ parser.add_argument("--model_type", nargs='?', type=str, default="bert")
 parser.add_argument("--pad_fusion", action='store_true')
 parser.add_argument("--move_data_layout_op", action='store_true')
 parser.add_argument("--verbose_performance", action='store_true')
-parser.add_argument("--block_based", action='store_true')
 
 args = parser.parse_args()
 filename = os.path.basename(args.model_path)
@@ -96,8 +94,6 @@ new_model = copy.deepcopy(model)
 
 new_model['operator_codes'] = new_opcodes
 
-tensor_id_mapping = [ x for x in range(len(tensors))]
-
 ori_graph = Graph(operators, tensors, buffers, new_opcodes, subgraphs[0]['inputs'], subgraphs[0]['outputs'], args.exec_order)
 
 splitter = Splitter(ori_graph, args.split_height, model_type, args.token_size)
@@ -107,15 +103,8 @@ if args.pad_fusion and model_type == 1:
 if args.move_data_layout_op and model_type == 0:
     splitter.Elminate_useless_data_layout_op()
 
-# Decide each block's range from ori_graph (Block: one entry point and one exit point)
-if args.block_based:
-    graph_to_blocks = Block(ori_graph, model_type)
-    blocks = graph_to_blocks.blocks
-else:
-    blocks = []
-
 ################## BASELINE ##################
-new_graph = splitter.perform_split(blocks)
+new_graph = splitter.perform_split()
 
 # Memory allocation(not perform cache optimization)
 mem_allocator = memory_allocator(new_graph)
