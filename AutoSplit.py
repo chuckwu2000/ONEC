@@ -209,7 +209,7 @@ class Splitter:
             end_ids.append(current_opid)
         return None
     
-    # Not use now, idea is prepare for block_based option use (option had been removed in commit #103)
+    # Not use now, idea is prepare for block_based option use (option had been removed in commit bd7874d36eea8e3966b9fbb83e743cbf548a5713)
     def traverse_til_not_splittable_with_end_id(self, current_opid, splittables, end_id, end_ids):
         for parent in self.nodes[current_opid].node.parents:
             if self.nodes[parent].visited == False:
@@ -357,9 +357,9 @@ class Splitter:
             del new_tensor_info_base['shape_signature']
 
         import math
-        for i in range(0, math.ceil(tensor_info['shape'][tile_dim1]/tile_size), 1):
+        for i in range(0, math.ceil(tensor_info['shape'][tile_dim1] / tile_size), 1):
             guard1 = min(tile_size, tensor_info['shape'][tile_dim1] - i * tile_size)
-            for j in range(0, math.ceil(tensor_info['shape'][tile_dim2]/tile_size), 1):
+            for j in range(0, math.ceil(tensor_info['shape'][tile_dim2] / tile_size), 1):
                 guard2 = min(tile_size, tensor_info['shape'][tile_dim2] - j * tile_size)
                 new_tensor_info = copy.deepcopy(new_tensor_info_base)
                 new_tensor_info['shape'][tile_dim1] = guard1
@@ -476,6 +476,7 @@ class Splitter:
 
     def split_pad(self, opid, output_split):
         info = self.nodes[opid].node.info
+
         split_dim = self.nodes[opid].node.split_dim
         self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
         for child in self.nodes[opid].node.children:
@@ -517,51 +518,45 @@ class Splitter:
         output = info['outputs'][0]
         input_shape = self.tensors[input]['shape']
         output_shape = self.tensors[output]['shape']
-        if self.model_type == ModelType.BERT:
-            split_dim_value = self.token_size
-            for dim, dim_value in enumerate(output_shape):
-                if dim_value == split_dim_value:
-                    if self.nodes[opid].avoid_split:
-                        self.split_tensor_by_n_with_same_info(info['outputs'][0], output_split, dim)
-                    else:
-                        self.split_tensor_by_n(info['outputs'][0], output_split, dim)
-                    break
-        else:
-            # Keep track the split_dim
-            # Not support the split_dim decomposed to multiple dimension or composed to one dimension
-            split_dim = self.nodes[opid].node.split_dim
-            tmp_value = 1
-            tmp_idx = 0
-            if len(output_shape) > len(input_shape):
-                for idx, dim_value in enumerate(output_shape):
-                    tmp_value *= dim_value
-                    if tmp_idx >= len(input_shape):
-                        raise f"out of range happen in split_reshape, reshape info: {info}"
-                    if tmp_value == input_shape[tmp_idx]:
-                        if tmp_idx == split_dim:
-                            split_dim = idx
-                            for child in self.nodes[opid].node.children:
-                                self.nodes[child].node.split_dim = split_dim
-                            break
-                        tmp_idx += 1
-                        tmp_value = 1
-            elif len(output_shape) < len(input_shape):
-                for idx, dim_value in enumerate(input_shape):
-                    tmp_value *= dim_value
-                    if tmp_idx >= len(output_shape):
-                        raise f"out of range happen in split_reshape, reshape info: {info}"
-                    if tmp_value == output_shape[tmp_idx]:
-                        if idx == split_dim:
-                            split_dim = tmp_idx
-                            for child in self.nodes[opid].node.children:
-                                self.nodes[child].node.split_dim = split_dim
-                            break
-                        tmp_idx += 1
-                        tmp_value = 1
 
+        # Keep track the split_dim
+        # Not support the split_dim decomposed to multiple dimension or composed to one dimension
+        split_dim = self.nodes[opid].node.split_dim
+        tmp_value = 1
+        tmp_idx = 0
+        if len(output_shape) > len(input_shape):
+            for idx, dim_value in enumerate(output_shape):
+                tmp_value *= dim_value
+                if tmp_idx >= len(input_shape):
+                    raise f"out of range happen in split_reshape, reshape info: {info}"
+                if tmp_value == input_shape[tmp_idx]:
+                    if tmp_idx == split_dim:
+                        split_dim = idx
+                        for child in self.nodes[opid].node.children:
+                            self.nodes[child].node.split_dim = split_dim
+                        break
+                    tmp_idx += 1
+                    tmp_value = 1
+        elif len(output_shape) < len(input_shape):
+            for idx, dim_value in enumerate(input_shape):
+                tmp_value *= dim_value
+                if tmp_idx >= len(output_shape):
+                    raise f"out of range happen in split_reshape, reshape info: {info}"
+                if tmp_value == output_shape[tmp_idx]:
+                    if idx == split_dim:
+                        split_dim = tmp_idx
+                        for child in self.nodes[opid].node.children:
+                            self.nodes[child].node.split_dim = split_dim
+                        break
+                    tmp_idx += 1
+                    tmp_value = 1
+
+        if self.nodes[opid].avoid_split:
+            self.split_tensor_by_n_with_same_info(info['outputs'][0], output_split, split_dim)
+        else:
             self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
-            for child in self.nodes[opid].node.children:
-                self.nodes[child].node.split_dim = split_dim
+        for child in self.nodes[opid].node.children:
+            self.nodes[child].node.split_dim = split_dim
             
         inputs = info['inputs']
         outputs = info['outputs']
@@ -583,32 +578,24 @@ class Splitter:
 
     def split_transpose(self, opid, output_split):
         info = self.nodes[opid].node.info
-        output_shape = self.tensors[info['outputs'][0]]['shape']
-        if self.model_type == ModelType.BERT:
-            split_dim_value = self.token_size
-            for dim, dim_value in enumerate(output_shape):
-                if dim_value == split_dim_value:
-                    if self.nodes[opid].avoid_split:
-                        self.split_tensor_by_n_with_same_info(info['outputs'][0], output_split, dim)
-                    else:
-                        self.split_tensor_by_n(info['outputs'][0], output_split, dim)
-                    break
-        else:
-            perm_tensor = self.tensors[info['inputs'][1]]
-            perm_buffer = self.buffers[perm_tensor['buffer']]['data']
-            # Process buffer structure: [a, 0, 0, 0, b, 0, 0, 0, c, 0, 0, 0, d, 0, 0, 0]
-            perm = []
-            for i in range(0, len(perm_buffer), 4):
-                perm.append(perm_buffer[i])
-            
-            split_dim = self.nodes[opid].node.split_dim
-            for idx, i in enumerate(perm):
-                if i == split_dim:
-                    split_dim = idx
+        perm_tensor = self.tensors[info['inputs'][1]]
+        perm_buffer = self.buffers[perm_tensor['buffer']]['data']
+        # Process buffer structure: [a, 0, 0, 0, b, 0, 0, 0, c, 0, 0, 0, d, 0, 0, 0]
+        perm = []
+        for i in range(0, len(perm_buffer), 4):
+            perm.append(perm_buffer[i])
+        
+        split_dim = self.nodes[opid].node.split_dim
+        for idx, i in enumerate(perm):
+            if i == split_dim:
+                split_dim = idx
+                if self.nodes[opid].avoid_split:
+                    self.split_tensor_by_n_with_same_info(info['outputs'][0], output_split, split_dim)
+                else:
                     self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
-                    for child in self.nodes[opid].node.children:
-                        self.nodes[child].node.split_dim = split_dim     
-                    break
+                for child in self.nodes[opid].node.children:
+                    self.nodes[child].node.split_dim = split_dim     
+                break
 
         inputs = info['inputs']
         outputs = info['outputs']
@@ -630,18 +617,11 @@ class Splitter:
 
     def split_softmax(self, opid, output_split):
         info = self.nodes[opid].node.info
-        output_shape = self.tensors[info['outputs'][0]]['shape']
-        if self.model_type == ModelType.BERT:
-            split_dim_value = self.token_size
-            for dim, dim_value in enumerate(output_shape):
-                if dim_value == split_dim_value:
-                    self.split_tensor_by_n(info['outputs'][0], output_split, dim)
-                    break
-        else:
-            split_dim = self.nodes[opid].node.split_dim
-            self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
-            for child in self.nodes[opid].node.children:
-                self.nodes[child].node.split_dim = self.nodes[opid].node.split_dim
+
+        split_dim = self.nodes[opid].node.split_dim
+        self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
+        for child in self.nodes[opid].node.children:
+            self.nodes[child].node.split_dim = self.nodes[opid].node.split_dim
 
         inputs = info['inputs']
         outputs = info['outputs']
@@ -665,25 +645,30 @@ class Splitter:
         info = self.nodes[opid].node.info
         inputs = info['inputs']
         outputs = info['outputs']
-        output_shape = self.tensors[outputs[0]]['shape']
 
+        # Some case: <1, 128, 32> -> split_dim = 1 -> <128, 16> break our split_dim tracking
+        input_shape = self.tensors[inputs[1]]['shape']
+        output_shape = self.tensors[outputs[0]]['shape']
+        split_dim_value = input_shape[self.nodes[opid].node.split_dim]
+        find_split_dim = False
+        for i in range(len(output_shape)):
+            if output_shape[i] == split_dim_value:
+                self.nodes[opid].node.split_dim = i
+                find_split_dim = True
+                break
+        if not find_split_dim:
+            raise "Can't split the dim which is split op's split axis"
+
+        split_dim = self.nodes[opid].node.split_dim
         # split have multi outputs, each output need to be split
         num_splits = info['builtin_options']['num_splits']
         for i in range(num_splits):
-            if self.model_type == ModelType.BERT:
-                split_dim_value = self.token_size
-                for dim, dim_value in enumerate(output_shape):
-                    if dim_value == split_dim_value:
-                        if self.nodes[opid].avoid_split:
-                            self.split_tensor_by_n_with_same_info(info['outputs'][i], output_split, dim)
-                        else:
-                            self.split_tensor_by_n(info['outputs'][i], output_split, dim)
-                        break
+            if self.nodes[opid].avoid_split:
+                self.split_tensor_by_n_with_same_info(info['outputs'][i], output_split, split_dim)
             else:
-                split_dim = self.nodes[opid].node.split_dim
                 self.split_tensor_by_n(info['outputs'][i], output_split, split_dim)
-                for child in self.nodes[opid].node.children:
-                    self.nodes[child].node.split_dim = self.nodes[opid].node.split_dim
+        for child in self.nodes[opid].node.children:
+            self.nodes[child].node.split_dim = self.nodes[opid].node.split_dim
 
         if len(inputs) != 2:
             raise "wrong input number"
@@ -736,19 +721,11 @@ class Splitter:
 
     def split_slice(self, opid, output_split):
         info = self.nodes[opid].node.info
-        output_shape = self.tensors[info['outputs'][0]]['shape']
-        if self.model_type == ModelType.BERT:
-            split_dim_value = self.token_size
-            for dim, dim_value in enumerate(output_shape):
-                if dim_value == split_dim_value:
-                    split_dim = dim
-                    self.split_tensor_by_n(info['outputs'][0], output_split, dim)
-                    break
-        else:
-            split_dim = self.nodes[opid].node.split_dim
-            self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
-            for child in self.nodes[opid].node.children:
-                self.nodes[child].node.split_dim = self.nodes[opid].node.split_dim
+
+        split_dim = self.nodes[opid].node.split_dim
+        self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
+        for child in self.nodes[opid].node.children:
+            self.nodes[child].node.split_dim = self.nodes[opid].node.split_dim
 
         inputs = info['inputs']
         outputs = info['outputs']
@@ -899,6 +876,7 @@ class Splitter:
 
     def split_dwconv(self, opid, input_split, output_split):
         info = self.nodes[opid].node.info
+        
         split_dim = self.nodes[opid].node.split_dim
         self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
         for child in self.nodes[opid].node.children:
@@ -991,9 +969,14 @@ class Splitter:
         if(self.split_tensor_table.get(inputs[1]) == None):
             need_split_nxn = False
 
-        split_dim = self.nodes[opid].node.split_dim
-        output_shape = self.tensors[info['outputs'][0]]['shape']
         if self.model_type == ModelType.BERT:
+            # Handle bert's split_dim is very annoying (input & weight may have diff shape -> break our split_dim tracking), use special case to handle
+            output_shape = self.tensors[info['outputs'][0]]['shape']
+            for i in range(len(output_shape)):
+                if output_shape[i] > 1:
+                    self.nodes[opid].node.split_dim = i
+                    split_dim = i
+                    break
             # Since QK and V's GEMM will take V's token dimension as product dimension, which should not be splitted
             # So we perform split_tensor_by_n_with_same_info to keep the size of the splitted tensor
             output_name = self.tensors[info['outputs'][0]]['name']
@@ -1002,28 +985,24 @@ class Splitter:
             if 'value' in output_name:
                 is_value_fc = True
                 self.set_flow_with_avoid_split(opid)
-            
-            split_dim_value = self.token_size
-            for dim, dim_value in enumerate(output_shape):
-                if dim_value == split_dim_value:
-                    if is_value_fc:
-                        self.split_tensor_by_n_with_same_info(info['outputs'][0], output_split, dim)
-                    # Encount the QKV's FC, only split the QK part
-                    elif self.nodes[opid].avoid_split:
-                        self.split_tensor_by_n(info['outputs'][0], output_split, dim)
-                    elif need_split_nxn:
-                        self.split_tensor_by_nxn(info['outputs'][0], output_split, dim, dim + 1)
-                    else:
-                        self.split_tensor_by_n(info['outputs'][0], output_split, dim)
-                    break
+            if is_value_fc:
+                self.split_tensor_by_n_with_same_info(info['outputs'][0], output_split, split_dim)
+            # Encount the QKV's FC, only split the QK part
+            elif self.nodes[opid].avoid_split:
+                self.split_tensor_by_n_with_same_info(info['outputs'][0], output_split, split_dim)
+            elif need_split_nxn:
+                self.split_tensor_by_nxn(info['outputs'][0], output_split, split_dim, split_dim + 1)
+            else:
+                self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
         else:
+            split_dim = self.nodes[opid].node.split_dim
             is_value_fc = False
             if need_split_nxn:
                 self.split_tensor_by_nxn(info['outputs'][0], output_split, split_dim, split_dim + 1)
             else:
                 self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
-            for child in self.nodes[opid].node.children:
-                self.nodes[child].node.split_dim = self.nodes[opid].node.split_dim
+        for child in self.nodes[opid].node.children:
+            self.nodes[child].node.split_dim = split_dim
 
         if len(inputs) != 3:
             raise "wrong input number"
@@ -1092,6 +1071,7 @@ class Splitter:
 
     def split_max_pool(self, opid, input_split, output_split):
         info = self.nodes[opid].node.info
+
         split_dim = self.nodes[opid].node.split_dim
         self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
         for child in self.nodes[opid].node.children:
@@ -1170,23 +1150,14 @@ class Splitter:
 
     def split_add(self, opid, output_split):
         info = self.nodes[opid].node.info
-        split_dim = -1
-        output_shape = self.tensors[info['outputs'][0]]['shape']
-        if self.model_type == ModelType.BERT:
-            split_dim_value = self.token_size
-            for dim, dim_value in enumerate(output_shape):
-                if dim_value == split_dim_value:
-                    split_dim = dim
-                    if self.nodes[opid].avoid_split:
-                        self.split_tensor_by_n_with_same_info(info['outputs'][0], output_split, dim)
-                    else:
-                        self.split_tensor_by_n(info['outputs'][0], output_split, dim)
-                    break
+
+        split_dim = self.nodes[opid].node.split_dim
+        if self.nodes[opid].avoid_split:
+            self.split_tensor_by_n_with_same_info(info['outputs'][0], output_split, split_dim)
         else:
-            split_dim = self.nodes[opid].node.split_dim
             self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
-            for child in self.nodes[opid].node.children:
-                self.nodes[child].node.split_dim = self.nodes[opid].node.split_dim
+        for child in self.nodes[opid].node.children:
+            self.nodes[child].node.split_dim = self.nodes[opid].node.split_dim
         
         # Add with constant value, constant value may also need to be splitted
         have_constant = False
@@ -1262,20 +1233,14 @@ class Splitter:
 
     def split_sub(self, opid, output_split):
         info = self.nodes[opid].node.info
-        split_dim = -1
-        output_shape = self.tensors[info['outputs'][0]]['shape']
-        if self.model_type == ModelType.BERT:
-            split_dim_value = self.token_size
-            for dim, dim_value in enumerate(output_shape):
-                if dim_value == split_dim_value:
-                    self.split_tensor_by_n(info['outputs'][0], output_split, dim)
-                    split_dim = dim
-                    break
+
+        split_dim = self.nodes[opid].node.split_dim
+        if self.nodes[opid].avoid_split:
+            self.split_tensor_by_n_with_same_info(info['outputs'][0], output_split, split_dim)
         else:
-            split_dim = self.nodes[opid].node.split_dim
             self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
-            for child in self.nodes[opid].node.children:
-                self.nodes[child].node.split_dim = self.nodes[opid].node.split_dim
+        for child in self.nodes[opid].node.children:
+            self.nodes[child].node.split_dim = self.nodes[opid].node.split_dim
 
         # Sub with constant value, constant value may also need to be splitted
         have_constant = False
@@ -1351,20 +1316,14 @@ class Splitter:
 
     def split_mul(self, opid, output_split):
         info = self.nodes[opid].node.info
-        split_dim = -1
-        output_shape = self.tensors[info['outputs'][0]]['shape']
-        if self.model_type == ModelType.BERT:
-            split_dim_value = self.token_size
-            for dim, dim_value in enumerate(output_shape):
-                if dim_value == split_dim_value:
-                    self.split_tensor_by_n(info['outputs'][0], output_split, dim)
-                    split_dim = dim
-                    break
+
+        split_dim = self.nodes[opid].node.split_dim
+        if self.nodes[opid].avoid_split:
+            self.split_tensor_by_n_with_same_info(info['outputs'][0], output_split, split_dim)
         else:
-            split_dim = self.nodes[opid].node.split_dim
             self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
-            for child in self.nodes[opid].node.children:
-                self.nodes[child].node.split_dim = self.nodes[opid].node.split_dim
+        for child in self.nodes[opid].node.children:
+            self.nodes[child].node.split_dim = self.nodes[opid].node.split_dim
         
         # Mul with constant value, constant value may also need to be splitted
         have_constant = False
@@ -1440,20 +1399,14 @@ class Splitter:
 
     def split_div(self, opid, output_split):
         info = self.nodes[opid].node.info
-        split_dim = -1
-        output_shape = self.tensors[info['outputs'][0]]['shape']
-        if self.model_type == ModelType.BERT:
-            split_dim_value = self.token_size
-            for dim, dim_value in enumerate(output_shape):
-                if dim_value == split_dim_value:
-                    self.split_tensor_by_n(info['outputs'][0], output_split, dim)
-                    split_dim = dim
-                    break
+
+        split_dim = self.nodes[opid].node.split_dim
+        if self.nodes[opid].avoid_split:
+            self.split_tensor_by_n_with_same_info(info['outputs'][0], output_split, split_dim)
         else:
-            split_dim = self.nodes[opid].node.split_dim
             self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
-            for child in self.nodes[opid].node.children:
-                self.nodes[child].node.split_dim = self.nodes[opid].node.split_dim
+        for child in self.nodes[opid].node.children:
+            self.nodes[child].node.split_dim = self.nodes[opid].node.split_dim
         
         # Mul with constant value, constant value may also need to be splitted
         have_constant = False
@@ -1529,6 +1482,7 @@ class Splitter:
 
     def split_logistic(self, opid, output_split):
         info = self.nodes[opid].node.info
+
         split_dim = self.nodes[opid].node.split_dim
         self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
         for child in self.nodes[opid].node.children:
@@ -1554,19 +1508,11 @@ class Splitter:
 
     def split_mean(self, opid, output_split):
         info = self.nodes[opid].node.info
-        output_shape = self.tensors[info['outputs'][0]]['shape']
-        if self.model_type == ModelType.BERT:
-            split_dim_value = self.token_size
-            for dim, dim_value in enumerate(output_shape):
-                if dim_value == split_dim_value:
-                    split_dim = dim
-                    self.split_tensor_by_n(info['outputs'][0], output_split, dim)
-                    break
-        else:
-            split_dim = self.nodes[opid].node.split_dim
-            self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
-            for child in self.nodes[opid].node.children:
-                self.nodes[child].node.split_dim = self.nodes[opid].node.split_dim
+
+        split_dim = self.nodes[opid].node.split_dim
+        self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
+        for child in self.nodes[opid].node.children:
+            self.nodes[child].node.split_dim = self.nodes[opid].node.split_dim
 
         inputs = info['inputs']
         outputs = info['outputs']
@@ -1614,18 +1560,11 @@ class Splitter:
 
     def split_squared_difference(self, opid, output_split):
         info = self.nodes[opid].node.info
-        output_shape = self.tensors[info['outputs'][0]]['shape']
-        if self.model_type == ModelType.BERT:
-            split_dim_value = self.token_size
-            for dim, dim_value in enumerate(output_shape):
-                if dim_value == split_dim_value:
-                    self.split_tensor_by_n(info['outputs'][0], output_split, dim)
-                    break
-        else:
-            split_dim = self.nodes[opid].node.split_dim
-            self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
-            for child in self.nodes[opid].node.children:
-                self.nodes[child].node.split_dim = self.nodes[opid].node.split_dim
+
+        split_dim = self.nodes[opid].node.split_dim
+        self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
+        for child in self.nodes[opid].node.children:
+            self.nodes[child].node.split_dim = self.nodes[opid].node.split_dim
 
         inputs = info['inputs']
         outputs = info['outputs']
@@ -1650,18 +1589,11 @@ class Splitter:
 
     def split_rsqrt(self, opid, output_split):
         info = self.nodes[opid].node.info
-        output_shape = self.tensors[info['outputs'][0]]['shape']
-        if self.model_type == ModelType.BERT:
-            split_dim_value = self.token_size
-            for dim, dim_value in enumerate(output_shape):
-                if dim_value == split_dim_value:
-                    self.split_tensor_by_n(info['outputs'][0], output_split, dim)
-                    break
-        else:
-            split_dim = self.nodes[opid].node.split_dim
-            self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
-            for child in self.nodes[opid].node.children:
-                self.nodes[child].node.split_dim = self.nodes[opid].node.split_dim
+
+        split_dim = self.nodes[opid].node.split_dim
+        self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
+        for child in self.nodes[opid].node.children:
+            self.nodes[child].node.split_dim = self.nodes[opid].node.split_dim
 
         inputs = info['inputs']
         outputs = info['outputs']
@@ -1683,18 +1615,11 @@ class Splitter:
 
     def split_gelu(self, opid, output_split):
         info = self.nodes[opid].node.info
-        output_shape = self.tensors[info['outputs'][0]]['shape']
-        if self.model_type == ModelType.BERT:
-            split_dim_value = self.token_size
-            for dim, dim_value in enumerate(output_shape):
-                if dim_value == split_dim_value:
-                    self.split_tensor_by_n(info['outputs'][0], output_split, dim)
-                    break
-        else:
-            split_dim = self.nodes[opid].node.split_dim
-            self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
-            for child in self.nodes[opid].node.children:
-                self.nodes[child].node.split_dim = self.nodes[opid].node.split_dim
+
+        split_dim = self.nodes[opid].node.split_dim
+        self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
+        for child in self.nodes[opid].node.children:
+            self.nodes[child].node.split_dim = self.nodes[opid].node.split_dim
 
         inputs = info['inputs']
         outputs = info['outputs']
@@ -1716,18 +1641,11 @@ class Splitter:
 
     def split_pow(self, opid, output_split):
         info = self.nodes[opid].node.info
-        output_shape = self.tensors[info['outputs'][0]]['shape']
-        if self.model_type == ModelType.BERT:
-            split_dim_value = self.token_size
-            for dim, dim_value in enumerate(output_shape):
-                if dim_value == split_dim_value:
-                    self.split_tensor_by_n(info['outputs'][0], output_split, dim)
-                    break
-        else:
-            split_dim = self.nodes[opid].node.split_dim
-            self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
-            for child in self.nodes[opid].node.children:
-                self.nodes[child].node.split_dim = self.nodes[opid].node.split_dim
+        
+        split_dim = self.nodes[opid].node.split_dim
+        self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
+        for child in self.nodes[opid].node.children:
+            self.nodes[child].node.split_dim = self.nodes[opid].node.split_dim
 
         inputs = info['inputs']
         outputs = info['outputs']
@@ -1749,18 +1667,11 @@ class Splitter:
 
     def split_tanh(self, opid, output_split):
         info = self.nodes[opid].node.info
-        output_shape = self.tensors[info['outputs'][0]]['shape']
-        if self.model_type == ModelType.BERT:
-            split_dim_value = self.token_size
-            for dim, dim_value in enumerate(output_shape):
-                if dim_value == split_dim_value:
-                    self.split_tensor_by_n(info['outputs'][0], output_split, dim)
-                    break
-        else:
-            split_dim = self.nodes[opid].node.split_dim
-            self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
-            for child in self.nodes[opid].node.children:
-                self.nodes[child].node.split_dim = self.nodes[opid].node.split_dim
+        
+        split_dim = self.nodes[opid].node.split_dim
+        self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
+        for child in self.nodes[opid].node.children:
+            self.nodes[child].node.split_dim = self.nodes[opid].node.split_dim
 
         inputs = info['inputs']
         outputs = info['outputs']
@@ -1782,18 +1693,11 @@ class Splitter:
 
     def split_quantize(self, opid, output_split):
         info = self.nodes[opid].node.info
-        output_shape = self.tensors[info['outputs'][0]]['shape']
-        if self.model_type == ModelType.BERT:
-            split_dim_value = self.token_size
-            for dim, dim_value in enumerate(output_shape):
-                if dim_value == split_dim_value:
-                    self.split_tensor_by_n(info['outputs'][0], output_split, dim)
-                    break
-        else:
-            split_dim = self.nodes[opid].node.split_dim
-            self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
-            for child in self.nodes[opid].node.children:
-                self.nodes[child].node.split_dim = self.nodes[opid].node.split_dim
+        
+        split_dim = self.nodes[opid].node.split_dim
+        self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
+        for child in self.nodes[opid].node.children:
+            self.nodes[child].node.split_dim = self.nodes[opid].node.split_dim
 
         inputs = info['inputs']
         outputs = info['outputs']
@@ -1815,19 +1719,11 @@ class Splitter:
 
     def split_dequantize(self, opid, output_split):
         info = self.nodes[opid].node.info
-        output_shape = self.tensors[info['outputs'][0]]['shape']
-
-        if self.model_type == ModelType.BERT:
-            split_dim_value = self.token_size
-            for dim, dim_value in enumerate(output_shape):
-                if dim_value == split_dim_value:
-                    self.split_tensor_by_n(info['outputs'][0], output_split, dim)
-                    break
-        else:
-            split_dim = self.nodes[opid].node.split_dim
-            self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
-            for child in self.nodes[opid].node.children:
-                self.nodes[child].node.split_dim = self.nodes[opid].node.split_dim
+        
+        split_dim = self.nodes[opid].node.split_dim
+        self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
+        for child in self.nodes[opid].node.children:
+            self.nodes[child].node.split_dim = self.nodes[opid].node.split_dim
 
         inputs = info['inputs']
         outputs = info['outputs']
@@ -1850,6 +1746,7 @@ class Splitter:
     # Need to consider whether it really can be splitted
     def split_resize_nearest_neighbor(self, opid, output_split):
         info = self.nodes[opid].node.info
+
         split_dim = self.nodes[opid].node.split_dim
         self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
         for child in self.nodes[opid].node.children:
@@ -1909,6 +1806,7 @@ class Splitter:
     # For now, assume concat's input only have two tensors
     def split_concatenation(self, opid, output_split):
         info = self.nodes[opid].node.info
+
         split_dim = self.nodes[opid].node.split_dim
         self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
         for child in self.nodes[opid].node.children:
@@ -1934,19 +1832,12 @@ class Splitter:
 
     def split_pack(self, opid, output_split):
         info = self.nodes[opid].node.info
-        output_shape = self.tensors[info['outputs'][0]]['shape']
-        if self.model_type == ModelType.BERT:
-            split_dim_value = self.token_size
-            for dim, dim_value in enumerate(output_shape):
-                if dim_value == split_dim_value:
-                    self.split_tensor_by_n(info['outputs'][0], output_split, dim)
-                    break
-        else:
-            split_dim = self.nodes[opid].node.split_dim
-            split_dim += 1
-            self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
-            for child in self.nodes[opid].node.children:
-                self.nodes[child].node.split_dim = split_dim
+
+        split_dim = self.nodes[opid].node.split_dim
+        split_dim += 1
+        self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
+        for child in self.nodes[opid].node.children:
+            self.nodes[child].node.split_dim = split_dim
 
         inputs = info['inputs']
         outputs = info['outputs']
@@ -2067,14 +1958,8 @@ class Splitter:
         immediate_tensor_id = len(self.tensors) - 1
         split_dim = self.nodes[opid].node.split_dim
         self.split_tensor_by_n(immediate_tensor_id, output_split, split_dim)
-        # If the op following the split is a PACK, then the split_dim should be increased by 1
-        opcode_index = next_opid_info.get("opcode_index")
-        opcode_type = self.opcodes[opcode_index].get("builtin_code")
-        next_split_dim = split_dim
-        if opcode_type == 'PACK':
-            next_split_dim += 1
         for child in self.nodes[opid].node.children:
-            self.nodes[child].node.split_dim = next_split_dim
+            self.nodes[child].node.split_dim = split_dim
         
         axis_tensor = {
             "shape": [],
