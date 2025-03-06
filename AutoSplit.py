@@ -1144,7 +1144,7 @@ class Splitter:
                 next_opid = self.nodes[opid].node.children[0]
                 for i, input in enumerate(self.nodes[next_opid].node.info['inputs']):
                     if self.tensors[input]['name'] == output_name:
-                        self.concat_than_split(next_opid, output_split, input_idx = i)
+                        self.concat_than_split(opid, next_opid, output_split, input_idx = i)
                         break
             else:
                 for a, b in zip(self.split_tensor_table[inputs[0]],
@@ -2110,18 +2110,15 @@ class Splitter:
             self.new_operators.append(new_op_info)
 
     # Parent op(multi output) -> concat -> split -> child op
-    def concat_than_split(self, start_opid, output_split, input_idx):
-        # child's info
-        info = self.nodes[start_opid].node.info
+    def concat_than_split(self, opid, next_opid, output_split, input_idx):
+        opid_info = self.nodes[opid].node.info
+        next_opid_info = self.nodes[next_opid].node.info
 
         # First, create a concate node
-        immediate_tensor = copy.deepcopy(self.tensors[info['inputs'][input_idx]])
-        self.tensors.append(immediate_tensor)
-        immediate_tensor_id = len(self.tensors) - 1
         concate_op_info = {
             "opcode_index": self.get_opcode_index(2),
-            "inputs": copy.deepcopy(self.split_tensor_table[info['inputs'][input_idx]]),
-            "outputs": [immediate_tensor_id],
+            "inputs": copy.deepcopy(self.split_tensor_table[opid_info['outputs'][0]]),
+            "outputs": [opid_info['outputs'][0]],
             "builtin_options_type": "ConcatenationOptions",
             "builtin_options": {
                 'axis': 1
@@ -2130,16 +2127,20 @@ class Splitter:
         self.new_operators.append(concate_op_info)
         
         # Second, create a split node
-        inputs = immediate_tensor_id
-        split_dim = self.nodes[start_opid].node.split_dim
-        # If the op following the split is a PACK, then the split_dim should be decreased by 1
-        opcode_index = info.get("opcode_index")
+        # immediate_tensor is prepare for splitting then become split op's output
+        immediate_tensor = copy.deepcopy(self.tensors[opid_info['outputs'][0]])
+        self.tensors.append(immediate_tensor)
+        immediate_tensor_id = len(self.tensors) - 1
+        split_dim = self.nodes[opid].node.split_dim
+        self.split_tensor_by_n(immediate_tensor_id, output_split, split_dim)
+        # If the op following the split is a PACK, then the split_dim should be increased by 1
+        opcode_index = next_opid_info.get("opcode_index")
         opcode_type = self.opcodes[opcode_index].get("builtin_code")
+        next_split_dim = split_dim
         if opcode_type == 'PACK':
-            split_dim -= 1
-        self.split_tensor_by_n(inputs, output_split, split_dim)
-        for child in self.nodes[start_opid].node.children:
-            self.nodes[child].node.split_dim = split_dim
+            next_split_dim += 1
+        for child in self.nodes[opid].node.children:
+            self.nodes[child].node.split_dim = next_split_dim
         
         axis_tensor = {
             "shape": [],
@@ -2147,7 +2148,7 @@ class Splitter:
             "buffer": len(self.buffers),
             "name": self.tensors[immediate_tensor_id]['name']+"_split_axis_tensor",
             "quantization": {},
-          }
+        }
         axis_buffer = {
             "data": self.int_list_to_byte_list([1])
         }
@@ -2157,7 +2158,7 @@ class Splitter:
         outputs = copy.deepcopy(self.split_tensor_table[immediate_tensor_id])
         split_op_info = {
             "opcode_index": self.get_opcode_index(49),
-            "inputs": [immediate_tensor_id],
+            "inputs": [opid_info['outputs'][0]],
             "outputs": outputs,
             "builtin_options_type": "SplitOptions",
             "builtin_options": {
@@ -2167,7 +2168,7 @@ class Splitter:
         self.new_operators.append(split_op_info)
 
         # Final, update start_op's input
-        info['inputs'][input_idx] = immediate_tensor_id
+        next_opid_info['inputs'][input_idx] = immediate_tensor_id
 
     def get_opcode_index(self, deprecated_builtin_code):
         for i, code in enumerate(self.opcodes):
