@@ -180,7 +180,8 @@ if args.verbose_performance:
 #######################################################
 
 # Tensor allocation in DRAM (SRAM allocation is implemented above)
-# mem_allocator.memory_allocate(use_sram = True)
+mem_allocator.dram_allocate(weights_reuse_need_allocate_tensors)
+allocated_tensors = mem_allocator.allocated_tensors
 
 # TODO: CodeGen
 # CodeGen

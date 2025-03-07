@@ -16,11 +16,12 @@ class tensor_memory:
     def __init__(self, tensor_id):
         self.tensor_id = tensor_id
         self.size = -1
-        self.memory_storage = Mem_area.DRAM
-        self.live_range = defaultdict(dict)
+        self.live_range = defaultdict(int)
         # May different to tensor_metadata's start_address and end_address, because the storage space of each tensor metadata is different
-        self.start_addr = -1
-        self.end_addr = -1
+        self.sram_start_addr = -1
+        self.sram_end_addr = -1
+        self.dram_start_addr = -1
+        self.dram_end_addr = -1
         self.tensors = []
 
 class tensor_metadata:
@@ -29,8 +30,8 @@ class tensor_metadata:
         self.pid = pid
         self.cid = cid
         self.in_DRAM = True
-        self.start_address = -1
-        self.end_address = -1
+        self.sram_start_address = -1
+        self.sram_end_address = -1
 
 class memory_allocator:
     def __init__(self, graph):
@@ -114,73 +115,52 @@ class memory_allocator:
         size = element * (elem_size // 8)
         return size
 
-    def memory_allocate(self, use_sram = False):
-        # Compute tensor's live range
-        self.compute_tensor_live_range()
-            
-        # Perform DRAM's mem allocation
-        self.dram_allocate()
-        # Perform SRAM's mem allocation
-        if use_sram:
-            # TODO: SRAM's mem allocation
-            self.sram_allocate()
-        return self.allocated_tensors
+    def dram_allocate(self, tensor_info):
+        # Step 1: Fetch those tensors that need to be allocated in DRAM
+        need_allocated_tensor_ids = []
+        for tensor_id in tensor_info:
+            for tensor_metadata in tensor_info[tensor_id].tensors:
+                if tensor_metadata.in_DRAM:
+                    need_allocated_tensor_ids.append(tensor_id)
+                    break
+        # Step 2: Greedy by size
+        self.greedy_by_size(tensor_info, need_allocated_tensor_ids)
 
-    def compute_tensor_live_range(self):
-        operators = self.graph.operators
+    def greedy_by_size(self, tensor_info, need_allocated_tensor_ids) -> list:
+        # Step 1: Initialize memory allocation
+        total_used_size = 0
+        ordered_allocated_tensors = []
 
-        # Record each input/output tensor's first and last time used
-        for opid, op_info in enumerate(operators):
-            for tensor_id in op_info['inputs'] + op_info['outputs']:
-                # Update this tensor's first time used
-                if opid < self.need_allocate_tensors[tensor_id].live_range.get('first_time_used', len(operators)):
-                    self.need_allocate_tensors[tensor_id].live_range['first_time_used'] = opid
-                # Update this tensor's last time used
-                if opid > self.need_allocate_tensors[tensor_id].live_range.get('last_time_used', -1):
-                    self.need_allocate_tensors[tensor_id].live_range['last_time_used'] = opid
-
-    def dram_allocate(self):
-        self.greedy_by_size()
-
-    def greedy_by_size(self) -> list:
-        # Step 1: Sort tensors by size
-        tensor_storage_in_DRAM = []
-        for tensor_id in self.need_allocate_tensor_ids:
-            if self.need_allocate_tensors[tensor_id].memory_storage == Mem_area.DRAM:
-                tensor_storage_in_DRAM.append(self.need_allocate_tensors[tensor_id])
-        sorted_tensor = sorted(tensor_storage_in_DRAM, key=lambda x: x.size, reverse=True)
-
-        # Step 2: Initialize memory allocation
-        total_consumed_size = 0
-        size_non_inc_allocated_tensors = []
-        
-        # Step 3: Allocate memory (greedy by size)
-        for tensor in sorted_tensor:
+        # Step 2: Greedy by size
+        # Step 2.1: Sort tensors by size
+        sorted_tensor_ids = sorted(need_allocated_tensor_ids, key=lambda x: tensor_info[x].size, reverse=True)
+        # Step 2.2: Allocate memory
+        for tensor_id in sorted_tensor_ids:
             prev_start = 0
             best_start = None
             smallest_gap = ArchitectureFeatures.DRAM_MAX_SIZE
 
-            for allocated_tensor in size_non_inc_allocated_tensors:
-                max_first_op = max(tensor.live_range['first_time_used'], allocated_tensor.live_range['first_time_used'])
-                min_last_op = min(tensor.live_range['last_time_used'], allocated_tensor.live_range['last_time_used'])
+            for allocated_tensor in ordered_allocated_tensors:
+                max_first_op = max(tensor_info[tensor_id].live_range['first_time_used'], tensor_info[allocated_tensor].live_range['first_time_used'])
+                min_last_op = min(tensor_info[tensor_id].live_range['last_time_used'], tensor_info[allocated_tensor].live_range['last_time_used'])
+                # Live range has overlap (try to find the gap between this tensor's start address & previous start)
                 if max_first_op <= min_last_op:
-                    gap = allocated_tensor.start_address - prev_start
-                    if gap >= tensor.size and gap < smallest_gap:
+                    gap = allocated_tensor.dram_start_addr - prev_start
+                    if gap >= tensor_info[tensor_id].size and gap < smallest_gap:
                         smallest_gap = gap
                         best_start = prev_start
-                    prev_start = max(prev_start, allocated_tensor.end_address)
-            if best_start is None:
-                best_start = prev_start
-            tensor.start_address = best_start
-            tensor.end_address = best_start + tensor.size
-            total_consumed_size = max(total_consumed_size, tensor.end_address)
-            
-            size_non_inc_allocated_tensors.append(tensor)
-            self.allocated_tensors[tensor.tensor_id] = tensor
-    
-    def sram_allocate(self):
-        # Step 1:
-        for tensor_id in self.need_allocate_tensor_ids:
-            if self.need_allocate_tensors[tensor_id].memory_storage == Mem_area.SRAM:
-                tensor = self.need_allocate_tensors[tensor_id]
-                self.allocated_tensors[tensor.tensor_id] = tensor
+                    prev_start = max(prev_start, tensor_info[allocated_tensor].dram_end_addr)
+                # If no large enough gap can reuse or this tensor's live range overlap with all the allocated tensors,
+                # prev_start will start from the highest end address
+                if best_start is None:
+                    best_start = prev_start
+                tensor_info[tensor_id].dram_start_addr = best_start
+                tensor_info[tensor_id].dram_end_addr = best_start + tensor_info[tensor_id].size
+                total_used_size = max(total_used_size, tensor_info[tensor_id].dram_end_addr)
+                # Check total used size whether over the DRAM's size
+                if total_used_size > ArchitectureFeatures.DRAM_MAX_SIZE:
+                    raise ValueError("The total used size exceeds the DRAM's max size")
+                ordered_allocated_tensors.append(tensor_id)
+                # Sort the allocated tensors by start address(ascending) and if the start address is the same, sort by size(descending)
+                ordered_allocated_tensors = sorted(ordered_allocated_tensors, key=lambda t: (tensor_info[t].dram_start_addr, -tensor_info[t].size))
+            self.allocated_tensors[tensor_id] = tensor_info[tensor_id]

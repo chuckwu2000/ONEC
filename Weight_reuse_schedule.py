@@ -197,7 +197,7 @@ class Weight_reuse_scheduler:
         def virtual_tensor_allocate(self, opids, tensor_info):
             ops = self.graph.ops
             # Step 1: Update tensor's live range
-            need_allocate_tensors = set()
+            need_allocate_tensor_ids = set()
             for opid in opids:
                 for tensor_id in ops[opid].info['inputs'] + ops[opid].info['outputs']:
                     # Update the tensor's first time used
@@ -206,9 +206,9 @@ class Weight_reuse_scheduler:
                     # Update the tensor's last time used
                     if ops[opid].schedule_order > tensor_info[tensor_id].live_range.get('last_time_used', -1):
                         tensor_info[tensor_id].live_range['last_time_used'] = ops[opid].schedule_order
-                    need_allocate_tensors.add(tensor_id)
-            if -1 in need_allocate_tensors:
-                need_allocate_tensors.remove(-1)
+                    need_allocate_tensor_ids.add(tensor_id)
+            if -1 in need_allocate_tensor_ids:
+                need_allocate_tensor_ids.remove(-1)
 
             # Step 2: Initialize memory allocation
             total_used_size = 0
@@ -216,9 +216,9 @@ class Weight_reuse_scheduler:
 
             # Step 3: Greedy by size
             # Step 3.1: Sort tensors by size
-            sorted_tensors = sorted(need_allocate_tensors, key=lambda x: tensor_info[x].size, reverse=True)
+            sorted_tensor_ids = sorted(need_allocate_tensor_ids, key=lambda x: tensor_info[x].size, reverse=True)
             # Step 3.2: Allocate memory
-            for tensor_id in sorted_tensors:
+            for tensor_id in sorted_tensor_ids:
                 prev_start = 0
                 best_start = None
                 smallest_gap = ArchitectureFeatures.SRAM_MAX_SIZE
@@ -228,25 +228,25 @@ class Weight_reuse_scheduler:
                     min_last_op = min(tensor_info[tensor_id].live_range['last_time_used'], tensor_info[allocated_tensor].live_range['last_time_used'])
                     # Live range has overlap (try to find the gap between this tensor's start address & previous start)
                     if max_first_op <= min_last_op:
-                        gap = tensor_info[allocated_tensor].start_addr - prev_start
+                        gap = tensor_info[allocated_tensor].sram_start_addr - prev_start
                         if gap >= tensor_info[tensor_id].size and gap < smallest_gap:
                             smallest_gap = gap
                             best_start = prev_start
-                        prev_start = max(prev_start, tensor_info[allocated_tensor].end_addr)
+                        prev_start = max(prev_start, tensor_info[allocated_tensor].sram_end_addr)
                 # If no large enough gap can reuse or this tensor's live range overlap with all the allocated tensors,
                 # prev_start will start from the highest end address
                 if best_start is None:
                     best_start = prev_start
-                tensor_info[tensor_id].start_addr = best_start
-                tensor_info[tensor_id].end_addr = best_start + tensor_info[tensor_id].size
-                total_used_size = max(total_used_size, tensor_info[tensor_id].end_addr)
+                tensor_info[tensor_id].sram_start_addr = best_start
+                tensor_info[tensor_id].sram_end_addr = best_start + tensor_info[tensor_id].size
+                total_used_size = max(total_used_size, tensor_info[tensor_id].sram_end_addr)
                 # Check total used size whether over the SRAM's size
                 self.max_use = max(self.max_use, total_used_size)
                 if total_used_size > ArchitectureFeatures.SRAM_MAX_SIZE:
                     return True
                 ordered_allocated_tensors.append(tensor_id)
                 # Sort the allocated tensors by start address(ascending) and if the start address is the same, sort by size(descending)
-                ordered_allocated_tensors = sorted(ordered_allocated_tensors, key=lambda t: (tensor_info[t].start_addr, -tensor_info[t].size))
+                ordered_allocated_tensors = sorted(ordered_allocated_tensors, key=lambda t: (tensor_info[t].sram_start_addr, -tensor_info[t].size))
             # The tensors of this block can be greedy allocated without overuse the SRAM
             # Update the tensor metadata (set the SRAM address of the tensors in the block)
             self.update_tensor_metadata(tensor_info, opids)
@@ -256,5 +256,5 @@ class Weight_reuse_scheduler:
             for tensor_id in tensor_info:
                 for tensor_metadata in tensor_info[tensor_id].tensors:
                     if tensor_metadata.cid in opids or tensor_metadata.pid in opids:
-                        tensor_metadata.start_address = tensor_info[tensor_id].start_addr
-                        tensor_metadata.end_address = tensor_info[tensor_id].end_addr
+                        tensor_metadata.sram_start_address = tensor_info[tensor_id].sram_start_addr
+                        tensor_metadata.sram_end_address = tensor_info[tensor_id].sram_end_addr
