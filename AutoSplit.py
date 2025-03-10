@@ -270,8 +270,10 @@ class Splitter:
             np_type = np.float32
         # Convert the buffer data to numpy array
         one_dim_arr = np.frombuffer(bytes(ori_buffer_info['data']), dtype = np_type)
-        # If the buffer only contain one element, let the shape be [1]
+        # If the buffer only contain one element (may loss shape info or shape = []), let the shape be [1]
         shape = tensor_info.get("shape", [1])
+        if shape == []:
+            shape = [1]
         # Reshape to the original shape
         np_arr = one_dim_arr.reshape(shape)
 

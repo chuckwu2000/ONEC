@@ -7,7 +7,7 @@ import math
 import struct
 
 # The operation that will be fall back to CPU
-data_layout_ops = ["CONCATENATION", "SPLIT", "SPLIT_V", "TRANSPOSE", "RESIZE_NEAREST_NEIGHBOR", "PACK", "RESHAPE"]
+data_layout_ops = ["CONCATENATION", "SPLIT", "SPLIT_V", "TRANSPOSE", "RESIZE_NEAREST_NEIGHBOR", "PACK", "RESHAPE", "SLICE"]
 reduce_ops = ["REDUCE_MAX"]
 fall_back_cpu_ops = data_layout_ops + reduce_ops
 
@@ -21,12 +21,12 @@ need_bias_ops = ["CONV_2D", "DEPTHWISE_CONV_2D", "FULLY_CONNECTED"]
 
 # Element-wise main operation
 unary_elementwise_ops = ["LOGISTIC", "SOFTMAX", "RSQRT", "POW", "TANH", "GELU", "QUANTIZE", "DEQUANTIZE"]
-binary_elementwise_ops = ["ADD", "SUB", "MUL", "SQUARED_DIFFERENCE"]
+binary_elementwise_ops = ["ADD", "SUB", "MUL", "DIV", "SQUARED_DIFFERENCE"]
 elementwise_ops = unary_elementwise_ops + binary_elementwise_ops
 
 # The operation that need requantization
 need_requant_ops = ["CONV_2D", "DEPTHWISE_CONV_2D", "FULLY_CONNECTED", "BATCH_MATMUL", "LOGISTIC", "SOFTMAX", "RSQRT", "TANH", \
-                    "GELU", "ADD", "SUB", "MUL", "SQUARED_DIFFERENCE"]
+                    "GELU", "ADD", "SUB", "MUL", "DIV", "SQUARED_DIFFERENCE"]
 
 # The operation that need dequantization
 need_dequant_ops = ["LOGISTIC", "SOFTMAX", "RSQRT", "TANH", "GELU"]
@@ -204,6 +204,9 @@ class simulator:
                 cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["ADD/SUB"]
             elif op_type == "MUL":
                 cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["MUL"]
+            elif op_type == "DIV":
+                # Div(x, y) = x * 1 / y
+                cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["RECIPROCAL"] + ArchitectureFeatures.output_cycles_per_elem["MUL"]
             elif op_type == "SQUARED_DIFFERENCE":
                 # SquaredDifference(x, y) = (x - y)(x - y)
                 cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["ADD/SUB"] + ArchitectureFeatures.output_cycles_per_elem["MUL"]
