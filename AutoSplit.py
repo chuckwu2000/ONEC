@@ -509,7 +509,6 @@ class Splitter:
                 self.nodes[opid].split_id.append(split_op_id)
                 split_op_id+=1
 
-    # TODO: Figure out how to control the split_dim
     # We follow the number of split input tensor to split the output tensor
     # For now, not support the split_dim decomposed to multiple dimension
     def split_reshape(self, opid, output_split):
@@ -550,8 +549,27 @@ class Splitter:
                         break
                     tmp_idx += 1
                     tmp_value = 1
+        # Special case happen in the DistilGPT2 model
+        elif len(output_shape) == len(input_shape):
+            split_dim_val = input_shape[split_dim]
+            for idx, dim_value in enumerate(output_shape):
+                if dim_value == split_dim_val:
+                    split_dim = idx
+                    for child in self.nodes[opid].node.children:
+                        self.nodes[child].node.split_dim = split_dim
+                    break
 
-        if self.nodes[opid].avoid_split:
+        # Since QK and V's GEMM will take V's token dimension as product dimension, which should not be splitted
+        # So we perform split_tensor_by_n_with_same_info to keep the size of the splitted tensor
+        output_name = self.tensors[output]['name']
+        # Check this reshape is from V's output
+        is_value_reshape = False
+        if 'MatMul_1/reshape_b' in output_name:
+            is_value_reshape = True
+            self.set_flow_with_avoid_split(opid)
+        if is_value_reshape:
+            self.split_tensor_by_n_with_same_info(info['outputs'][0], output_split, split_dim)
+        elif self.nodes[opid].avoid_split:
             self.split_tensor_by_n_with_same_info(info['outputs'][0], output_split, split_dim)
         else:
             self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
@@ -567,14 +585,39 @@ class Splitter:
             raise "wrong output number"
         else:
             split_op_id = len(self.new_operators)
-            for a, b in zip(self.split_tensor_table[inputs[0]],
-                            self.split_tensor_table[outputs[0]]):
-                new_op_info = copy.deepcopy(info)
-                new_op_info['inputs'][0] = a
-                new_op_info['outputs'] = [b]
-                self.new_operators.append(new_op_info)
-                self.nodes[opid].split_id.append(split_op_id)
-                split_op_id+=1
+            if is_value_reshape:
+                parent_opid = self.nodes[opid].node.parents[0]
+                immediate_tensor = copy.deepcopy(self.tensors[inputs[0]])
+                self.tensors.append(immediate_tensor)
+                immediate_tensor_id = len(self.tensors) - 1
+                # Add a concate op before the reshape op
+                concate_op_info = {
+                    "opcode_index": self.get_opcode_index(2),
+                    "inputs": copy.deepcopy(self.split_tensor_table[inputs[0]]),
+                    "outputs": [immediate_tensor_id],
+                    "builtin_options_type": "ConcatenationOptions",
+                    "builtin_options": {
+                        "axis": self.nodes[parent_opid].node.split_dim
+                    }
+                }
+                self.new_operators.append(concate_op_info)
+            
+                for a in self.split_tensor_table[outputs[0]]:
+                    new_op_info = copy.deepcopy(info)
+                    new_op_info['inputs'][0] = immediate_tensor_id
+                    new_op_info['outputs'] = [a]
+                    self.new_operators.append(new_op_info)
+                    self.nodes[opid].split_id.append(split_op_id)
+                    split_op_id += 1
+            else:
+                for a, b in zip(self.split_tensor_table[inputs[0]],
+                                self.split_tensor_table[outputs[0]]):
+                    new_op_info = copy.deepcopy(info)
+                    new_op_info['inputs'][0] = a
+                    new_op_info['outputs'] = [b]
+                    self.new_operators.append(new_op_info)
+                    self.nodes[opid].split_id.append(split_op_id)
+                    split_op_id += 1
 
     def split_transpose(self, opid, output_split):
         info = self.nodes[opid].node.info
@@ -723,7 +766,10 @@ class Splitter:
         info = self.nodes[opid].node.info
 
         split_dim = self.nodes[opid].node.split_dim
-        self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
+        if self.nodes[opid].avoid_split:
+            self.split_tensor_by_n_with_same_info(info['outputs'][0], output_split, split_dim)
+        else:
+            self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
         for child in self.nodes[opid].node.children:
             self.nodes[child].node.split_dim = self.nodes[opid].node.split_dim
 
@@ -989,7 +1035,7 @@ class Splitter:
                 self.split_tensor_by_n_with_same_info(info['outputs'][0], output_split, split_dim)
             # Encount the QKV's FC, only split the QK part
             elif self.nodes[opid].avoid_split:
-                self.split_tensor_by_n_with_same_info(info['outputs'][0], output_split, split_dim)
+                self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
             elif need_split_nxn:
                 self.split_tensor_by_nxn(info['outputs'][0], output_split, split_dim, split_dim + 1)
             else:

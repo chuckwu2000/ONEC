@@ -60,6 +60,17 @@ for opcode in opcodes:
         opcode['deprecated_builtin_code'] = 0
         opcode['builtin_code'] = "ADD"
 
+# Don't know why DistilGPT2 model's opcodes's builtin_code is missing, so add it back
+builtin_code_mapping = {6: 'DEQUANTIZE', 9: 'FULLY_CONNECTED', 18: 'MUL', 22: 'RESHAPE', 25: 'SOFTMAX', \
+                        28: 'TANH', 36: 'GATHER', 39: 'TRANSPOSE', 40: 'MEAN', 41: 'SUB', \
+                        42: 'DIV', 49: 'SPLIT', 65: 'SLICE', 76: 'RSQRT', 78: 'POW', \
+                        83: 'PACK', 99: 'SQUARED_DIFFERENCE'}
+for opcode in opcodes:
+    if opcode.get('builtin_code', None) == None:
+        deprecated_builtin_code = opcode.get('deprecated_builtin_code', -1)
+        if deprecated_builtin_code in builtin_code_mapping.keys():
+            opcode['builtin_code'] = builtin_code_mapping[deprecated_builtin_code]
+
 # Don't know why opcode_index 0 is missing, so add it back
 for operator in operators:
     if 'opcode_index' not in operator:
