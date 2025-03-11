@@ -308,17 +308,26 @@ class Splitter:
                 
                 # Extract the data
                 if len(shape) == 4:
-                    if tile_dim == 1:
+                    if tile_dim == 0:
+                        tmp_data = np_arr[i * tile_size : i * tile_size + guard, :, :, :]
+                    elif tile_dim == 1:
                         tmp_data = np_arr[:, i * tile_size : i * tile_size + guard, :, :]
                     elif tile_dim == 2:
                         tmp_data = np_arr[:, :, i * tile_size : i * tile_size + guard, :]
                     elif tile_dim == 3:
                         tmp_data = np_arr[:, :, :, i * tile_size : i * tile_size + guard]
                 elif len(shape) == 3:
-                    if tile_dim == 1:
+                    if tile_dim == 0:
+                        tmp_data = np_arr[i * tile_size : i * tile_size + guard, :, :]
+                    elif tile_dim == 1:
                         tmp_data = np_arr[:, i * tile_size : i * tile_size + guard, :]
                     elif tile_dim == 2:
                         tmp_data = np_arr[:, :, i * tile_size : i * tile_size + guard]
+                elif len(shape) == 2:
+                    if tile_dim == 0:
+                        tmp_data = np_arr[i * tile_size : i * tile_size + guard, :]
+                    elif tile_dim == 1:
+                        tmp_data = np_arr[:, i * tile_size : i * tile_size + guard]
                 # Flatten the data
                 new_data = tmp_data.astype(np_type).tobytes()
                 new_buffer_info['data'] = list(new_data)
@@ -566,7 +575,7 @@ class Splitter:
         output_name = self.tensors[output]['name']
         # Check this reshape is from V's output
         is_value_reshape = False
-        if 'MatMul_1/reshape_b' in output_name:
+        if 'attn/Reshape_2' in output_name:
             is_value_reshape = True
             self.set_flow_with_avoid_split(opid)
         if is_value_reshape:
