@@ -16,6 +16,8 @@ class Node:
         # This represent that this op is matched with another op run currently in each of MAC/ELE engine.
         # But depend on its computation ratio, it can overlap more than one op.
         self.have_fully_matched = False
+        # This represent that op is belong to which weight reuse block
+        self.block_id = -1
         self.non_overlap_cycles = 0
         self.estimated_DMA_cycles = 0
         self.estimated_op_cycles = 0

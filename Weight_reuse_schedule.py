@@ -29,6 +29,8 @@ class Weight_reuse_scheduler:
         self.virtual_tensor_allocator = self.virtual_tensor_allocate(graph)
 
     def weight_reuse_schedule(self):
+        ops = self.graph.ops
+        block_id = 0
         # Traverse the DF order to reschedule
         ordered_ops = self.graph.ordered_ops
         for op in ordered_ops:
@@ -53,7 +55,9 @@ class Weight_reuse_scheduler:
                         self.weights_reuse_mapping[opid] = self.new_order
                         self.new_order += 1
                         self.scheduled[opid] = True
+                        ops[opid].block_id = block_id
                     # Reinitialize the block
+                    block_id += 1
                     self.tensor_in_SRAM = set()
                     self.opids_in_block = set()
                     self.opids_in_block.update(same_layer_opids)

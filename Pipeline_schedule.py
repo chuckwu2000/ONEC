@@ -105,8 +105,8 @@ def pipeline_schedule(split_graph: Graph):
             if candidate_op.is_mac_main_op:
                 # Find the insert position
                 for insert_pos in range(candidate_op.hoist_min_schedule_order, candidate_op.schedule_order):
-                    # We don't plus one on op's hoist_min_schedule_order, since it will loss some optimize opportunity
-                    # But we need to check that op won't run concurrently with its parents
+                    # We don't plus one on op's hoist_min_schedule_order, since it may loss some optimize opportunity
+                    # But we need to check that op won't have same order with its parents
                     illegal = False
                     for parent_id in candidate_op.parents:
                         if split_graph.ops[parent_id].is_mem_main_op:
@@ -117,6 +117,11 @@ def pipeline_schedule(split_graph: Graph):
                         continue
 
                     insert_pos_op = split_graph.ordered_ops[insert_pos]
+                    # The second priority schedule's matched_ops should belong to the same block
+                    # Since we had ensured the block's memory usage won't exceed the SRAM's capacity
+                    if candidate_op.block_id != insert_pos_op.block_id:
+                        continue
+
                     if insert_pos_op.is_elem_wise_main_op and insert_pos_op.have_fully_matched is False:
                         # node[opid] can fully cover node[insert_pos_opid]
                         if insert_pos_op.estimated_total_cycles <= candidate_op.estimated_total_cycles:
@@ -132,6 +137,10 @@ def pipeline_schedule(split_graph: Graph):
                                 # Find the node[insert_pos + 1]
                                 if insert_pos + 1 < len(split_graph.ordered_ops):
                                     insert_pos_child_op = split_graph.ordered_ops[insert_pos + 1]
+
+                                # The second priority schedule's matched_ops should belong to the same block
+                                if candidate_op.block_id != insert_pos_child_op.block_id:
+                                    break
 
                                 if insert_pos_child_op.is_elem_wise_main_op and insert_pos_child_op.have_fully_matched is False:
                                     # Ensure that won't take another longer op to cover this mac_main op
@@ -166,6 +175,10 @@ def pipeline_schedule(split_graph: Graph):
                                 if candidate_op_pos + 1 < len(split_graph.ordered_ops):
                                     candidate_op_child_op = split_graph.ordered_ops[candidate_op_pos + 1]
 
+                                # The second priority schedule's matched_ops should belong to the same block
+                                if candidate_op_child_op.block_id != insert_pos_op.block_id:
+                                    break
+
                                 if candidate_op_child_op.is_mac_main_op and candidate_op_child_op.have_fully_matched is False:
                                     # Ensure that won't take another longer op to cover this elem_wise_main op
                                     # 1.7 is just a default threshold
@@ -199,6 +212,11 @@ def pipeline_schedule(split_graph: Graph):
                         continue
 
                     insert_pos_op = split_graph.ordered_ops[insert_pos]
+                    # The second priority schedule's matched_ops should belong to the same block
+                    # Since we had ensured the block's memory usage won't exceed the SRAM's capacity
+                    if candidate_op.block_id != insert_pos_op.block_id:
+                        continue
+
                     if insert_pos_op.is_mac_main_op and insert_pos_op.have_fully_matched is False:
                         # node[opid] can fully cover node[insert_pos_opid]
                         if insert_pos_op.estimated_total_cycles <= candidate_op.estimated_total_cycles:
@@ -214,6 +232,10 @@ def pipeline_schedule(split_graph: Graph):
                                 # Find the node[insert_pos + 1]
                                 if insert_pos + 1 < len(split_graph.ordered_ops):
                                     insert_pos_child_op = split_graph.ordered_ops[insert_pos + 1]
+
+                                # The second priority schedule's matched_ops should belong to the same block
+                                if candidate_op.block_id != insert_pos_child_op.block_id:
+                                    break
 
                                 if insert_pos_child_op.is_mac_main_op and insert_pos_child_op.have_fully_matched is False:
                                     # Ensure that won't take another longer op to cover this mac_main op
@@ -248,6 +270,10 @@ def pipeline_schedule(split_graph: Graph):
                                 if candidate_op_pos + 1 < len(split_graph.ordered_ops):
                                     candidate_op_child_op = split_graph.ordered_ops[candidate_op_pos + 1]
 
+                                # The second priority schedule's matched_ops should belong to the same block
+                                if candidate_op_child_op.block_id != insert_pos_op.block_id:
+                                    break
+
                                 if candidate_op_child_op.is_elem_wise_main_op and candidate_op_child_op.have_fully_matched is False:
                                     # Ensure that won't take another longer op to cover this elem_wise_main op
                                     # 1.7 is just a default threshold
@@ -266,10 +292,21 @@ def pipeline_schedule(split_graph: Graph):
                             insert_pos_op.non_overlap_cycles = 0
                             split_graph.matched_ops.append(matched_ops)
                             break
+
+    def update_schedule_order(split_graph: Graph):
+        # Update the schedule order in the ordered_ops
+        split_graph.ordered_ops = sorted(split_graph.ops, key=lambda x: x.schedule_order)
+        # Update the operators in the split_graph
+        split_graph.operators = []
+        for op in split_graph.ordered_ops:
+            split_graph.operators.append(op.info)
     
     # Start to piepline schedule
     first_priority_schedule(split_graph)
     second_priority_schedule(split_graph)
+
+    # Update the schedule order
+    update_schedule_order(split_graph)
     
     #return pipeline_split_graph
     split_graph.pipeline_schedule = True
