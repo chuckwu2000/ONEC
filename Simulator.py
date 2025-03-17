@@ -549,50 +549,50 @@ class simulator:
             
         if pipeline:
             cascade_matched_ops = self.model.cascade_matched_ops
+            cascade_total_op = 0
+            cascade_save_cycles = 0
             # For now, assume the two op parallel execution will take the longer one
             for cascade_matched_op in cascade_matched_ops:
+                cascade_total_op += len(cascade_matched_op)
                 op1 = self.ops[cascade_matched_op[0]]
-                op2_estimated_DMA_cycles = 0
                 op2_estimated_op_cycles = 0
                 op2_estimated_total_cycles = 0
                 for op_id in range(1, len(cascade_matched_op)):
                     op2 = self.ops[cascade_matched_op[op_id]]
-                    # op2_estimated_DMA_cycles += op2.estimated_DMA_cycles
                     op2_estimated_op_cycles += op2.estimated_op_cycles
                     op2_estimated_total_cycles += op2.estimated_total_cycles
                 if op1.estimated_total_cycles > op2_estimated_total_cycles:
-                    # total_dma_cycles -= op2_estimated_DMA_cycles
                     total_op_cycles -= op2_estimated_op_cycles
                     total_cycles -= op2_estimated_op_cycles
-                    if op1.is_mac_main_op == True:
-                        elem_wise_idle_cycles -= op2.estimated_op_cycles
+                    cascade_save_cycles += op2_estimated_op_cycles
                 else:
-                    # total_dma_cycles -= op1.estimated_DMA_cycles
                     total_op_cycles -= op1.estimated_op_cycles
                     total_cycles -= op1.estimated_op_cycles
-                    if op1.is_elem_wise_main_op == True:
-                        mac_idle_cycles -= op2.estimated_op_cycles
+                    cascade_save_cycles += op1.estimated_op_cycles
             matched_ops = self.model.matched_ops
+            match_total_op = 0
+            match_save_cycles = 0
             # For now, assume the two op parallel execution will take the longer one
             for matched_op in matched_ops:
+                match_total_op += len(matched_op)
                 op1 = self.ops[matched_op[0]]
-                op2_estimated_DMA_cycles = 0
                 op2_estimated_op_cycles = 0
                 op2_estimated_total_cycles = 0
                 for op_id in range(1, len(matched_op)):
                     op2 = self.ops[matched_op[op_id]]
-                    # op2_estimated_DMA_cycles += op2.estimated_DMA_cycles
                     op2_estimated_op_cycles += op2.estimated_op_cycles
                     op2_estimated_total_cycles += op2.estimated_total_cycles
                 if op1.estimated_total_cycles > op2_estimated_total_cycles:
-                    # total_dma_cycles -= op2_estimated_DMA_cycles
                     total_op_cycles -= op2_estimated_op_cycles
                     total_cycles -= op2_estimated_op_cycles
+                    match_save_cycles += op2_estimated_op_cycles
                 else:
-                    # total_dma_cycles -= op1.estimated_DMA_cycles
                     total_op_cycles -= op1.estimated_op_cycles
                     total_cycles -= op1.estimated_op_cycles
-        return total_dma_cycles, total_op_cycles, total_cycles, (mac_idle_cycles, elem_wise_idle_cycles)
+                    match_save_cycles += op1.estimated_op_cycles
+            # print(f"cascade_total_op: {cascade_total_op}, cascade_save_cycles: {cascade_save_cycles}")
+            # print(f"match_total_op: {match_total_op}, match_save_cycles: {match_save_cycles}")
+        return total_dma_cycles, total_op_cycles, total_cycles
 
     def print_performance(self):
         for order, op in enumerate(self.model.ordered_ops):
@@ -602,4 +602,7 @@ class simulator:
             dma_cycles = op.estimated_DMA_cycles
             op_cycles = op.estimated_op_cycles
             op_total_cycles = op.estimated_total_cycles
-            print(f"order: {order}, opid: {opid}, opcode_type: {opcode_type}, DMA cycles: {dma_cycles}, OP cycles: {op_cycles}, Total cycles: {op_total_cycles}, out_id: {op.info['outputs'][0]}")
+            # print("*" * 50)
+            # print(f"order: {order}, opid: {opid}, opcode_type: {opcode_type}, DMA cycles: {dma_cycles}, OP cycles: {op_cycles}, Total cycles: {op_total_cycles}, out_id: {op.info['outputs'][0]}")
+            # print(f"op info: {op.info}")
+            # print(f"op output name: {self.tensors[op.info['outputs'][0]]['name']}")

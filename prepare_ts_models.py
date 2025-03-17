@@ -17,6 +17,7 @@ parser.add_argument("--model_type", nargs='?', type=str,
 parser.add_argument("--verbose_performance", action='store_true')
 parser.add_argument("--pad_fusion", action='store_true')
 parser.add_argument("--move_data_layout_op", action='store_true')
+parser.add_argument("--genesys", action='store_true')
 args = parser.parse_args()
 rewriter_path = str(args.rewriter_path)
 schema_path = str(args.schema_path)
@@ -46,4 +47,6 @@ for split_height in [split_size]:
             cmd += " --verbose_performance"
         if args.move_data_layout_op:
             cmd += " --move_data_layout_op"
+        if args.genesys:
+            cmd += " --genesys"
         subprocess.run(cmd.split(' '))

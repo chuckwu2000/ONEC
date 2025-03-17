@@ -9,6 +9,7 @@ from Normal_schedule import Normal_scheduler
 from Weight_reuse_schedule import Weight_reuse_scheduler
 from Pipeline_schedule import set_active_engine
 from Pipeline_schedule import pipeline_schedule
+from GeneSys_schedule import genesys_schedule
 from Simulator import simulator
 from memory_allocation import memory_allocator
 
@@ -23,6 +24,9 @@ parser.add_argument("--model_type", nargs='?', type=str, default="bert")
 parser.add_argument("--pad_fusion", action='store_true')
 parser.add_argument("--move_data_layout_op", action='store_true')
 parser.add_argument("--verbose_performance", action='store_true')
+
+# Test GeneSys's options
+parser.add_argument("--genesys", action='store_true')
 
 args = parser.parse_args()
 filename = os.path.basename(args.model_path)
@@ -115,10 +119,9 @@ set_active_engine(new_graph)
 # Estimate the performance before pipeline schedule
 model_sim = simulator(new_graph, mem_allocator.need_allocate_tensors)
 if args.verbose_performance:
-    split_dma_cycles, split_op_cycles, split_total_cycles, engine_idle_cycles = model_sim.estimate_model(pipeline = False)
+    split_dma_cycles, split_op_cycles, split_total_cycles = model_sim.estimate_model(pipeline = False)
     # model_sim.print_performance()
     print(f"Original: dma cycles = {split_dma_cycles :.1f}, op cycles = {split_op_cycles :.1f}, total cycles = {split_total_cycles :.1f}")
-    # print(f"mac_idle_cycles: {engine_idle_cycles[0]}, elem_wise_idle_cycles: {engine_idle_cycles[1]}")
 ##############################################
 
 ################## NORMAL SCHEDULE ##################
@@ -130,7 +133,7 @@ normal_graph = normal_scheduler.normal_schedule()
 
 model_sim = simulator(normal_graph, normal_scheduler.tensor_info)
 if args.verbose_performance:
-    normal_dma_cycles, normal_op_cycles, normal_total_cycles, engine_idle_cycles = model_sim.estimate_model(pipeline = False)
+    normal_dma_cycles, normal_op_cycles, normal_total_cycles = model_sim.estimate_model(pipeline = False)
     print(f"After use cache: dma cycles = {normal_dma_cycles :.1f}, op cycles = {normal_op_cycles :.1f}, total cycles = {normal_total_cycles :.1f}")
     print(f"speedup = {((split_total_cycles/normal_total_cycles) - 1) * 100 :.2f}%")
 #####################################################
@@ -144,7 +147,7 @@ weight_reuse_graph = weight_reuse_scheduler.weight_reuse_schedule()
 
 model_sim = simulator(weight_reuse_graph, weight_reuse_scheduler.tensor_info)
 if args.verbose_performance:
-    reuse_dma_cycles, reuse_op_cycles, reuse_total_cycles, engine_idle_cycles = model_sim.estimate_model(pipeline = False)
+    reuse_dma_cycles, reuse_op_cycles, reuse_total_cycles = model_sim.estimate_model(pipeline = False)
     # model_sim.print_performance()
     print(f"After weight reuse schedule: dma cycles = {reuse_dma_cycles :.1f}, op cycles = {reuse_op_cycles :.1f}, total cycles = {reuse_total_cycles :.1f}")
     print(f"speedup = {((split_total_cycles/reuse_total_cycles) - 1) * 100 :.2f}%")
@@ -158,24 +161,29 @@ if args.verbose_performance:
 
 ################## PIPELINE SCHEDULE ##################
 # Perform software pipeline schedule
-pipeline_new_graph = pipeline_schedule(weight_reuse_graph)
+# Test GeneSys's options
+genesys_options = {"no_intermediate_tensor_reuse": False, "can_not_followed_multi_child": False}
+if args.genesys:
+    genesys_options = {"no_intermediate_tensor_reuse": True, "can_not_followed_multi_child": True}
+    pipeline_new_graph = genesys_schedule(weight_reuse_graph, weights_reuse_need_allocate_tensors, genesys_options)
+else:
+    pipeline_new_graph = pipeline_schedule(weight_reuse_graph)
 
 # Estimate the performance after pipeline schedule
 model_sim = simulator(pipeline_new_graph, weights_reuse_need_allocate_tensors)
 if args.verbose_performance:
-    pipeline_dma_cycles, pipeline_op_cycles, pipeline_total_cycles, engine_idle_cycles = model_sim.estimate_model(pipeline = True)
+    pipeline_dma_cycles, pipeline_op_cycles, pipeline_total_cycles = model_sim.estimate_model(pipeline = True)
     # model_sim.print_performance()
-    print(f"cascade ops = {pipeline_new_graph.cascade_matched_ops}")
-    print(f"match ops = {pipeline_new_graph.matched_ops}")
-    total_fusion_ops = 0
-    total_match_ops = 0
-    for cascade_ops in pipeline_new_graph.cascade_matched_ops:
-        total_fusion_ops += len(cascade_ops)
-    for match_ops in pipeline_new_graph.matched_ops:
-        total_match_ops += len(match_ops)
-    print(f"total fusion ops = {total_fusion_ops}, total match ops = {total_match_ops}, total ops = {len(pipeline_new_graph.operators)}")
+    # print(f"cascade ops = {pipeline_new_graph.cascade_matched_ops}")
+    # print(f"match ops = {pipeline_new_graph.matched_ops}")
+    # total_fusion_ops = 0
+    # total_match_ops = 0
+    # for cascade_ops in pipeline_new_graph.cascade_matched_ops:
+    #     total_fusion_ops += len(cascade_ops)
+    # for match_ops in pipeline_new_graph.matched_ops:
+    #     total_match_ops += len(match_ops)
+    # print(f"total fusion ops = {total_fusion_ops}, total match ops = {total_match_ops}, total ops = {len(pipeline_new_graph.operators)}")
     print(f"After pipeline schedule: dma cycles = {pipeline_dma_cycles :.1f}, op cycles = {pipeline_op_cycles :.1f}, total cycles = {pipeline_total_cycles :.1f}")
-    print(f"mac_idle_cycles: {engine_idle_cycles[0]}, elem_wise_idle_cycles: {engine_idle_cycles[1]}")
     print(f"speedup = {((split_total_cycles/pipeline_total_cycles) - 1) * 100 :.2f}%")
 #######################################################
 
