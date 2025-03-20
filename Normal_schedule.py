@@ -38,6 +38,8 @@ class Normal_scheduler:
                 self.need_virtual_allocate_opids.add(opid)
                 overuse_sram = self.virtual_tensor_allocator.virtual_tensor_allocate(self.need_virtual_allocate_opids, self.tensor_info)
                 if overuse_sram:
+                    if len(self.need_virtual_allocate_opids) == 1:
+                        raise Exception(f"Can't put single op's tensor in SRAM, op info: {op.info}")
                     self.tensor_in_SRAM = set()
                     self.need_virtual_allocate_opids = set()
                     self.need_virtual_allocate_opids.add(opid)

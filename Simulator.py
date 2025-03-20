@@ -1,7 +1,5 @@
 # This simulator is referenced from Planaria's implementation
-
 from MyGraph import Graph
-from Architecture_feature import Mem_area
 from Architecture_feature import ArchitectureFeatures
 import math
 import struct
@@ -397,7 +395,7 @@ class simulator:
         dram_transfer_cycles, latency = self.estimate_mac_engine_dram_access(tiling, writes, reads)
 
         # Computations cycles
-        op_cycles = math.ceil(oc / ArchitectureFeatures.MAC_width) * oh * ow * math.ceil(ic / ArchitectureFeatures.MAC_height) * FH * FW
+        op_cycles = math.ceil(oc / ArchitectureFeatures.MAC_width) * oh * ow * math.ceil((ic * FH * FW) / ArchitectureFeatures.MAC_height)
         op_cycles *= ArchitectureFeatures.output_cycles_per_elem["MAC"]
         op_cycles *= num_tiles
         # Depthwise convolution will multiply the output channel
@@ -419,10 +417,12 @@ class simulator:
     # Modify by own self
     def tiling_compute(self, IC, OH, OW, OC, FH, FW, B):
         tiling_dict = {'B/b': (1, B), 'IC/ic': (1, IC), 'OH/oh': (1, OH), 'OW/ow': (1, OW), 'OC/oc': (1, OC)}
-        ic_num = math.ceil(IC / ArchitectureFeatures.MAC_height)
+        # ic_num = math.ceil(IC / ArchitectureFeatures.MAC_height)
+        per_ic = math.ceil(ArchitectureFeatures.MAC_height / (FH * FW))
+        ic_num = math.ceil(IC / per_ic)
         oc_num = math.ceil(OC / ArchitectureFeatures.MAC_width)
         # Get max ic per tile
-        tiling_dict['IC/ic'] = (ic_num, ArchitectureFeatures.MAC_height)
+        tiling_dict['IC/ic'] = (ic_num, per_ic)
         # Get max oc per tile
         tiling_dict['OC/oc'] = (oc_num, ArchitectureFeatures.MAC_width)
 
