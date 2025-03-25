@@ -18,10 +18,11 @@ class SplitterNode:
         self.avoid_split = False
 
 class Splitter:
-    def __init__(self,ori_graph:Graph, split_height:int, model_type:int, token_size:int):
+    def __init__(self,ori_graph:Graph, model_type:int, token_size:int):
         self.padding_param_tensors = {}
         self.ori_graph = ori_graph
-        self.split_height = split_height
+        # Will be set in the tile_size selection phase
+        self.split_height = 0
         self.opcodes =  copy.deepcopy(ori_graph.opcodes)
         self.tensors = copy.deepcopy(ori_graph.tensors)
         self.buffers = copy.deepcopy(ori_graph.buffers)
@@ -1931,7 +1932,7 @@ class Splitter:
                     self.nodes[start_opid].node.split_dim = split_dim
                     break
         else:
-            # Split from te first dim that larger than 1
+            # Split from the first dim that larger than 1
             for dim, dim_value in enumerate(input_shape):
                 if dim_value > 1:
                     split_dim = dim

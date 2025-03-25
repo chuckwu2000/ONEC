@@ -145,6 +145,8 @@ class Normal_scheduler:
             need_allocate_tensor_ids = set()
             for opid in opids:
                 for tensor_id in ops[opid].info['inputs'] + ops[opid].info['outputs']:
+                    if tensor_id == -1:
+                        continue
                     # Update the tensor's first time used
                     if ops[opid].schedule_order < tensor_info[tensor_id].live_range.get('first_time_used', len(ops)):
                         tensor_info[tensor_id].live_range['first_time_used'] = ops[opid].schedule_order
@@ -152,8 +154,6 @@ class Normal_scheduler:
                     if ops[opid].schedule_order > tensor_info[tensor_id].live_range.get('last_time_used', -1):
                         tensor_info[tensor_id].live_range['last_time_used'] = ops[opid].schedule_order
                     need_allocate_tensor_ids.add(tensor_id)
-            if -1 in need_allocate_tensor_ids:
-                need_allocate_tensor_ids.remove(-1)
 
             # Step 2: Initialize memory allocation
             total_used_size = 0

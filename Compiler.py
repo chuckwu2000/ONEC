@@ -5,6 +5,7 @@ import os
 from MyGraph import Graph
 from AutoSplit import Splitter
 import tempfile
+from TileSize_selection import TileSizeSelection
 from Normal_schedule import Normal_scheduler
 from Weight_reuse_schedule import Weight_reuse_scheduler
 from Pipeline_schedule import set_active_engine
@@ -18,7 +19,7 @@ parser.add_argument("model_path")
 parser.add_argument("--schema_path", nargs='?', default="utils/schema.fbs")
 parser.add_argument("--out_path")
 parser.add_argument("--exec_order", nargs='?', default="DF")
-parser.add_argument("--split_height", nargs='?', type=int, default=2)
+parser.add_argument("--split_height", nargs='?', type=int, required=False)
 parser.add_argument("--token_size", nargs='?', type=int, default=50)
 parser.add_argument("--model_type", nargs='?', type=str, default="bert")
 parser.add_argument("--pad_fusion", action='store_true')
@@ -100,12 +101,34 @@ new_model['operator_codes'] = new_opcodes
 
 ori_graph = Graph(operators, tensors, buffers, new_opcodes, subgraphs[0]['inputs'], subgraphs[0]['outputs'], args.exec_order)
 
-splitter = Splitter(ori_graph, args.split_height, model_type, args.token_size)
+splitter = Splitter(ori_graph, model_type, args.token_size)
+
+# Try to eliminate pad ops (only take effect on CNN model)
 if args.pad_fusion and model_type == 1:
     splitter.PaddingFusion()
-# When emcount bert model, try to eliminate some data layout ops
+# When encount bert model, try to eliminate some data layout ops (only take effect on bert model)
 if args.move_data_layout_op and model_type == 0:
     splitter.Elminate_useless_data_layout_op()
+
+# Pick the best tile size
+if args.split_height == None:
+    tilesize_selection = TileSizeSelection(ori_graph, model_type)
+    # Bert model
+    if model_type == 0:
+        token_size = args.token_size
+    # CNN model
+    elif model_type == 1:
+        root_op_id = ori_graph.root_op_ids[0]
+        root_op = ori_graph.ops[root_op_id]
+        root_op_input_tensor_shape = ori_graph.tensors[root_op.info['inputs'][0]]['shape']
+        for dim, dim_value in enumerate(root_op_input_tensor_shape):
+            if dim_value > 1:
+                token_size = dim_value
+                break
+        splitter.split_height = tilesize_selection.pick_best_tile_size(token_size)
+else:
+    split_height = args.split_height
+splitter.split_height = split_height
 
 ################## BASELINE ##################
 new_graph = splitter.perform_split()
