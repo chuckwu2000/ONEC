@@ -6,6 +6,7 @@ from MyGraph import Graph
 from AutoSplit import Splitter
 import tempfile
 from TileSize_selection import TileSizeSelection
+from Softmax_lowering import SoftMax
 from Normal_schedule import Normal_scheduler
 from Weight_reuse_schedule import Weight_reuse_scheduler
 from Pipeline_schedule import set_active_engine
@@ -72,14 +73,28 @@ for operator in operators:
 
 new_opcodes = copy.deepcopy(opcodes)
 
+# For tensor splitting
 has_split = False
 has_concat = False
+# For lowering the sotfmax op
+has_max_pool = False
+has_exp = False
+has_sum = False
+has_div = False
 
 for opcode in opcodes:
     if opcode.get('deprecated_builtin_code',0) == 2:
         has_concat = True
     elif opcode.get('deprecated_builtin_code',0) ==49:
         has_split = True
+    elif opcode.get('deprecated_builtin_code',0) == 17:
+        has_max_pool = True
+    elif opcode.get('deprecated_builtin_code',0) == 47:
+        has_exp = True
+    elif opcode.get('deprecated_builtin_code',0) == 74:
+        has_sum = True
+    elif opcode.get('deprecated_builtin_code',0) == 42:
+        has_div = True
 
 if has_concat == False:
     new_opcodes.append({
@@ -93,7 +108,30 @@ if has_split == False:
         "version": 1,
         "builtin_code": "SPLIT"
         })
-
+if has_max_pool == False:
+    new_opcodes.append({
+        "deprecated_builtin_code": 17,
+        "version": 1,
+        "builtin_code": "MAX_POOL_2D"
+        })
+if has_exp == False:
+    new_opcodes.append({
+        "deprecated_builtin_code": 47,
+        "version": 1,
+        "builtin_code": "EXP"
+        })
+if has_sum == False:
+    new_opcodes.append({
+        "deprecated_builtin_code": 74,
+        "version": 1,
+        "builtin_code": "SUM"
+        })
+if has_div == False:
+    new_opcodes.append({
+        "deprecated_builtin_code": 42,
+        "version": 1,
+        "builtin_code": "DIV"
+        })
 
 new_model = copy.deepcopy(model)
 
@@ -109,6 +147,8 @@ if args.pad_fusion and model_type == 1:
 # When encount bert model, try to eliminate some data layout ops (only take effect on bert model)
 if args.move_data_layout_op and model_type == 0:
     splitter.Elminate_useless_data_layout_op()
+# Perform softmax lowering
+SoftMax(splitter).softmax_lowering()
 
 # Pick the best tile size
 if args.split_height == None:
