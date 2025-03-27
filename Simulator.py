@@ -1,33 +1,20 @@
 # This simulator is referenced from Planaria's implementation
 from MyGraph import Graph
 from Architecture_feature import ArchitectureFeatures
+from OpClassify import Op_Classify
 import math
 import struct
 
-# The operation that will be fall back to CPU
-data_layout_ops = ["CONCATENATION", "SPLIT", "SPLIT_V", "TRANSPOSE", "RESIZE_NEAREST_NEIGHBOR", "PACK", "RESHAPE", "SLICE"]
-reduce_ops = ["REDUCE_MAX"]
-fall_back_cpu_ops = data_layout_ops + reduce_ops
-
-# MAC main operation
-mac_ops = ["CONV_2D", "DEPTHWISE_CONV_2D", "FULLY_CONNECTED", "MEAN", "MAX_POOL_2D", "BATCH_MATMUL"]
-
-# The operation that need weights
-need_weights_ops = ["CONV_2D", "DEPTHWISE_CONV_2D", "FULLY_CONNECTED", "BATCH_MATMUL"]
-# The operation that need bias
-need_bias_ops = ["CONV_2D", "DEPTHWISE_CONV_2D", "FULLY_CONNECTED"]
-
-# Element-wise main operation
-unary_elementwise_ops = ["LOGISTIC", "SOFTMAX", "RSQRT", "POW", "TANH", "GELU", "QUANTIZE", "DEQUANTIZE"]
-binary_elementwise_ops = ["ADD", "SUB", "MUL", "DIV", "SQUARED_DIFFERENCE"]
-elementwise_ops = unary_elementwise_ops + binary_elementwise_ops
-
-# The operation that need requantization
-need_requant_ops = ["CONV_2D", "DEPTHWISE_CONV_2D", "FULLY_CONNECTED", "BATCH_MATMUL", "LOGISTIC", "SOFTMAX", "RSQRT", "TANH", \
-                    "GELU", "ADD", "SUB", "MUL", "DIV", "SQUARED_DIFFERENCE"]
-
-# The operation that need dequantization
-need_dequant_ops = ["LOGISTIC", "SOFTMAX", "RSQRT", "TANH", "GELU"]
+op_classify = Op_Classify()
+data_layout_ops = op_classify.data_layout_ops
+mac_ops = op_classify.mac_ops
+need_weights_ops = op_classify.need_weights_ops
+need_bias_ops = op_classify.need_bias_ops
+unary_elementwise_ops = op_classify.unary_ops
+binary_elementwise_ops = op_classify.binary_ops
+elementwise_ops = op_classify.elementwise_ops
+need_requant_ops = op_classify.need_requant_ops
+need_dequant_ops = op_classify.need_dequant_ops
 
 class simulator:
     def __init__(self, model: Graph, tensors_info):
@@ -510,7 +497,7 @@ class simulator:
             op.estimated_DMA_cycles = dma_cycles
             op.estimated_op_cycles = op_cycles
             op.estimated_total_cycles = total_cycles
-        elif opcode_type in fall_back_cpu_ops:
+        elif opcode_type in data_layout_ops:
             # NPU won't do these ops, so for now set the cycles to 0
             dma_cycles, op_cycles, total_cycles = 0, 0, 0
             op.estimated_DMA_cycles = dma_cycles

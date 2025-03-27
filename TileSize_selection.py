@@ -1,11 +1,11 @@
 from Architecture_feature import ArchitectureFeatures
 from AutoSplit import ModelType
+from OpClassify import Op_Classify
 import math
-import warnings
 
-# The mac main op
-mac_ops = ["MEAN", "MAX_POOL_2D", "BATCH_MATMUL"]
-weight_reuse_ops = ["CONV_2D", "DEPTHWISE_CONV_2D", "FULLY_CONNECTED"]
+op_classify = Op_Classify()
+mac_ops = op_classify.mac_ops
+weight_reuse_ops = op_classify.need_weights_ops
 
 # Use binary search to find the best tile size
 class TileSizeSelection:

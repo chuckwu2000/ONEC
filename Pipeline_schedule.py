@@ -1,13 +1,11 @@
 from MyGraph import Graph
+from OpClassify import Op_Classify
 
-# The elementwise main op
-elem_wise_ops = ["ADD", "SUB", "MUL", "LOGISTIC", "RSQRT", "SQUARED_DIFFERENCE", "SOFTMAX", "GELU", "LEAKY_RELU", "REDUCE_MAX", "QUANTIZE", "DEQUANTIZE", "TANH", "POW"]
-# The mac main op
-mac_ops = ["MEAN", "CONV_2D", "DEPTHWISE_CONV_2D", "FULLY_CONNECTED", "TRANSPOSE_CONV", "MAX_POOL_2D", "BATCH_MATMUL"]
-# The memory main op
+op_classify = Op_Classify()
+elem_wise_ops = op_classify.elementwise_ops
+mac_ops = op_classify.mac_ops
 mem_ops = ["RESHAPE"]
-# The elementwise main op but contain the reduce behavior
-reduce_ops = ["MEAN", "REDUCE_MAX", "SOFTMAX"]
+reduce_ops = op_classify.reduce_ops
 
 def set_active_engine(graph: Graph):
     operators = graph.ordered_ops

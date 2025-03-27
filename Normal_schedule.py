@@ -1,16 +1,13 @@
 from Architecture_feature import ArchitectureFeatures
+from OpClassify import Op_Classify
 
-# The elementwise main op
-elem_wise_ops = ["ADD", "SUB", "MUL", "LOGISTIC", "RSQRT", "SQUARED_DIFFERENCE", "SOFTMAX", "GELU", "LEAKY_RELU", "REDUCE_MAX", "QUANTIZE", "DEQUANTIZE", "TANH", "POW"]
-# The mac main op
-mac_ops = ["MEAN", "CONV_2D", "DEPTHWISE_CONV_2D", "FULLY_CONNECTED", "MAX_POOL_2D", "BATCH_MATMUL"]
-# The operation that will be fall back to CPU (not contain RESHAPE)
-data_layout_ops = ["CONCATENATION", "SPLIT", "SPLIT_V", "TRANSPOSE", "RESIZE_NEAREST_NEIGHBOR", "PACK"]
-fall_back_cpu_ops = data_layout_ops
-# The input of the operation
-unary_ops = ["LOGISTIC", "RSQRT", "SOFTMAX", "GELU", "LEAKY_RELU", "REDUCE_MAX", "QUANTIZE", "DEQUANTIZE", "TANH", "POW", "MEAN", "MAX_POOL_2D"]
-binary_ops = ["ADD", "SUB", "MUL", "SQUARED_DIFFERENCE", "BATCH_MATMUL"]
-trinary_ops = ["CONV_2D", "DEPTHWISE_CONV_2D", "FULLY_CONNECTED"]
+op_classify = Op_Classify()
+elem_wise_ops = op_classify.elementwise_ops
+mac_ops = op_classify.mac_ops
+fall_back_cpu_ops = op_classify.fall_back_cpu_ops
+unary_ops = op_classify.unary_ops
+binary_ops = op_classify.binary_ops
+trinary_ops = op_classify.trinary_ops
 
 class Normal_scheduler:
     def __init__(self, graph, need_allocate_tensors):

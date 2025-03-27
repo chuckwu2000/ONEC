@@ -2,6 +2,7 @@ from AutoSplit import Splitter
 from MyGraph import Graph
 from MyGraph import Node
 import copy
+import numpy as np
 
 class SoftMax:
     def __init__(self, splitter: Splitter):
@@ -21,6 +22,7 @@ class SoftMax:
             softmax_output_tensor_id = op.info['outputs'][0]
 
             # Step 1: Create max_pool op to compute the max value of the input tensor in last axis
+            # No effect on the output tensor's scale and zero point (just pick the max value)
             max_pool_output_tensor = copy.deepcopy(self.tensors[softmax_input_tensor_id])
             max_pool_output_tensor['name'] = 'softmax_lower_max_pool_%d' % i
             reduce_size = max_pool_output_tensor['shape'][-1]
@@ -48,6 +50,9 @@ class SoftMax:
             # Step 2: Subtract the max value from the input tensor
             subtract_output_tensor = copy.deepcopy(self.tensors[softmax_input_tensor_id])
             subtract_output_tensor['name'] = 'softmax_lower_subtract_%d' % i
+            # Since Xq' = Xq - Xq_max => X' = S_in * (Xq - Z_in) - S_in * (Xq_max - Z_in) = S_in * (Xq - Xq_max)
+            # Output tensor's scale is same to softmax_input_scale, zero point is no needed
+            subtract_output_tensor['quantization']['zero_point'] = [0]
             self.tensors.append(subtract_output_tensor)
             subtract_output_tensor_id = len(self.tensors) - 1
             subtract_op = {
@@ -63,6 +68,12 @@ class SoftMax:
             # Step 3: Compute the exponential of the subtracted tensor
             exp_output_tensor = copy.deepcopy(self.tensors[subtract_output_tensor_id])
             exp_output_tensor['name'] = 'softmax_lower_exp_%d' % i
+            # Since exp(Xq - Xq_max)'s range is (0, 1], exp's output scale is (1.0 / 127.0), zero point is no needed
+            np_int_scale = np.float32(1.0 / 127.0).view('int32')
+            np_arr = np.array([np_int_scale], dtype=np.int32)
+            int_scale = np_arr.tolist()
+            exp_output_tensor['quantization']['scale'] = int_scale
+            exp_output_tensor['quantization']['zero_point'] = [0]
             self.tensors.append(exp_output_tensor)
             exp_output_tensor_id = len(self.tensors) - 1
             exp_op = {
@@ -79,11 +90,32 @@ class SoftMax:
             sum_output_tensor = copy.deepcopy(self.tensors[exp_output_tensor_id])
             sum_output_tensor['name'] = 'softmax_lower_sum_%d' % i
             sum_output_tensor['shape'][-1] = 1
+            # Since summarize the last axis(reduce_size) of exp(Xq - Xq_max) = (0, reduce_size], sum's output scale is (reduce_size / 127.0), zero point is 0
+            np_int_scale = np.float32(reduce_size / 127.0).view('int32')
+            np_arr = np.array([np_int_scale], dtype=np.int32)
+            int_scale = np_arr.tolist()
+            sum_output_tensor['quantization']['scale'] = int_scale
+            sum_output_tensor['quantization']['zero_point'] = [0]
             self.tensors.append(sum_output_tensor)
             sum_output_tensor_id = len(self.tensors) - 1
+
+            len_shape = len(exp_output_tensor['shape'])
+            axis_buffer = {"data": self.int_list_to_byte_list([len_shape - 1])}
+            self.buffers.append(axis_buffer)
+            axis_buffer_id = len(self.buffers) - 1
+            axis_tensor = {
+                "shape": [],
+                "type": "INT32",
+                "buffer": axis_buffer_id,
+                "name": "softmax_lower_sum_axis_tensor_%d" % i,
+                "quantization": {}
+            }
+            self.tensors.append(axis_tensor)
+            axis_tensor_id = len(self.tensors) - 1
+
             sum_op = {
                 "opcode_index": self.get_opcode_index(74),
-                "inputs": [exp_output_tensor_id],
+                "inputs": [exp_output_tensor_id, axis_tensor_id],
                 "outputs": [sum_output_tensor_id]
             }
             self.operators.append(sum_op)

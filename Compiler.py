@@ -25,6 +25,8 @@ parser.add_argument("--token_size", nargs='?', type=int, default=50)
 parser.add_argument("--model_type", nargs='?', type=str, default="bert")
 parser.add_argument("--pad_fusion", action='store_true')
 parser.add_argument("--move_data_layout_op", action='store_true')
+parser.add_argument("--softmax_lowering", action='store_true')
+parser.add_argument("--mean_lowering", action='store_true')
 parser.add_argument("--verbose_performance", action='store_true')
 
 # Test GeneSys's options
@@ -78,6 +80,7 @@ has_split = False
 has_concat = False
 # For lowering the sotfmax op
 has_max_pool = False
+has_sub = False
 has_exp = False
 has_sum = False
 has_div = False
@@ -89,6 +92,8 @@ for opcode in opcodes:
         has_split = True
     elif opcode.get('deprecated_builtin_code',0) == 17:
         has_max_pool = True
+    elif opcode.get('deprecated_builtin_code',0) == 41:
+        has_sub = True
     elif opcode.get('deprecated_builtin_code',0) == 47:
         has_exp = True
     elif opcode.get('deprecated_builtin_code',0) == 74:
@@ -113,6 +118,12 @@ if has_max_pool == False:
         "deprecated_builtin_code": 17,
         "version": 1,
         "builtin_code": "MAX_POOL_2D"
+        })
+if has_sub == False:
+    new_opcodes.append({
+        "deprecated_builtin_code": 41,
+        "version": 1,
+        "builtin_code": "SUB"
         })
 if has_exp == False:
     new_opcodes.append({
@@ -148,7 +159,8 @@ if args.pad_fusion and model_type == 1:
 if args.move_data_layout_op and model_type == 0:
     splitter.Elminate_useless_data_layout_op()
 # Perform softmax lowering
-SoftMax(splitter).softmax_lowering()
+if args.softmax_lowering:
+    SoftMax(splitter).softmax_lowering()
 
 # Pick the best tile size
 if args.split_height == None:

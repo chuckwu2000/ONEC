@@ -1,10 +1,11 @@
 from MyGraph import Graph
-from Architecture_feature import ArchitectureFeatures
+from OpClassify import Op_Classify
 
+op_classify = Op_Classify()
 # Classify refer to the tandem processor's paper
 # The elementwise main op
 elem_wise_ops = ["ADD", "SUB", "MUL", "LOGISTIC", "RSQRT", "SQUARED_DIFFERENCE", "SOFTMAX", "GELU", "LEAKY_RELU", \
-                 "REDUCE_MAX", "QUANTIZE", "DEQUANTIZE", "TANH", "POW", "MAX_POOL_2D", "RESHAPE"]
+                 "REDUCE_MAX", "QUANTIZE", "DEQUANTIZE", "TANH", "POW", "MAX_POOL_2D", "RESHAPE", "EXP", "SUM"]
 # The mac main op
 mac_ops = ["MEAN", "CONV_2D", "DEPTHWISE_CONV_2D", "FULLY_CONNECTED", "TRANSPOSE_CONV", "BATCH_MATMUL"]
 
