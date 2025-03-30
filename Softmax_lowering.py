@@ -134,7 +134,7 @@ class SoftMax:
             self.ops.append(Node(divide_op, divide_opid))
 
             # Update the parent and children of the lower ops
-            # Orginal softmax op's input tensor now is the max_pool op & subtract op's input tensor\
+            # Orginal softmax op's input tensor now is the max_pool op & subtract op's input tensor
             parent_opid = op.parents[0]
             for i, opid in enumerate(self.ops[parent_opid].children):
                 if opid == op.opid:
@@ -163,9 +163,9 @@ class SoftMax:
                     self.ops[divide_opid].children.append(child_opid)
                     break
             
-            new_buffers, new_tensors, new_inputs, new_outputs, new_operators, new_opcodes = self.graph.export()
-            new_graph = Graph(new_operators, new_tensors, new_buffers, new_opcodes, new_inputs, new_outputs, "DF")
-            self.splitter.re_init(new_graph)
+        new_buffers, new_tensors, new_inputs, new_outputs, new_operators, new_opcodes = self.graph.export()
+        new_graph = Graph(new_operators, new_tensors, new_buffers, new_opcodes, new_inputs, new_outputs, "DF")
+        self.splitter.re_init(new_graph)
 
     def find_softmax_op(self):
         softmax_ops = []
@@ -181,24 +181,6 @@ class SoftMax:
             if code.get('deprecated_builtin_code', 0) == deprecated_builtin_code:
                 return i
         raise 'opcode not found'
-    
-    def remove_deprecated_op(self, deprecated):
-        new_opid = []
-        id = 0
-        for i in range(len(self.ops)):
-            if i in deprecated:
-                new_opid.append(-1)
-            else:
-                new_opid.append(id)
-                id += 1
-        for op in self.ops:
-            op.opid = new_opid[op.opid]
-            for i in range(len(op.parents)):
-                op.parents[i] = new_opid[op.parents[i]]
-            for i in range(len(op.children)):
-                op.children[i] = new_opid[op.children[i]]
-        self.ops = [op for op in self.ops if op.opid != -1]
-        self.operators = [op for idx, op in enumerate(self.operators) if new_opid[idx] != -1]
 
     def int_list_to_byte_list(self, ints):
         out = []

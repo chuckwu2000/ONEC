@@ -18,7 +18,7 @@ class Op_Classify:
 
         # The operation that need requantization
         self.need_requant_ops = ["CONV_2D", "DEPTHWISE_CONV_2D", "FULLY_CONNECTED", "MEAN", "BATCH_MATMUL", "SUM", "LOGISTIC", \
-                            "SOFTMAX", "RSQRT", "TANH", "GELU", "ADD", "SUB", "MUL", "DIV", "SQUARED_DIFFERENCE"]
+                            "SOFTMAX", "RSQRT", "TANH", "GELU", "EXP", "ADD", "SUB", "MUL", "DIV", "SQUARED_DIFFERENCE"]
 
         # The operation that need dequantization
         self.need_dequant_ops = ["LOGISTIC", "SOFTMAX", "RSQRT", "TANH", "GELU"]

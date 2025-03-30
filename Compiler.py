@@ -7,6 +7,7 @@ from AutoSplit import Splitter
 import tempfile
 from TileSize_selection import TileSizeSelection
 from Softmax_lowering import SoftMax
+from Mean_convert import Mean
 from Normal_schedule import Normal_scheduler
 from Weight_reuse_schedule import Weight_reuse_scheduler
 from Pipeline_schedule import set_active_engine
@@ -26,7 +27,7 @@ parser.add_argument("--model_type", nargs='?', type=str, default="bert")
 parser.add_argument("--pad_fusion", action='store_true')
 parser.add_argument("--move_data_layout_op", action='store_true')
 parser.add_argument("--softmax_lowering", action='store_true')
-parser.add_argument("--mean_lowering", action='store_true')
+parser.add_argument("--mean_convert", action='store_true')
 parser.add_argument("--verbose_performance", action='store_true')
 
 # Test GeneSys's options
@@ -84,6 +85,8 @@ has_sub = False
 has_exp = False
 has_sum = False
 has_div = False
+# For convert the mean op
+has_depthwise_conv2d = False
 
 for opcode in opcodes:
     if opcode.get('deprecated_builtin_code',0) == 2:
@@ -113,36 +116,44 @@ if has_split == False:
         "version": 1,
         "builtin_code": "SPLIT"
         })
-if has_max_pool == False:
-    new_opcodes.append({
-        "deprecated_builtin_code": 17,
-        "version": 1,
-        "builtin_code": "MAX_POOL_2D"
-        })
-if has_sub == False:
-    new_opcodes.append({
-        "deprecated_builtin_code": 41,
-        "version": 1,
-        "builtin_code": "SUB"
-        })
-if has_exp == False:
-    new_opcodes.append({
-        "deprecated_builtin_code": 47,
-        "version": 1,
-        "builtin_code": "EXP"
-        })
-if has_sum == False:
-    new_opcodes.append({
-        "deprecated_builtin_code": 74,
-        "version": 1,
-        "builtin_code": "SUM"
-        })
-if has_div == False:
-    new_opcodes.append({
-        "deprecated_builtin_code": 42,
-        "version": 1,
-        "builtin_code": "DIV"
-        })
+if args.softmax_lowering:
+    if has_max_pool == False:
+        new_opcodes.append({
+            "deprecated_builtin_code": 17,
+            "version": 1,
+            "builtin_code": "MAX_POOL_2D"
+            })
+    if has_sub == False:
+        new_opcodes.append({
+            "deprecated_builtin_code": 41,
+            "version": 1,
+            "builtin_code": "SUB"
+            })
+    if has_exp == False:
+        new_opcodes.append({
+            "deprecated_builtin_code": 47,
+            "version": 1,
+            "builtin_code": "EXP"
+            })
+    if has_sum == False:
+        new_opcodes.append({
+            "deprecated_builtin_code": 74,
+            "version": 1,
+            "builtin_code": "SUM"
+            })
+    if has_div == False:
+        new_opcodes.append({
+            "deprecated_builtin_code": 42,
+            "version": 1,
+            "builtin_code": "DIV"
+            })
+if args.mean_convert:
+    if has_depthwise_conv2d == False:
+        new_opcodes.append({
+            "deprecated_builtin_code": 4,
+            "version": 1,
+            "builtin_code": "DEPTHWISE_CONV_2D"
+            })
 
 new_model = copy.deepcopy(model)
 
@@ -161,6 +172,10 @@ if args.move_data_layout_op and model_type == 0:
 # Perform softmax lowering
 if args.softmax_lowering:
     SoftMax(splitter).softmax_lowering()
+# Perform mean convert
+if args.mean_convert:
+    Mean(splitter).convert_mean_to_depthwise_conv()
+ori_graph = splitter.ori_graph
 
 # Pick the best tile size
 if args.split_height == None:

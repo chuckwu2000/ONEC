@@ -50,7 +50,7 @@ for split_height in [split_size]:
             cmd += " --move_data_layout_op"
         if not args.cancel_lowering:
             cmd += " --softmax_lowering"
-            cmd += " --mean_lowering"
+            cmd += " --mean_convert"
         if args.genesys:
             cmd += " --genesys"
         subprocess.run(cmd.split(' '))
