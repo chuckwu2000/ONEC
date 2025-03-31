@@ -29,10 +29,14 @@ class Mean:
 
             # Step 1.1: Prepare for the depthwise conv2d op's needed info
             input_shape = self.tensors[mean_input_tensor_id]['shape']
+            if len(input_shape) == 4 and axis in [1, 2]:
+                height = input_shape[1] if axis == 1 else 1
+                width = input_shape[2] if axis == 2 else 1
+                channel = input_shape[3]
             # If the input tensor is 3D, change it to 4D, and if the mean over depth-axis, left shift the channel dim
-            if len(input_shape) == 3 and axis == 2:
-                height = input_shape[1]
-                width = input_shape[2]
+            elif len(input_shape) == 3:
+                height = input_shape[1] if axis == 1 else 1
+                width = input_shape[2] if axis == 2 else 1
                 channel = 1
             else:
                 raise 'unsupported mean format!!'

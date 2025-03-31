@@ -86,46 +86,64 @@ class SoftMax:
             exp_opid = len(self.operators) - 1
             self.ops.append(Node(exp_op, len(self.operators) - 1))
 
-            # Step 4: Compute the sum of the exponential tensor in the last axis
-            sum_output_tensor = copy.deepcopy(self.tensors[exp_output_tensor_id])
-            sum_output_tensor['name'] = 'softmax_lower_sum_%d' % i
-            sum_output_tensor['shape'][-1] = 1
+            # Step 4: Compute the sum of the exponential tensor in the last axis (use conv2d to replace reduce_sum)
+            # Step 4.1: Create the weight tensor of the conv2d op
+            weight_shape = [1, 1, 1, reduce_size]
+            np_ones_array = np.ones(weight_shape, dtype = np.int8)
+            ones_array = np_ones_array.astype(np.int8).tobytes()
+            weights_buffer = {"data": list(ones_array)}
+            self.buffers.append(weights_buffer)
+            weights_buffer_id = len(self.buffers) - 1
+
+            np_int_scale = np.float32(1.0).view('int32')
+            np_arr = np.array([np_int_scale], dtype=np.int32)
+            one_scale = np_arr.tolist()
+            weights_tensor = {
+                "shape": weight_shape,
+                "type": "INT8",
+                "buffer": weights_buffer_id,
+                "name": 'mean_lower_depthwise_conv2d_weight_%d' % i,
+                "quantization": {'scale': one_scale, 'zero_point': [0]}
+            }
+            self.tensors.append(weights_tensor)
+            weights_tensor_id = len(self.tensors) - 1
+
+            # Step 4.2: Create the output tensor of the conv2d op
+            conv_output_tensor = copy.deepcopy(self.tensors[exp_output_tensor_id])
+            conv_output_tensor['name'] = 'softmax_lower_conv2d_%d' % i
+            conv_output_tensor['shape'][-1] = 1
             # Since summarize the last axis(reduce_size) of exp(Xq - Xq_max) = (0, reduce_size], sum's output scale is (reduce_size / 127.0), zero point is 0
             np_int_scale = np.float32(reduce_size / 127.0).view('int32')
             np_arr = np.array([np_int_scale], dtype=np.int32)
             int_scale = np_arr.tolist()
-            sum_output_tensor['quantization']['scale'] = int_scale
-            sum_output_tensor['quantization']['zero_point'] = [0]
-            self.tensors.append(sum_output_tensor)
-            sum_output_tensor_id = len(self.tensors) - 1
+            conv_output_tensor['quantization']['scale'] = int_scale
+            conv_output_tensor['quantization']['zero_point'] = [0]
+            self.tensors.append(conv_output_tensor)
+            conv_output_tensor_id = len(self.tensors) - 1
 
-            len_shape = len(exp_output_tensor['shape'])
-            axis_buffer = {"data": self.int_list_to_byte_list([len_shape - 1])}
-            self.buffers.append(axis_buffer)
-            axis_buffer_id = len(self.buffers) - 1
-            axis_tensor = {
-                "shape": [],
-                "type": "INT32",
-                "buffer": axis_buffer_id,
-                "name": "softmax_lower_sum_axis_tensor_%d" % i,
-                "quantization": {}
+            # Step 4.3: Create the conv2d op
+            conv_op = {
+                "opcode_index": self.get_opcode_index(3),
+                "inputs": [exp_output_tensor_id, weights_tensor_id, -1],
+                "outputs": [conv_output_tensor_id],
+                "builtin_options_type": "DepthwiseConv2DOptions",
+                "builtin_options": {
+                    "padding": "VALID",
+                    "stride_w": 1,
+                    "stride_h": 1,
+                    "depth_multiplier": 1,
+                    "dilation_w_factor": 1,
+                    "dilation_h_factor": 1
+                }
             }
-            self.tensors.append(axis_tensor)
-            axis_tensor_id = len(self.tensors) - 1
-
-            sum_op = {
-                "opcode_index": self.get_opcode_index(74),
-                "inputs": [exp_output_tensor_id, axis_tensor_id],
-                "outputs": [sum_output_tensor_id]
-            }
-            self.operators.append(sum_op)
-            sum_opid = len(self.operators) - 1
-            self.ops.append(Node(sum_op, len(self.operators) - 1))
+            self.operators.append(conv_op)
+            conv_opid = len(self.operators) - 1
+            self.ops.append(Node(conv_op, conv_opid))
 
             # Step 5: Divide the exponential tensor by the sum tensor
             divide_op = {
                 "opcode_index": self.get_opcode_index(42),
-                "inputs": [exp_output_tensor_id, sum_output_tensor_id],
+                "inputs": [exp_output_tensor_id, conv_output_tensor_id],
                 "outputs": [softmax_output_tensor_id],
                 "builtin_options_type": "DivOptions"
             }
@@ -148,12 +166,12 @@ class SoftMax:
             self.ops[subtract_opid].parents.append(max_pool_opid)
             self.ops[subtract_opid].children.append(exp_opid)
             self.ops[exp_opid].parents.append(subtract_opid)
-            self.ops[exp_opid].children.append(sum_opid)
+            self.ops[exp_opid].children.append(conv_opid)
             self.ops[exp_opid].children.append(divide_opid)
-            self.ops[sum_opid].parents.append(exp_opid)
-            self.ops[sum_opid].children.append(divide_opid)
+            self.ops[conv_opid].parents.append(exp_opid)
+            self.ops[conv_opid].children.append(divide_opid)
             self.ops[divide_opid].parents.append(exp_opid)
-            self.ops[divide_opid].parents.append(sum_opid)
+            self.ops[divide_opid].parents.append(conv_opid)
             # Original softmax op's output tensor now is the divide op's output tensor
             child_opid = op.children[0]
             for i, opid in enumerate(self.ops[child_opid].parents):

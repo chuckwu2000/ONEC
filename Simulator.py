@@ -87,6 +87,8 @@ class simulator:
             if op_type == "LOGISTIC":
                 # Logistic(x) = 1 / (1 + exp(-x))
                 cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["LOGISTIC"]
+            elif op_type == "EXP":
+                cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["EXP"]
             elif op_type == "SOFTMAX":
                 # Softmax(x) = exp(x) / sum(exp(x))
                 cycle_per_elem = (ArchitectureFeatures.output_cycles_per_elem["EXP"] + ArchitectureFeatures.output_cycles_per_elem["RECIPROCAL"] + \
@@ -272,17 +274,20 @@ class simulator:
             OC = weight_shape[0]
             stride = 1
         elif op_type == "MEAN":
-            OH = ofm_shape[0]
-            OW = ofm_shape[1]
-            FH = 1
-            FW = 1
             axis_tensor = self.tensors[inputs[1]]
             axis = self.buffers[axis_tensor['buffer']]['data'][0]
-            ifm = tensors[inputs[0]]
-            ifm_shape = ifm.get("shape")
-            IC = ifm_shape[axis]
-            OC = 1
-            stride = 1
+            if axis == 2:
+                OH = ofm_shape[0]
+                OW = ofm_shape[1]
+                FH = 1
+                FW = ofm_shape[axis]
+                ifm = tensors[inputs[0]]
+                ifm_shape = ifm.get("shape")
+                IC = 1
+                OC = 1
+                stride = 1
+            else:
+                raise ValueError("Now only support mean along the axis 2")
         elif op_type == "MAX_POOL_2D":
             OH = ofm_shape[1]
             OW = ofm_shape[2]
@@ -320,11 +325,8 @@ class simulator:
         if op_type == "CONV_2D" or op_type == "DEPTHWISE_CONV_2D":
             weights_storage_size = oc * FH * FW * ic * (ofm_elem_size / 8)
             bias_storage_size = oh * ow * oc * (32 / 8)
-        if op_type == "FULLY_CONNECTED":
-            weights_storage_size = oc * 1 * 1 * ic * (ofm_elem_size / 8)
-        if op_type == "MEAN":
-            # All the weights are 1 (same to the ofm's data type)
-            weights_storage_size = ic * (ofm_elem_size / 8)
+        if op_type == "FULLY_CONNECTED" or op_type == "MEAN":
+            weights_storage_size = oc * FH * FW * ic * (ofm_elem_size / 8)
 
         # Check whether the tensors need to move from DRAM to SRAM
         # Check input tensor (transformer's V's FC needs additional handle)

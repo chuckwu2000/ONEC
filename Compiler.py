@@ -83,7 +83,7 @@ has_concat = False
 has_max_pool = False
 has_sub = False
 has_exp = False
-has_sum = False
+has_conv = False
 has_div = False
 # For convert the mean op
 has_depthwise_conv2d = False
@@ -99,8 +99,8 @@ for opcode in opcodes:
         has_sub = True
     elif opcode.get('deprecated_builtin_code',0) == 47:
         has_exp = True
-    elif opcode.get('deprecated_builtin_code',0) == 74:
-        has_sum = True
+    elif opcode.get('deprecated_builtin_code',0) == 3:
+        has_conv = True
     elif opcode.get('deprecated_builtin_code',0) == 42:
         has_div = True
 
@@ -135,11 +135,11 @@ if args.softmax_lowering:
             "version": 1,
             "builtin_code": "EXP"
             })
-    if has_sum == False:
+    if has_conv == False:
         new_opcodes.append({
-            "deprecated_builtin_code": 74,
+            "deprecated_builtin_code": 3,
             "version": 1,
-            "builtin_code": "SUM"
+            "builtin_code": "CONV_2D"
             })
     if has_div == False:
         new_opcodes.append({
