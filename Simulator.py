@@ -4,6 +4,7 @@ from Architecture_feature import ArchitectureFeatures
 from OpClassify import Op_Classify
 import math
 import struct
+import copy
 
 op_classify = Op_Classify()
 data_layout_ops = op_classify.data_layout_ops
@@ -223,7 +224,7 @@ class simulator:
         need_requant = False
 
         ofm = tensors[outputs[0]]
-        ofm_shape = ofm.get("shape")
+        ofm_shape = copy.deepcopy(ofm.get("shape"))
         if ofm.get("type") == "INT8":
             ifm_elem_size = 8
             ofm_elem_size = 8
@@ -252,6 +253,9 @@ class simulator:
             OC = filter_shape[0]
             stride = info["builtin_options"]["stride_h"]
         elif op_type == "DEPTHWISE_CONV_2D":
+            # Special case in mean's convert
+            if(len(ofm_shape) == 3):
+                ofm_shape.append(1)
             OH = ofm_shape[1]
             OW = ofm_shape[2]
             filter = tensors[inputs[1]]
@@ -289,12 +293,12 @@ class simulator:
             else:
                 raise ValueError("Now only support mean along the axis 2")
         elif op_type == "MAX_POOL_2D":
-            OH = ofm_shape[1]
-            OW = ofm_shape[2]
+            OH = ofm_shape[1] * ofm_shape[2]
+            OW = ofm_shape[3]
             FH = info["builtin_options"]["filter_height"]
             FW = info["builtin_options"]["filter_width"]
-            IC = ofm_shape[3]
-            OC = ofm_shape[3]
+            IC = 1
+            OC = 1
             stride = info["builtin_options"]["stride_h"]
         # This estimation is not accurate
         elif op_type == "BATCH_MATMUL":
@@ -591,7 +595,7 @@ class simulator:
             dma_cycles = op.estimated_DMA_cycles
             op_cycles = op.estimated_op_cycles
             op_total_cycles = op.estimated_total_cycles
-            # print("*" * 50)
-            # print(f"order: {order}, opid: {opid}, opcode_type: {opcode_type}, DMA cycles: {dma_cycles}, OP cycles: {op_cycles}, Total cycles: {op_total_cycles}, out_id: {op.info['outputs'][0]}")
-            # print(f"op info: {op.info}")
-            # print(f"op output name: {self.tensors[op.info['outputs'][0]]['name']}")
+            print("*" * 50)
+            print(f"order: {order}, opid: {opid}, opcode_type: {opcode_type}, DMA cycles: {dma_cycles}, \
+                    OP cycles: {op_cycles}, Total cycles: {op_total_cycles}")
+            print(f"op info: {op.info}")
