@@ -899,44 +899,54 @@ class Splitter:
                 else:
                     paddings_H = 0
                     paddings_W = 0
+            
+            if split_dim == 1:
+                # generate splitted conv for each tile
+                for out_y in range(0, out_shape[1], output_split):
+                    new_op_info = copy.deepcopy(new_op_info_base)
 
-            # generate splitted conv for each tile
-            for out_y in range(0, out_shape[1], output_split):
-                new_op_info = copy.deepcopy(new_op_info_base)
+                    guard_inner_y = min(output_split, out_shape[1] - out_y)
 
-                guard_inner_y = min(output_split, out_shape[1] - out_y)
+                    new_inputs = []
+                    split_padding_H = -((out_y) * stride_h - paddings_H)
+                    split_padding_H = 0 if split_padding_H < 0 else split_padding_H
 
-                new_inputs = []
-                split_padding_H = -((out_y) * stride_h - paddings_H)
-                split_padding_H = 0 if split_padding_H < 0 else split_padding_H
+                    # inference required in_y from this tile
+                    required = []
+                    for out_inner_y in range(guard_inner_y):
+                        in_y_origin = (out_y + out_inner_y) * stride_h - paddings_H
+                        for h in range(ker_shape[1]):
+                            in_y = in_y_origin + h
+                            if in_y >= 0 and in_y < in_shape[1] and (in_y//input_split) not in required:
+                                required.append((in_y//input_split))
 
-                # inference required in_y from this tile
-                required = []
-                for out_inner_y in range(guard_inner_y):
-                    in_y_origin = (out_y + out_inner_y) * stride_h - paddings_H
-                    for h in range(ker_shape[1]):
-                        in_y = in_y_origin + h
-                        if in_y >= 0 and in_y < in_shape[1] and (in_y//input_split) not in required:
-                            required.append((in_y//input_split))
+                    # inputs
+                    for in_y in required:
+                        new_inputs.append(self.split_tensor_table[inputs[0]][in_y])
 
-                # inputs
-                for in_y in required:
-                    new_inputs.append(self.split_tensor_table[inputs[0]][in_y])
+                    padding_param_tensor = self.get_padding_param_tensor(split_padding_H, paddings_W)
+                    if (len(inputs) == 4):
+                        new_op_info['inputs'][3] = padding_param_tensor
+                        new_op_info['inputs'] += new_inputs
+                    else:
+                        new_op_info['inputs'] += [padding_param_tensor] + new_inputs
+                    new_op_info['inputs'][0] = new_op_info['inputs'][4]
 
-                padding_param_tensor = self.get_padding_param_tensor(split_padding_H, paddings_W)
-                if (len(inputs) == 4):
-                    new_op_info['inputs'][3] = padding_param_tensor
-                    new_op_info['inputs'] += new_inputs
-                else:
-                    new_op_info['inputs'] += [padding_param_tensor] + new_inputs
-                new_op_info['inputs'][0] = new_op_info['inputs'][4]
+                    # outputs
+                    new_op_info['outputs'] = [self.split_tensor_table[outputs[0]][int(out_y)//input_split]]
 
-                # outputs
-                new_op_info['outputs'] = [self.split_tensor_table[outputs[0]][int(out_y)//input_split]]
-
-                self.new_operators.append(new_op_info)
-                self.nodes[opid].split_id.append(split_op_id)
-                split_op_id += 1
+                    self.new_operators.append(new_op_info)
+                    self.nodes[opid].split_id.append(split_op_id)
+                    split_op_id += 1
+            else:
+                for a, b in zip(self.split_tensor_table[inputs[0]],
+                                self.split_tensor_table[outputs[0]]):
+                    new_op_info = copy.deepcopy(info)
+                    new_op_info['inputs'][0] = a
+                    new_op_info['outputs'] = [b]
+                    self.new_operators.append(new_op_info)
+                    self.nodes[opid].split_id.append(split_op_id)
+                    split_op_id += 1
 
     def split_dwconv(self, opid, input_split, output_split):
         info = self.nodes[opid].node.info
