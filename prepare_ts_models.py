@@ -16,6 +16,7 @@ parser.add_argument("--model_type", nargs='?', type=str,
                     default="bert")
 parser.add_argument("--verbose_performance", action='store_true')
 parser.add_argument("--pad_fusion", action='store_true')
+parser.add_argument("--remove_data_layout_op", action='store_true')
 parser.add_argument("--move_data_layout_op", action='store_true')
 parser.add_argument("--cancel_lowering", action='store_true')
 parser.add_argument("--genesys", action='store_true')
@@ -46,6 +47,8 @@ for split_height in [split_size]:
             cmd += " --pad_fusion"
         if args.verbose_performance:
             cmd += " --verbose_performance"
+        if args.remove_data_layout_op:
+            cmd += " --remove_data_layout_op"
         if args.move_data_layout_op:
             cmd += " --move_data_layout_op"
         if not args.cancel_lowering:

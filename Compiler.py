@@ -5,6 +5,7 @@ import os
 from MyGraph import Graph
 from AutoSplit import Splitter
 import tempfile
+from Sink_or_Hoist import Safe_Hoister_Splitter
 from TileSize_selection import TileSizeSelection
 from Softmax_lowering import SoftMax
 from Mean_convert import Mean
@@ -25,6 +26,7 @@ parser.add_argument("--split_height", nargs='?', type=int, required=False)
 parser.add_argument("--token_size", nargs='?', type=int, default=50)
 parser.add_argument("--model_type", nargs='?', type=str, default="bert")
 parser.add_argument("--pad_fusion", action='store_true')
+parser.add_argument("--remove_data_layout_op", action='store_true')
 parser.add_argument("--move_data_layout_op", action='store_true')
 parser.add_argument("--softmax_lowering", action='store_true')
 parser.add_argument("--mean_convert", action='store_true')
@@ -167,8 +169,11 @@ splitter = Splitter(ori_graph, model_type, args.token_size)
 if args.pad_fusion and model_type == 1:
     splitter.PaddingFusion()
 # When encount bert model, try to eliminate some data layout ops (only take effect on bert model)
-if args.move_data_layout_op and model_type == 0:
+if args.remove_data_layout_op and model_type == 0:
     splitter.Elminate_useless_data_layout_op()
+# Perform data layout sinking or hoisting
+if args.move_data_layout_op and model_type == 0:
+    Safe_Hoister_Splitter(splitter).data_layout_sink()
 # Perform softmax lowering
 if args.softmax_lowering:
     SoftMax(splitter).softmax_lowering()
