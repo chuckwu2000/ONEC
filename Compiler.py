@@ -5,7 +5,7 @@ import os
 from MyGraph import Graph
 from AutoSplit import Splitter
 import tempfile
-from Sink_or_Hoist import Safe_Hoister_Splitter
+from Sink_or_Hoist import Safe_Sinker_Hoister
 from TileSize_selection import TileSizeSelection
 from Softmax_lowering import SoftMax
 from Mean_convert import Mean
@@ -173,7 +173,7 @@ if args.remove_data_layout_op and model_type == 0:
     splitter.Elminate_useless_data_layout_op()
 # Perform data layout sinking or hoisting
 if args.move_data_layout_op and model_type == 0:
-    Safe_Hoister_Splitter(splitter).data_layout_sink()
+    Safe_Sinker_Hoister(splitter).data_layout_sink()
 # Perform softmax lowering
 if args.softmax_lowering:
     SoftMax(splitter).softmax_lowering()
