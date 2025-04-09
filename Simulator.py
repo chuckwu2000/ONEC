@@ -266,9 +266,7 @@ class simulator:
             OC = 1
             stride = info["builtin_options"]["stride_h"]
         elif op_type == "FULLY_CONNECTED":
-            ifm = tensors[inputs[0]]
-            ifm_shape = ifm.get("shape")
-            OH = ifm_shape[-2]
+            OH = ofm_shape[-2]
             OW = 1
             FH = 1
             FW = 1

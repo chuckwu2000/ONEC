@@ -209,9 +209,7 @@ class Safe_Sinker_Hoister:
         # Convert the buffer data to numpy array
         one_dim_arr = np.frombuffer(bytes(ori_buffer_info['data']), dtype = np_type)
         # If the buffer only contain one element (may loss shape info or shape = []), let the shape be [1]
-        shape = tensor_info.get("shape", [1])
-        if shape == []:
-            shape = [1]
+        shape = tensor_info.get("shape", [])
         # Reshape to the original shape
         np_arr = one_dim_arr.reshape(shape)
 
@@ -219,7 +217,7 @@ class Safe_Sinker_Hoister:
             del new_tensor_info_base['shape_signature']
 
         split_tensor_ids = []
-        if tile_dim >= len(shape):
+        if shape == [] or tile_dim >= len(shape):
             for i in range(0, 1, 1):
                 new_buffer_info = copy.deepcopy(new_buffer_info_base)
                 new_tensor_info = copy.deepcopy(new_tensor_info_base)

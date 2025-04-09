@@ -274,9 +274,7 @@ class Splitter:
         # Convert the buffer data to numpy array
         one_dim_arr = np.frombuffer(bytes(ori_buffer_info['data']), dtype = np_type)
         # If the buffer only contain one element (may loss shape info or shape = []), let the shape be [1]
-        shape = tensor_info.get("shape", [1])
-        if shape == []:
-            shape = [1]
+        shape = tensor_info.get("shape", [])
         # Reshape to the original shape
         np_arr = one_dim_arr.reshape(shape)
 
@@ -284,7 +282,7 @@ class Splitter:
             del new_tensor_info_base['shape_signature']
 
         import math
-        if tile_dim >= len(shape):
+        if shape == [] or tile_dim >= len(shape):
             for i in range(0, 1, 1):
                 new_buffer_info = copy.deepcopy(new_buffer_info_base)
                 new_tensor_info = copy.deepcopy(new_tensor_info_base)
@@ -386,7 +384,7 @@ class Splitter:
     def set_flow_with_avoid_split(self, opid):
         opcode_index = self.nodes[opid].node.info.get("opcode_index")
         opcode_type = self.opcodes[opcode_index].get("builtin_code")
-        if opcode_type == "FULLY_CONNECTED":
+        if opcode_type == "FULLY_CONNECTED" or opcode_type == "PACK":
             return
         self.nodes[opid].avoid_split = True
         for child in self.nodes[opid].node.children:
@@ -558,7 +556,7 @@ class Splitter:
         output_name = self.tensors[output]['name']
         # Check this reshape is from V's output
         k_or_v_reshape = False
-        if 'attn/Reshape_1' in output_name or 'attn/Reshape_2' in output_name:
+        if '/attn/Reshape_1' in output_name or '/attn/Reshape_2' in output_name:
             k_or_v_reshape = True
             # Set the avoid_split attribute of the ops in the flow to true
             self.set_flow_with_avoid_split(opid)
