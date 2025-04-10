@@ -171,15 +171,15 @@ if args.pad_fusion and model_type == 1:
 # When encount bert model, try to eliminate some data layout ops (only take effect on bert model)
 if args.remove_data_layout_op and model_type == 0:
     splitter.Elminate_useless_data_layout_op()
-# Perform data layout sinking or hoisting
-if args.move_data_layout_op and model_type == 0:
-    Safe_Sinker_Hoister(splitter).data_layout_sink()
 # Perform softmax lowering
-if args.softmax_lowering:
+if args.softmax_lowering and model_type == 0:
     SoftMax(splitter).softmax_lowering()
 # Perform mean convert
 if args.mean_convert:
     Mean(splitter).convert_mean_to_depthwise_conv()
+# Perform data layout sinking or hoisting
+if args.move_data_layout_op and model_type == 0:
+    Safe_Sinker_Hoister(splitter).data_layout_sink()
 ori_graph = splitter.ori_graph
 
 # Pick the best tile size
@@ -269,15 +269,6 @@ model_sim = simulator(pipeline_new_graph, weights_reuse_need_allocate_tensors)
 if args.verbose_performance:
     pipeline_dma_cycles, pipeline_op_cycles, pipeline_total_cycles = model_sim.estimate_model(pipeline = True)
     # model_sim.print_performance()
-    # print(f"cascade ops = {pipeline_new_graph.cascade_matched_ops}")
-    # print(f"match ops = {pipeline_new_graph.matched_ops}")
-    # total_fusion_ops = 0
-    # total_match_ops = 0
-    # for cascade_ops in pipeline_new_graph.cascade_matched_ops:
-    #     total_fusion_ops += len(cascade_ops)
-    # for match_ops in pipeline_new_graph.matched_ops:
-    #     total_match_ops += len(match_ops)
-    # print(f"total fusion ops = {total_fusion_ops}, total match ops = {total_match_ops}, total ops = {len(pipeline_new_graph.operators)}")
     print(f"After pipeline schedule: dma cycles = {pipeline_dma_cycles :.1f}, op cycles = {pipeline_op_cycles :.1f}, total cycles = {pipeline_total_cycles :.1f}")
     print(f"speedup = {((split_total_cycles/pipeline_total_cycles) - 1) * 100 :.2f}%")
 #######################################################
