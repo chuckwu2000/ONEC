@@ -290,7 +290,7 @@ class Splitter:
                 new_tensor_info['name'] += '_split_%d' % (i)
                 
                 # Extract the data
-                if len(shape) != 1:
+                if shape != [] and len(shape) != 1:
                     raise BaseException("The shape of the constant tensor is not supported")
                 
                 self.buffers.append(new_buffer_info)
@@ -370,15 +370,17 @@ class Splitter:
             del new_tensor_info_base['shape_signature']
 
         import math
-        for i in range(0, math.ceil(tensor_info['shape'][tile_dim] / tile_size), 1):
-            new_tensor_info = copy.deepcopy(new_tensor_info_base)
-            new_tensor_info['buffer'] = buffer_id
-            new_tensor_info['name'] += '_split_%d' % (i)
-            self.buffers.append({})
-            self.tensors.append(new_tensor_info)
+        # Let the split tensor table share the same tensor info
+        new_tensor_info = copy.deepcopy(new_tensor_info_base)
+        new_tensor_info['buffer'] = buffer_id
+        new_tensor_info['name'] += '_split_%d' % (0)
+        self.buffers.append({})
+        self.tensors.append(new_tensor_info)
+        self.split_tensor_table[tensor_id_in].append(tensor_id)
+        for i in range(1, math.ceil(tensor_info['shape'][tile_dim] / tile_size), 1):
             self.split_tensor_table[tensor_id_in].append(tensor_id)
-            buffer_id += 1
-            tensor_id += 1
+        buffer_id += 1
+        tensor_id += 1
 
     # Set the ops on the path from K or V's child to FC(which bert model usually perform multi-head self attention) with avoid_split
     def set_flow_with_avoid_split(self, opid):
@@ -577,6 +579,7 @@ class Splitter:
             raise "wrong output number"
         else:
             split_op_id = len(self.new_operators)
+            # Need to create a concat op to concatenate the split tensor
             if k_or_v_reshape:
                 parent_opid = self.nodes[opid].node.parents[0]
                 immediate_tensor = copy.deepcopy(self.tensors[inputs[0]])
@@ -594,13 +597,21 @@ class Splitter:
                 }
                 self.new_operators.append(concate_op_info)
             
-                for a in self.split_tensor_table[outputs[0]]:
-                    new_op_info = copy.deepcopy(info)
-                    new_op_info['inputs'][0] = immediate_tensor_id
-                    new_op_info['outputs'] = [a]
-                    self.new_operators.append(new_op_info)
-                    self.nodes[opid].split_id.append(split_op_id)
-                    split_op_id += 1
+                # Only need to create one new op, since this op avoid split
+                new_op_info = copy.deepcopy(info)
+                new_op_info['inputs'][0] = immediate_tensor_id
+                new_op_info['outputs'] = [self.split_tensor_table[outputs[0]][0]]
+                self.new_operators.append(new_op_info)
+                self.nodes[opid].split_id.append(split_op_id)
+                split_op_id += 1
+            elif self.nodes[opid].avoid_split:
+                # Only need to create one new op, since this op avoid split
+                new_op_info = copy.deepcopy(info)
+                new_op_info['inputs'][0] = self.split_tensor_table[inputs[0]][0]
+                new_op_info['outputs'] = [self.split_tensor_table[outputs[0]][0]]
+                self.new_operators.append(new_op_info)
+                self.nodes[opid].split_id.append(split_op_id)
+                split_op_id += 1
             else:
                 for a, b in zip(self.split_tensor_table[inputs[0]],
                                 self.split_tensor_table[outputs[0]]):
@@ -641,14 +652,23 @@ class Splitter:
             raise "wrong output number"
         else:
             split_op_id = len(self.new_operators)
-            for a, b in zip(self.split_tensor_table[inputs[0]],
-                            self.split_tensor_table[outputs[0]]):
+            if self.nodes[opid].avoid_split:
+                # Only need to create one new op, since this op avoid split
                 new_op_info = copy.deepcopy(info)
-                new_op_info['inputs'][0] = a
-                new_op_info['outputs'] = [b]
+                new_op_info['inputs'][0] = self.split_tensor_table[inputs[0]][0]
+                new_op_info['outputs'] = [self.split_tensor_table[outputs[0]][0]]
                 self.new_operators.append(new_op_info)
-                self.nodes[opid].split_id.append(split_op_id)
-                split_op_id+=1
+                self.nodes[opid].split_id.append(len(self.new_operators))
+                split_op_id += 1
+            else:
+                for a, b in zip(self.split_tensor_table[inputs[0]],
+                                self.split_tensor_table[outputs[0]]):
+                    new_op_info = copy.deepcopy(info)
+                    new_op_info['inputs'][0] = a
+                    new_op_info['outputs'] = [b]
+                    self.new_operators.append(new_op_info)
+                    self.nodes[opid].split_id.append(split_op_id)
+                    split_op_id+=1
 
     def split_softmax(self, opid, output_split):
         info = self.nodes[opid].node.info
@@ -711,17 +731,29 @@ class Splitter:
             raise "wrong output number"
         else:
             split_op_id = len(self.new_operators)
-            for idx1, a in enumerate(self.split_tensor_table[inputs[1]]):
+            if self.nodes[opid].avoid_split:
+                # Only need to create one new op, since this op avoid split
                 new_op_info = copy.deepcopy(info)
-                new_op_info['inputs'][1] = a
+                new_op_info['inputs'][1] = self.split_tensor_table[inputs[1]][0]
                 new_op_output = []
-                for idx2 in range(num_splits):
-                    b = self.split_tensor_table[outputs[idx2]][idx1]
-                    new_op_output.append(b)
+                for idx in range(num_splits):
+                    new_op_output.append(self.split_tensor_table[outputs[idx]][0])
                 new_op_info['outputs'] = new_op_output
                 self.new_operators.append(new_op_info)
                 self.nodes[opid].split_id.append(split_op_id)
-                split_op_id+=1
+                split_op_id += 1
+            else:
+                for idx1, a in enumerate(self.split_tensor_table[inputs[1]]):
+                    new_op_info = copy.deepcopy(info)
+                    new_op_info['inputs'][1] = a
+                    new_op_output = []
+                    for idx2 in range(num_splits):
+                        b = self.split_tensor_table[outputs[idx2]][idx1]
+                        new_op_output.append(b)
+                    new_op_info['outputs'] = new_op_output
+                    self.new_operators.append(new_op_info)
+                    self.nodes[opid].split_id.append(split_op_id)
+                    split_op_id+=1
 
     def split_split_v(self, opid, output_split):
         info = self.nodes[opid].node.info
@@ -758,10 +790,7 @@ class Splitter:
         info = self.nodes[opid].node.info
 
         split_dim = self.nodes[opid].node.split_dim
-        if self.nodes[opid].avoid_split:
-            self.split_tensor_by_n_with_same_info(info['outputs'][0], output_split, split_dim)
-        else:
-            self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
+        self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
         for child in self.nodes[opid].node.children:
             self.nodes[child].node.split_dim = self.nodes[opid].node.split_dim
 
@@ -1022,16 +1051,38 @@ class Splitter:
         else:
             split_op_id = len(self.new_operators)
             if k_or_v_fc:
-                # For K or V's FC, we decide to avoid split, perform fake concatenate
-                for a in self.split_tensor_table[outputs[0]]:
-                    new_op_info = copy.deepcopy(info)
-                    for b in self.split_tensor_table[inputs[0]]:
-                        new_op_info['inputs'].append(b)
-                    new_op_info['inputs'][0] = self.split_tensor_table[inputs[0]][0]
-                    new_op_info['outputs'] = [a]
-                    self.new_operators.append(new_op_info)
-                    self.nodes[opid].split_id.append(split_op_id)
-                    split_op_id += 1
+                # For K or V's FC, need to create a concat op to concatenate the split tensor
+                parent_opid = self.nodes[opid].node.parents[0]
+                immediate_tensor = copy.deepcopy(self.tensors[inputs[0]])
+                self.tensors.append(immediate_tensor)
+                immediate_tensor_id = len(self.tensors) - 1
+                # Add a concate op before the fullyconnected op
+                concate_op_info = {
+                    "opcode_index": self.get_opcode_index(2),
+                    "inputs": copy.deepcopy(self.split_tensor_table[inputs[0]]),
+                    "outputs": [immediate_tensor_id],
+                    "builtin_options_type": "ConcatenationOptions",
+                    "builtin_options": {
+                        "axis": self.nodes[parent_opid].node.split_dim
+                    }
+                }
+                self.new_operators.append(concate_op_info)
+                
+                # Only need to create one new op, since this op avoid split
+                new_op_info = copy.deepcopy(info)
+                new_op_info['inputs'][0] = immediate_tensor_id
+                new_op_info['outputs'] = [self.split_tensor_table[outputs[0]][0]]
+                self.new_operators.append(new_op_info)
+                self.nodes[opid].split_id.append(split_op_id)
+                split_op_id += 1
+            elif self.nodes[opid].avoid_split:
+                # Only need to create one new op, since this op avoid split
+                new_op_info = copy.deepcopy(info)
+                new_op_info['inputs'][0] = self.split_tensor_table[inputs[0]][0]
+                new_op_info['outputs'] = [self.split_tensor_table[outputs[0]][0]]
+                self.new_operators.append(new_op_info)
+                self.nodes[opid].split_id.append(split_op_id)
+                split_op_id += 1
             elif weight_had_splitted:
                 for a, b, c in zip(self.split_tensor_table[inputs[0]],
                                 self.split_tensor_table[inputs[1]],
@@ -1192,47 +1243,54 @@ class Splitter:
             raise BaseException("split number of two operand is not equal")
         else:
             split_op_id = len(self.new_operators)
-            # We don't split the constant value, if it need to be broadcast
-            if have_constant and need_broadcast:
-                if input1_need_broadcast:
-                    for a, b in zip(self.split_tensor_table[inputs[1]],
-                                    self.split_tensor_table[outputs[0]]):
-                        new_op_info = copy.deepcopy(info)
-                        new_op_info['inputs'][0] = self.split_tensor_table[inputs[0]][0]
-                        new_op_info['inputs'][1] = a
-                        new_op_info['outputs'] = [b]
-                        self.new_operators.append(new_op_info)
-                        self.nodes[opid].split_id.append(split_op_id)
-                        split_op_id+=1
-                elif input2_need_broadcast:
-                    for a, b in zip(self.split_tensor_table[inputs[0]],
-                                    self.split_tensor_table[outputs[0]]):
-                        new_op_info = copy.deepcopy(info)
-                        new_op_info['inputs'][0] = a
-                        new_op_info['inputs'][1] = self.split_tensor_table[inputs[1]][0]
-                        new_op_info['outputs'] = [b]
-                        self.new_operators.append(new_op_info)
-                        self.nodes[opid].split_id.append(split_op_id)
-                        split_op_id+=1
+            if self.nodes[opid].avoid_split:
+                # Only need to create one new op, since this op avoid split
+                new_op_info = copy.deepcopy(info)
+                new_op_info['inputs'][0] = self.split_tensor_table[inputs[0]][0]
+                new_op_info['inputs'][1] = self.split_tensor_table[inputs[1]][0]
+                new_op_info['outputs'] = [self.split_tensor_table[outputs[0]][0]]
+                self.new_operators.append(new_op_info)
+                self.nodes[opid].split_id.append(split_op_id)
+                split_op_id += 1
             else:
-                for a, b, c in zip(self.split_tensor_table[inputs[0]],
-                                self.split_tensor_table[inputs[1]],
-                                self.split_tensor_table[outputs[0]]):
-                    new_op_info = copy.deepcopy(info)
-                    new_op_info['inputs'] = [a,b]
-                    new_op_info['outputs'] = [c]
-                    self.new_operators.append(new_op_info)
-                    self.nodes[opid].split_id.append(split_op_id)
-                    split_op_id+=1
+                # We don't split the constant value, if it need to be broadcast
+                if have_constant and need_broadcast:
+                    if input1_need_broadcast:
+                        for a, b in zip(self.split_tensor_table[inputs[1]],
+                                        self.split_tensor_table[outputs[0]]):
+                            new_op_info = copy.deepcopy(info)
+                            new_op_info['inputs'][0] = self.split_tensor_table[inputs[0]][0]
+                            new_op_info['inputs'][1] = a
+                            new_op_info['outputs'] = [b]
+                            self.new_operators.append(new_op_info)
+                            self.nodes[opid].split_id.append(split_op_id)
+                            split_op_id += 1
+                    elif input2_need_broadcast:
+                        for a, b in zip(self.split_tensor_table[inputs[0]],
+                                        self.split_tensor_table[outputs[0]]):
+                            new_op_info = copy.deepcopy(info)
+                            new_op_info['inputs'][0] = a
+                            new_op_info['inputs'][1] = self.split_tensor_table[inputs[1]][0]
+                            new_op_info['outputs'] = [b]
+                            self.new_operators.append(new_op_info)
+                            self.nodes[opid].split_id.append(split_op_id)
+                            split_op_id += 1
+                else:
+                    for a, b, c in zip(self.split_tensor_table[inputs[0]],
+                                    self.split_tensor_table[inputs[1]],
+                                    self.split_tensor_table[outputs[0]]):
+                        new_op_info = copy.deepcopy(info)
+                        new_op_info['inputs'] = [a,b]
+                        new_op_info['outputs'] = [c]
+                        self.new_operators.append(new_op_info)
+                        self.nodes[opid].split_id.append(split_op_id)
+                        split_op_id += 1
 
     def split_sub(self, opid, output_split):
         info = self.nodes[opid].node.info
 
         split_dim = self.nodes[opid].node.split_dim
-        if self.nodes[opid].avoid_split:
-            self.split_tensor_by_n_with_same_info(info['outputs'][0], output_split, split_dim)
-        else:
-            self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
+        self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
         for child in self.nodes[opid].node.children:
             self.nodes[child].node.split_dim = self.nodes[opid].node.split_dim
 
@@ -1312,10 +1370,7 @@ class Splitter:
         info = self.nodes[opid].node.info
 
         split_dim = self.nodes[opid].node.split_dim
-        if self.nodes[opid].avoid_split:
-            self.split_tensor_by_n_with_same_info(info['outputs'][0], output_split, split_dim)
-        else:
-            self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
+        self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
         for child in self.nodes[opid].node.children:
             self.nodes[child].node.split_dim = self.nodes[opid].node.split_dim
         
@@ -1395,10 +1450,7 @@ class Splitter:
         info = self.nodes[opid].node.info
 
         split_dim = self.nodes[opid].node.split_dim
-        if self.nodes[opid].avoid_split:
-            self.split_tensor_by_n_with_same_info(info['outputs'][0], output_split, split_dim)
-        else:
-            self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
+        self.split_tensor_by_n(info['outputs'][0], output_split, split_dim)
         for child in self.nodes[opid].node.children:
             self.nodes[child].node.split_dim = self.nodes[opid].node.split_dim
         
@@ -1968,17 +2020,28 @@ class Splitter:
         if opcode_type == 'PACK':
             number_of_concate = len(info['inputs'])
 
-        for i in range(number_of_concate):
-            new_op_info = {
-                "opcode_index": self.get_opcode_index(2),
-                "inputs": copy.deepcopy(self.split_tensor_table[info['inputs'][i]]),
-                "outputs": [info['inputs'][i]],
-                "builtin_options_type": "ConcatenationOptions",
-                "builtin_options": {
-                    'axis': 1
+        cancel_concat = False
+        # Check if parent op is avoid split
+        for parent in self.nodes[end_opid].node.parents:
+            if self.nodes[parent].avoid_split:
+                cancel_concat = True
+
+        if cancel_concat:
+            # Just update the end_opid's inputs
+            for i in range(len(info['inputs'])):
+                info['inputs'][i] = self.split_tensor_table[info['inputs'][i]][0]
+        else:
+            for i in range(number_of_concate):
+                new_op_info = {
+                    "opcode_index": self.get_opcode_index(2),
+                    "inputs": copy.deepcopy(self.split_tensor_table[info['inputs'][i]]),
+                    "outputs": [info['inputs'][i]],
+                    "builtin_options_type": "ConcatenationOptions",
+                    "builtin_options": {
+                        'axis': 1
+                    }
                 }
-            }
-            self.new_operators.append(new_op_info)
+                self.new_operators.append(new_op_info)
 
     def get_opcode_index(self, deprecated_builtin_code):
         for i, code in enumerate(self.opcodes):

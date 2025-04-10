@@ -225,7 +225,7 @@ class Safe_Sinker_Hoister:
                 new_tensor_info['name'] += '_split_%d' % (i)
                 
                 # Extract the data
-                if len(shape) != 1:
+                if shape != [] and len(shape) != 1:
                     raise BaseException("The shape of the constant tensor is not supported")
                 
                 self.buffers.append(new_buffer_info)
