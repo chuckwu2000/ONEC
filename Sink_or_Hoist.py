@@ -44,6 +44,9 @@ class Safe_Sinker_Hoister:
             # Record the last op's child for updating pack op's child
             final_opid = last_op_in_pattern.children[0]
             final_op = self.ops[final_opid]
+            # Solve the case in gpt2, since our split_reshape will update the split dim's track, but other ops won't
+            # We plan use this flag to help other ops to remove the head dim(which made by pack), keep input shape equal to output shape
+            encount_reshape = False
             # In the initial phase, the input tensor is multi-head attention's fully connected op's output tensor
             split_input_tensor_ids = pack_op.info['inputs']
             for op in pattern[1:]:
@@ -63,6 +66,12 @@ class Safe_Sinker_Hoister:
                             if len(split_input_tensor2_ids) != head_num:
                                 for _ in range(head_num - 1):
                                     split_input_tensor2_ids.append(split_input_tensor2_ids[0])
+                        if opcode_type == "RESHAPE":
+                            encount_reshape = True
+                        if not encount_reshape:
+                            # Update the output tensor id
+                            for i in range(head_num):
+                                del self.tensors[split_output_tensor_ids[i]]['shape'][dim]
                         break
                 # Record the next layer's opids for updating the new op's children
                 next_opids = []
