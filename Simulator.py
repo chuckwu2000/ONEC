@@ -207,7 +207,7 @@ class simulator:
             op_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
 
         dram_transfer_size -= (initial_dram_reads + final_dram_writes)
-        dram_bandwidth = (ArchitectureFeatures.axi_bit_width / 8) * ArchitectureFeatures.Dram_burst_length
+        dram_bandwidth = ArchitectureFeatures.axi_bit_width / 8
         # First tile's read from DRAM & last tile's write to DRAM can't be overlapped
         latency = math.ceil(initial_dram_reads / float(dram_bandwidth)) + math.ceil(final_dram_writes / float(dram_bandwidth))
         dram_transfer_cycles = math.ceil(dram_transfer_size / float(dram_bandwidth))
@@ -275,21 +275,6 @@ class simulator:
             IC = weight_shape[1]
             OC = weight_shape[0]
             stride = 1
-        elif op_type == "MEAN":
-            axis_tensor = self.tensors[inputs[1]]
-            axis = self.buffers[axis_tensor['buffer']]['data'][0]
-            if axis == 2:
-                OH = ofm_shape[0]
-                OW = ofm_shape[1]
-                FH = 1
-                FW = ofm_shape[axis]
-                ifm = tensors[inputs[0]]
-                ifm_shape = ifm.get("shape")
-                IC = 1
-                OC = 1
-                stride = 1
-            else:
-                raise ValueError("Now only support mean along the axis 2")
         elif op_type == "MAX_POOL_2D":
             OH = ofm_shape[1] * ofm_shape[2]
             OW = ofm_shape[3]
@@ -327,7 +312,7 @@ class simulator:
         if op_type == "CONV_2D" or op_type == "DEPTHWISE_CONV_2D":
             weights_storage_size = oc * FH * FW * ic * (ofm_elem_size / 8)
             bias_storage_size = oh * ow * oc * (32 / 8)
-        if op_type == "FULLY_CONNECTED" or op_type == "MEAN":
+        if op_type == "FULLY_CONNECTED":
             weights_storage_size = oc * FH * FW * ic * (ofm_elem_size / 8)
 
         # Check whether the tensors need to move from DRAM to SRAM
@@ -392,10 +377,6 @@ class simulator:
         # Depthwise convolution will multiply the output channel
         if op_type == "DEPTHWISE_CONV_2D":
             op_cycles *= ofm_shape[3]
-        # MEAN need to perform divide operation
-        if op_type == "MEAN":
-            cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["RECIPROCAL"] + ArchitectureFeatures.output_cycles_per_elem["MUL"]
-            op_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
         if need_requant:
             cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"]
             op_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
@@ -481,7 +462,7 @@ class simulator:
         middle_dram_accesses = total_dram_accesses - initial_dram_reads - final_dram_writes
 
         # Compute the latency (fisrt tile's read & last tile's write can't be overlapped)
-        dram_bandwidth = (ArchitectureFeatures.axi_bit_width / 8) * ArchitectureFeatures.Dram_burst_length
+        dram_bandwidth = ArchitectureFeatures.axi_bit_width / 8
         latency = math.ceil(initial_dram_reads / float(dram_bandwidth)) + math.ceil(final_dram_writes / float(dram_bandwidth))
         memory_cycles_required = int(math.ceil(float(middle_dram_accesses) / dram_bandwidth))
         return memory_cycles_required, latency

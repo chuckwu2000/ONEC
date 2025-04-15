@@ -23,20 +23,47 @@ class Mean:
 
             # Step 1: Create depthwise conv2d op to compute the mean value of the input tensor in axis
             #         Perform the div(reduce_size) with output tensor's quantization scale
+            # Get the axis dim info & the reduce size
             axis_tensor = self.tensors[op.info['inputs'][1]]
-            axis = self.buffers[axis_tensor['buffer']]['data'][0]
-            reduce_size = self.tensors[mean_input_tensor_id]['shape'][axis]
+            axis_buffer = self.buffers[axis_tensor['buffer']]
+            axis_shape = axis_tensor.get('shape', [])
+            axis_list = []
+            multi_axis = False
+            # Check whether needs to reduce > 2 dimensions
+            if axis_shape != [] and axis_shape[0] > 1:
+                multi_axis = True
+                for i in range(axis_shape[0]):
+                    axis_list.append(axis_buffer['data'][i * 4])
+            else:
+                axis_list.append(axis_buffer['data'][0])
+            
+            # Set the reduce size for the division, now only support same reduce size
+            reduce_size = self.tensors[mean_input_tensor_id]['shape'][axis_list[0]]
+            if multi_axis:
+                for axis in axis_list[1:]:
+                    if reduce_size != self.tensors[mean_input_tensor_id]['shape'][axis]:
+                        raise 'unsupported mean format, if multi reduce axis, the reduce size must be same!!'
 
             # Step 1.1: Prepare for the depthwise conv2d op's needed info
             input_shape = self.tensors[mean_input_tensor_id]['shape']
-            if len(input_shape) == 4 and axis in [1, 2]:
-                height = input_shape[1] if axis == 1 else 1
-                width = input_shape[2] if axis == 2 else 1
+            output_shape = self.tensors[mean_output_tensor_id]['shape']
+            # If keep_dims is false, we set output shape equal to input shape
+            if len(input_shape) != len(output_shape):
+                # Set reduce axis to 1 at the create output tensor phase
+                self.tensors[mean_output_tensor_id]['shape'] = input_shape
+
+            if len(input_shape) == 4:
+                if 0 in axis_list or 3 in axis_list:
+                    raise 'unsupported mean format, if 4D input tensor, the reduce axis must be 1, 2!!'
+                height = input_shape[1] if 1 in axis_list else 1
+                width = input_shape[2] if 2 in axis_list else 1
                 channel = input_shape[3]
             # If the input tensor is 3D, change it to 4D, and if the mean over depth-axis, left shift the channel dim
             elif len(input_shape) == 3:
-                height = input_shape[1] if axis == 1 else 1
-                width = input_shape[2] if axis == 2 else 1
+                if 0 in axis_list:
+                    raise 'unsupported mean format, if 3D input tensor, the reduce axis must be 1, 2!!'
+                height = input_shape[1] if 1 in axis_list else 1
+                width = input_shape[2] if 2 in axis_list else 1
                 channel = 1
             else:
                 raise 'unsupported mean format!!'
@@ -65,7 +92,8 @@ class Mean:
             # Step 1.3: Create the output tensor of the depthwise conv2d op
             depthwise_conv2d_output_tensor = self.tensors[mean_output_tensor_id]
             depthwise_conv2d_output_tensor['name'] = 'mean_lower_depthwise_conv2d_%d' % i
-            depthwise_conv2d_output_tensor['shape'][axis] = 1
+            for axis in axis_list:
+                depthwise_conv2d_output_tensor['shape'][axis] = 1
             # Since Y = S_in * S_w * sigma(Xq - Z_in) = S_in * sigma(Xq - Z_in) [S_w = 1.0]
             # Div the reduce_size: Y = S_in / reduce_size * sigma(Xq - Z_in)
             # Yq = Y / S_out + Z_out = S_in / reduce_size / S_out * sigma(Xq - Z_in) + Z_out
@@ -134,12 +162,3 @@ class Mean:
             if code.get('deprecated_builtin_code', 0) == deprecated_builtin_code:
                 return i
         raise 'opcode not found'
-
-    def int_list_to_byte_list(self, ints):
-        out = []
-        for num in ints:
-            if(type(num) != int):
-                print(type(num))
-                raise "int_list_to_byte_list: type error"
-            out += [ b for b in (num).to_bytes(length = 4, byteorder = 'little')]
-        return out

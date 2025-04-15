@@ -10,12 +10,10 @@ class ArchitectureFeatures:
     # Assume bandwidth in SRAM (assume 10 times faster) and DRAM (16 GB/s)
     # DDR4 DRAM's DIMM always 64-bit wide, and can bursts of 8 data words -> gives 64 bytes per burst 
     # DMA will fetch SRAM_burst_length(bytes) in one cycle
-    axi_bit_width = 64
+    axi_bit_width = 512
     core_clock = 2e9
     Sram_clock_scale = 10
-    Sram_burst_length = 8
     Dram_clock_scale = 1
-    Dram_burst_length = 8
     
     # MAC configuration is refer to Planaria
     MAC_height = 128

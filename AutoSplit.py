@@ -188,16 +188,6 @@ class Splitter:
                     if child not in end_ids:
                         end_ids.append(child)
                     return None
-                
-            # Check if mean's keep_dims is True (if not, it is non-splittable op)
-            if opcode_type == "MEAN":
-                info = self.nodes[child].node.info
-                input_shape = self.tensors[info['inputs'][0]]['shape']
-                output_shape = self.tensors[info['outputs'][0]]['shape']
-                if len(input_shape) != len(output_shape):
-                    if child not in end_ids:
-                        end_ids.append(child)
-                    return None
 
             # Check if it is splittable op
             if self.nodes[child].node.info.get("opcode_index",0) in self.splittable_opcode_idxes.values():
@@ -1552,6 +1542,7 @@ class Splitter:
                 self.nodes[opid].split_id.append(split_op_id)
                 split_op_id+=1
 
+    # Not use any more since we perform mean convert
     def split_mean(self, opid, output_split):
         info = self.nodes[opid].node.info
 

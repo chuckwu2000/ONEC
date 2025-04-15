@@ -2,10 +2,11 @@ class Op_Classify:
     def __init__(self):
         # The operation that will be fall back to CPU
         self.data_layout_ops = ["CONCATENATION", "SPLIT", "SPLIT_V", "TRANSPOSE", "RESIZE_NEAREST_NEIGHBOR", "PACK", "RESHAPE", "SLICE"]
+        self.cpu_ops = ["REDUCE_MAX", "SUM"]
         self.fall_back_cpu_ops = list(set(self.data_layout_ops) - set(["RESHAPE"]))
 
         # MAC main operation
-        self.mac_ops = ["CONV_2D", "DEPTHWISE_CONV_2D", "FULLY_CONNECTED", "MEAN", "MAX_POOL_2D", "BATCH_MATMUL", "REDUCE_MAX", "SUM"]
+        self.mac_ops = ["CONV_2D", "DEPTHWISE_CONV_2D", "FULLY_CONNECTED", "MEAN", "MAX_POOL_2D", "BATCH_MATMUL"]
 
         # The operation that need weights
         self.need_weights_ops = ["CONV_2D", "DEPTHWISE_CONV_2D", "FULLY_CONNECTED", "BATCH_MATMUL"]
