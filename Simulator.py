@@ -243,6 +243,7 @@ class simulator:
         # Now only support batch = 1
         B = 1
         if op_type == "CONV_2D":
+            B = ofm_shape[0]
             OH = ofm_shape[1]
             OW = ofm_shape[2]
             filter = tensors[inputs[1]]
@@ -256,6 +257,7 @@ class simulator:
             # Special case in mean's convert
             if(len(ofm_shape) == 3):
                 ofm_shape.append(1)
+            B = ofm_shape[0]
             OH = ofm_shape[1]
             OW = ofm_shape[2]
             filter = tensors[inputs[1]]
@@ -276,8 +278,14 @@ class simulator:
             OC = weight_shape[0]
             stride = 1
         elif op_type == "MAX_POOL_2D":
-            OH = ofm_shape[1] * ofm_shape[2]
-            OW = ofm_shape[3]
+            if (len(ofm_shape) == 3):
+                B = ofm_shape[0]
+                OH = ofm_shape[1]
+                OW = ofm_shape[2]
+            else:
+                B = ofm_shape[0]
+                OH = ofm_shape[1] * ofm_shape[2]
+                OW = ofm_shape[3]
             FH = info["builtin_options"]["filter_height"]
             FW = info["builtin_options"]["filter_width"]
             IC = 1

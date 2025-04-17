@@ -1000,9 +1000,18 @@ class Splitter:
         inputs = info['inputs']
         outputs = info['outputs']
 
+        # There have the case that the FC's input might be constant tensor, and the weight tensor is computed by the other op
+        # Since the weight need to fully compute, we don't support that if weight has been splitted
+        input_is_constant = False
+        if len(self.buffers[self.tensors[info['inputs'][0]]['buffer']]) != 0:
+            input_is_constant = True
+            self.nodes[opid].avoid_split = True
+            if len(self.split_tensor_table[inputs[1]]) > 1:
+                raise "Fullyconnected's weight tensor had been splitted, but the input is constant tensor, not support this case now"
+
         # Check fc's weight whether had been splitted
         weight_had_splitted = True
-        if(self.split_tensor_table.get(inputs[1]) == None):
+        if len(self.split_tensor_table[inputs[1]]) == 0:
             weight_had_splitted = False
         # Whether to split the fc's output tensor
         k_or_v_fc = False
@@ -1067,12 +1076,20 @@ class Splitter:
                 split_op_id += 1
             elif self.nodes[opid].avoid_split:
                 # Only need to create one new op, since this op avoid split
-                new_op_info = copy.deepcopy(info)
-                new_op_info['inputs'][0] = self.split_tensor_table[inputs[0]][0]
-                new_op_info['outputs'] = [self.split_tensor_table[outputs[0]][0]]
-                self.new_operators.append(new_op_info)
-                self.nodes[opid].split_id.append(split_op_id)
-                split_op_id += 1
+                if input_is_constant:
+                    new_op_info = copy.deepcopy(info)
+                    new_op_info['inputs'][1] = self.split_tensor_table[inputs[1]][0]
+                    new_op_info['outputs'] = [self.split_tensor_table[outputs[0]][0]]
+                    self.new_operators.append(new_op_info)
+                    self.nodes[opid].split_id.append(split_op_id)
+                    split_op_id += 1
+                else:
+                    new_op_info = copy.deepcopy(info)
+                    new_op_info['inputs'][0] = self.split_tensor_table[inputs[0]][0]
+                    new_op_info['outputs'] = [self.split_tensor_table[outputs[0]][0]]
+                    self.new_operators.append(new_op_info)
+                    self.nodes[opid].split_id.append(split_op_id)
+                    split_op_id += 1
             elif weight_had_splitted:
                 for a, b, c in zip(self.split_tensor_table[inputs[0]],
                                 self.split_tensor_table[inputs[1]],
@@ -1983,7 +2000,7 @@ class Splitter:
 
           }
         axis_buffer = {
-            "data": self.int_list_to_byte_list([1])
+            "data": self.int_list_to_byte_list([split_dim])
         }
         self.tensors.append(axis_tensor)
         self.buffers.append(axis_buffer)
