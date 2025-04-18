@@ -5,6 +5,7 @@ import os
 from MyGraph import Graph
 from AutoSplit import Splitter
 import tempfile
+from Eliminate_data_layout_op import Eliminater
 from Sink_or_Hoist import Safe_Sinker_Hoister
 from TileSize_selection import TileSizeSelection
 from Softmax_lowering import SoftMax
@@ -15,7 +16,7 @@ from Pipeline_schedule import set_active_engine
 from Pipeline_schedule import pipeline_schedule
 from GeneSys_schedule import genesys_schedule
 from Simulator import simulator
-from memory_allocation import memory_allocator
+from Memory_allocation import memory_allocator
 
 parser = argparse.ArgumentParser()
 parser.add_argument("model_path")
@@ -170,7 +171,7 @@ if args.pad_fusion and model_type == 1:
     splitter.PaddingFusion()
 # When encount bert model, try to eliminate some data layout ops (only take effect on bert model)
 if args.remove_data_layout_op and model_type == 0:
-    splitter.Elminate_useless_data_layout_op()
+    Eliminater(splitter).Eliminate_useless_data_layout_op()
 # Perform softmax lowering
 if args.softmax_lowering and model_type == 0:
     SoftMax(splitter).softmax_lowering()
@@ -269,7 +270,10 @@ model_sim = simulator(pipeline_new_graph, weights_reuse_need_allocate_tensors)
 if args.verbose_performance:
     pipeline_dma_cycles, pipeline_op_cycles, pipeline_total_cycles = model_sim.estimate_model(pipeline = True)
     # model_sim.print_performance()
-    print(f"After pipeline schedule: dma cycles = {pipeline_dma_cycles :.1f}, op cycles = {pipeline_op_cycles :.1f}, total cycles = {pipeline_total_cycles :.1f}")
+    if args.genesys:
+        print(f"After GeneSys schedule: dma cycles = {pipeline_dma_cycles :.1f}, op cycles = {pipeline_op_cycles :.1f}, total cycles = {pipeline_total_cycles :.1f}")
+    else:
+        print(f"After pipeline schedule: dma cycles = {pipeline_dma_cycles :.1f}, op cycles = {pipeline_op_cycles :.1f}, total cycles = {pipeline_total_cycles :.1f}")
     print(f"speedup = {((split_total_cycles/pipeline_total_cycles) - 1) * 100 :.2f}%")
 #######################################################
 

@@ -2,7 +2,7 @@ import json
 import argparse
 import os
 import tempfile
-from memory_allocation import memory_allocator
+from Memory_allocation import memory_allocator
 from OPGen import OPGen
 
 parser = argparse.ArgumentParser()
