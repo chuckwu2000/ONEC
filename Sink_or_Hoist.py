@@ -249,11 +249,15 @@ class Safe_Sinker_Hoister:
                     break
                 if len(next_op.parents) != 1:
                     # If both parents are pack/concatenate op, we can combine them, and pack can further sink
+                    can_not_sink = False
                     for parent in next_op.parents:
                         opcode_index = self.ops[parent].info.get("opcode_index")
                         opcode_type = self.opcodes[opcode_index].get("builtin_code")
                         if opcode_type not in sink_data_layout:
+                            can_not_sink = True
                             break
+                    if can_not_sink == True:
+                        break
                     # To avoid handle this op multiple times, make sure handle the next op in inputs[0]'s pack
                     if next_op.info['inputs'][0] in op.info['outputs']:
                         tmp_pattern.append(next_op)
