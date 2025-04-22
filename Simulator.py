@@ -14,8 +14,6 @@ need_bias_ops = op_classify.need_bias_ops
 unary_elementwise_ops = op_classify.unary_ops
 binary_elementwise_ops = op_classify.binary_ops
 elementwise_ops = op_classify.elementwise_ops
-need_requant_ops = op_classify.need_requant_ops
-need_dequant_ops = op_classify.need_dequant_ops
 
 class simulator:
     def __init__(self, model: Graph, tensors_info):
@@ -90,18 +88,11 @@ class simulator:
                 cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["LOGISTIC"]
             elif op_type == "EXP":
                 cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["EXP"]
-            elif op_type == "SOFTMAX":
-                # Softmax(x) = exp(x) / sum(exp(x))
-                cycle_per_elem = (ArchitectureFeatures.output_cycles_per_elem["EXP"] + ArchitectureFeatures.output_cycles_per_elem["RECIPROCAL"] + \
-                                ArchitectureFeatures.output_cycles_per_elem["MUL"])
-                # sum(exp(x)) can't be vectorized
-                reduce_sum_need = ifm_shape[-1]
-                reduce_cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["ADD/SUB"]
-                op_cycles += reduce_cycle_per_elem * reduce_sum_need
             elif op_type == "RSQRT":
-                # Rsqrt(x) = 1 / sqrt(x) almost equal to 3*mul + 1*sub
-                # Above reference: https://blog.csdn.net/qq_26499321/article/details/73724763
-                cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["RSQRT"]
+                # There have quick rsqrt method, but it looks like can't be used in our design
+                # Above reference: https://zh.wikipedia.org/zh-tw/%E5%B9%B3%E6%96%B9%E6%A0%B9%E5%80%92%E6%95%B0%E9%80%9F%E7%AE%97%E6%B3%95
+                # So, we use the LUT to get the rsqrt result
+                cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["LUT"]
             elif op_type == "POW":
                 # Pow(x, y) = x^y
                 # Extract the exponent from the second input tensor, tflite store the data in little-endian format
@@ -111,22 +102,19 @@ class simulator:
                 Exponent = int(struct.unpack('<f', exp_buffer_data)[0])
                 cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["MUL"] * (Exponent - 1)
             elif op_type == "TANH":
-                # Tanh(x) = (exp(x) - exp(-x)) / (exp(x) + exp(-x))
-                cycle_per_elem = (ArchitectureFeatures.output_cycles_per_elem["EXP"] * 2 + ArchitectureFeatures.output_cycles_per_elem["ADD/SUB"] * 2 + \
-                                ArchitectureFeatures.output_cycles_per_elem["RECIPROCAL"] + ArchitectureFeatures.output_cycles_per_elem["MUL"])
+                # Tanh(x): 2 * Logistic(2 * x) - 1
+                cycle_per_elem = (ArchitectureFeatures.output_cycles_per_elem["LOGISTIC"] + ArchitectureFeatures.output_cycles_per_elem["SUB"])
             elif op_type == "GELU":
                 # Gelu(x) = x * logistic(1.702 * x)
-                cycle_per_elem = (ArchitectureFeatures.output_cycles_per_elem["LOGISTIC"] + ArchitectureFeatures.output_cycles_per_elem["MUL"] * 2)
-            elif op_type == "QUANTIZE":
+                cycle_per_elem = (ArchitectureFeatures.output_cycles_per_elem["LOGISTIC"] + ArchitectureFeatures.output_cycles_per_elem["MUL"])
+            
+            if op_type == "QUANTIZE":
                 cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"]
             elif op_type == "DEQUANTIZE":
                 cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"]
-             
-            # Exponantial need to do dequant first
-            if need_requant and op_type in need_dequant_ops:
+            elif need_requant:
                 cycle_per_elem += ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"]
-            if need_requant and op_type in need_requant_ops:
-                cycle_per_elem += ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"]
+            
             op_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
         elif op_type in binary_elementwise_ops:
             ifm1 = tensors[inputs[0]]
@@ -199,11 +187,9 @@ class simulator:
                 # SquaredDifference(x, y) = (x - y)(x - y)
                 cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["ADD/SUB"] + ArchitectureFeatures.output_cycles_per_elem["MUL"]
             
-            # Exponantial need to do dequant first
-            if need_requant and op_type in need_dequant_ops:
+            if need_requant:
                 cycle_per_elem += ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"]
-            if need_requant and op_type in need_requant_ops:
-                cycle_per_elem += ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"]
+            
             op_cycles += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
 
         dram_transfer_size -= (initial_dram_reads + final_dram_writes)

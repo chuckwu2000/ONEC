@@ -7,7 +7,7 @@ class Mem_area(Enum):
     OffChipFlash = 3
 
 class ArchitectureFeatures:
-    # Assume bandwidth in SRAM (assume 10 times faster) and DRAM (16 GB/s)
+    # Assume bandwidth in SRAM (assume 10 times faster) and DRAM (19.2 GB/s)
     # DDR4 DRAM's DIMM always 64-bit wide, and can bursts of 8 data words -> gives 64 bytes per burst 
     # DMA will fetch SRAM_burst_length(bytes) in one cycle
     axi_bit_width = 512
@@ -33,8 +33,8 @@ class ArchitectureFeatures:
         "ADD/SUB": 1,
         "EXP": 1,
         "RECIPROCAL": 1,
+        # Logistic(x) = 1 / (1 + exp(-x)) => sub + exp + reciprocal
         "LOGISTIC": 3,
-        "RSQRT": 4,
         "DE/QUANTIZE": 1,
         "LUT": 1
     }

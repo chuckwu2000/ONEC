@@ -14,21 +14,14 @@ class Op_Classify:
         self.need_bias_ops = ["CONV_2D", "DEPTHWISE_CONV_2D", "FULLY_CONNECTED"]
 
         # Element-wise main operation
-        self.elementwise_ops = ["LOGISTIC", "SOFTMAX", "RSQRT", "POW", "TANH", "GELU", "QUANTIZE", "DEQUANTIZE", "EXP", \
+        self.elementwise_ops = ["LOGISTIC", "RSQRT", "POW", "TANH", "GELU", "QUANTIZE", "DEQUANTIZE", "EXP", \
                                 "ADD", "SUB", "MUL", "DIV", "SQUARED_DIFFERENCE"]
 
-        # The operation that need requantization
-        self.need_requant_ops = ["CONV_2D", "DEPTHWISE_CONV_2D", "FULLY_CONNECTED", "MEAN", "BATCH_MATMUL", "SUM", "LOGISTIC", \
-                            "SOFTMAX", "RSQRT", "TANH", "GELU", "EXP", "ADD", "SUB", "MUL", "DIV", "SQUARED_DIFFERENCE"]
-
-        # The operation that need dequantization
-        self.need_dequant_ops = ["LOGISTIC", "SOFTMAX", "RSQRT", "TANH", "GELU"]
-
         # The operation that need reduce
-        self.reduce_ops = ["MEAN", "REDUCE_MAX", "SOFTMAX", "SUM"]
+        self.reduce_ops = ["MEAN", "REDUCE_MAX", "SUM"]
 
         # The input of the operation
-        self.unary_ops = ["LOGISTIC", "RSQRT", "SOFTMAX", "GELU", "LEAKY_RELU", "REDUCE_MAX", "QUANTIZE", "DEQUANTIZE", \
-                          "TANH", "POW", "MEAN", "MAX_POOL_2D", "SUM", "EXP"]
+        self.unary_ops = ["LOGISTIC", "RSQRT", "GELU", "QUANTIZE", "DEQUANTIZE", \
+                          "TANH", "POW", "MEAN", "MAX_POOL_2D", "EXP"]
         self.binary_ops = ["ADD", "SUB", "MUL", "DIV", "SQUARED_DIFFERENCE", "BATCH_MATMUL"]
         self.trinary_ops = ["CONV_2D", "DEPTHWISE_CONV_2D", "FULLY_CONNECTED"]
