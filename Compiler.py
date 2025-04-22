@@ -173,7 +173,7 @@ if args.pad_fusion and model_type == 1:
 if args.remove_data_layout_op and model_type == 0:
     Eliminater(splitter).Eliminate_useless_data_layout_op()
 # Perform softmax lowering
-if args.softmax_lowering and model_type == 0:
+if args.softmax_lowering:
     SoftMax(splitter).softmax_lowering()
 # Perform mean convert
 if args.mean_convert:

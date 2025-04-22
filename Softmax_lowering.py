@@ -190,7 +190,8 @@ class SoftMax:
         for op in self.ops:
             opcode_index = op.info.get("opcode_index")
             opcode_type = self.opcodes[opcode_index].get("builtin_code")
-            if opcode_type == "SOFTMAX":
+            # For now, can't support that softmax op is the last op
+            if opcode_type == "SOFTMAX" and len(op.children) > 0:
                 softmax_ops.append(op)
         return softmax_ops
 
