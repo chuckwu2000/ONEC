@@ -17,11 +17,13 @@ from Pipeline_schedule import pipeline_schedule
 from GeneSys_schedule import genesys_schedule
 from Simulator import simulator
 from Memory_allocation import memory_allocator
+from CodeGen import CodeGen
 
 parser = argparse.ArgumentParser()
 parser.add_argument("model_path")
 parser.add_argument("--schema_path", nargs='?', default="utils/schema.fbs")
 parser.add_argument("--out_path")
+parser.add_argument("--code_path")
 parser.add_argument("--exec_order", nargs='?', default="DF")
 parser.add_argument("--split_height", nargs='?', type=int, required=False)
 parser.add_argument("--token_size", nargs='?', type=int, default=50)
@@ -281,8 +283,9 @@ if args.verbose_performance:
 mem_allocator.dram_allocate(weights_reuse_need_allocate_tensors)
 allocated_tensors = mem_allocator.allocated_tensors
 
-# TODO: CodeGen
-# CodeGen
+# Generate the code
+code_generator = CodeGen(pipeline_new_graph, allocated_tensors, pipeline_new_graph.cascade_matched_ops)
+code_generator.code_gen()
 
 # new_buffers, new_tensors, new_inputs, new_outputs, new_operators, new_opcodes = ori_graph.export()
 new_buffers, new_tensors, new_inputs, new_outputs, new_operators, new_opcodes = new_graph.export()
@@ -294,6 +297,10 @@ new_model['subgraphs'][0]['tensors'] = new_tensors
 new_model['subgraphs'][0]['inputs'] = new_inputs
 new_model['subgraphs'][0]['outputs'] = new_outputs
 new_model['subgraphs'][0]['operators'] = new_operators
+
+# Save the npu instructions
+with open(args.code_path, 'w') as f:
+    f.write(code_generator.npu_code)
 
 # Save the rewritten model
 with open(json_model_path, 'w') as f:

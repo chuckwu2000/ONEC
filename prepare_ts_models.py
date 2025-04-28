@@ -37,12 +37,16 @@ for split_height in [split_size]:
     for exec_order in ['DF']:
         subfolder_dir = os.path.join(folder_root, f"{model_name}_{exec_order}_{split_height}")
         os.makedirs(subfolder_dir, exist_ok=True)
+        # out_path: optimized tflite model
         out_path = f"{subfolder_dir}/{model_name}_splitted_{exec_order}_{split_height}.tflite"
+        # code_path: generated code
+        code_path = f"{subfolder_dir}/{model_name}_splitted_{exec_order}_{split_height}_code.txt"
         print(out_path)
         cmd =   f"python {rewriter_path} {tflite_path} --schema_path {schema_path}" \
                 f" --exec_order {exec_order} --split_height {split_height} --token_size {token_size}" \
                 f" --model_type {model_type}" \
-                f" --out_path {out_path}"
+                f" --out_path {out_path}" \
+                f" --code_path {code_path}"
         if args.pad_fusion:
             cmd += " --pad_fusion"
         if args.verbose_performance:

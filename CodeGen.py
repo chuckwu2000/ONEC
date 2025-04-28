@@ -1,67 +1,31 @@
-import json
-import argparse
-import os
-import tempfile
-from Memory_allocation import memory_allocator
 from OPGen import OPGen
 
-parser = argparse.ArgumentParser()
-parser.add_argument("model_path")
-parser.add_argument("--out_path")
-parser.add_argument("--schema_path", nargs='?', default='utils/schema.fbs')
-parser.add_argument("--pattern_path", nargs='?', default='models/')
-args = parser.parse_args()
+class CodeGen:
+    def __init__(self, graph, allocated_tensors, cascade_matched_ops):
+        self.graph = graph
+        self.operators = graph.operators
+        self.allocated_tensors = allocated_tensors
+        self.npu_code = ""
+        self.cascade_matched_ops = cascade_matched_ops
+        self.visited = [False for _ in range(len(graph.ops))]
 
-filename = os.path.basename(args.model_path)
-model_name = os.path.splitext(filename)[0]
-schema_path = args.schema_path
-pattern_path = args.pattern_path
-
-tmp_dir = tempfile.TemporaryDirectory(dir='.')
-tmp_dir_path = tmp_dir.name
-
-if os.path.splitext(filename)[1] != '.tflite':
-    raise "input model path doesn't match: .tflite extension is required"
-
-json_model_path = os.path.join(tmp_dir_path, f'{model_name}.json')
-os.system(f'flatc --json -o {tmp_dir_path} --raw-binary {schema_path} -- {args.model_path}')
-os.system(r'sed -i "s/\([^ ]*\):/\"\1\":/" ' + json_model_path)
-
-with open(json_model_path, 'r') as f:
-    model = json.load(f)
-
-with open(pattern_path, 'r') as f:
-    data = json.load(f)
-    cascade_matched_ops = data['cascade_matched_ops']
-    matched_ops = data['matched_ops']
-
-opcodes = model['operator_codes']
-buffers = model['buffers']
-subgraphs = model["subgraphs"]
-tensors = subgraphs[0]["tensors"]
-operators = subgraphs[0]["operators"]
-
-# Don't know why ADD's info is missing, so add it back
-for opcode in opcodes:
-    if opcode.get('deprecated_builtin_code',0) == 0:
-        opcode['deprecated_builtin_code'] = 0
-        opcode['builtin_code'] = "ADD"
-
-# Don't know why opcode_index 0 is missing, so add it back
-for operator in operators:
-    if 'opcode_index' not in operator:
-        operator['opcode_index'] = 0
-        operator['builtin_options_type'] = 'ReshapeOptions'
-
-_memory_allocator = memory_allocator(model, cascade_matched_ops, matched_ops)
-allocated_tensor = _memory_allocator.allocated_tensor
-
-npu_code = ""
-opgen = OPGen(model, allocated_tensor, npu_code)
-for operator in operators:
-    opgen.op_codegen(operator)
-
-with open(args.out_path, 'w') as f:
-    f.write(opgen.npu_code)
-
-tmp_dir.cleanup()
+    def code_gen(self):
+        op_code_generator = OPGen(self.graph, self.allocated_tensors)
+        # Follow the order of operators in the graph
+        for operator in self.operators:
+            if self.visited[operator.opid]:
+                continue
+            # Traverse the cascade_matched_ops, and 
+            for cascade_matched_pattern in self.cascade_matched_ops:
+                if operator.opid == cascade_matched_pattern[0]:
+                    # Generate code for the patterns
+                    operators = cascade_matched_pattern
+                    op_code = op_code_generator.op_code_gen(operators)
+                    self.npu_code += op_code
+                    for opid in cascade_matched_pattern:
+                        self.visited[opid] = True
+                else:
+                    # Generate code for the operator
+                    op_code = op_code_generator.op_code_gen(operator)
+                    self.npu_code += op_code
+                    self.visited[operator.opid] = True
