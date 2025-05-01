@@ -180,9 +180,8 @@ class simulator:
                 cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["ADD/SUB"]
             elif op_type == "MUL":
                 cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["MUL"]
-            elif op_type == "DIV":
-                # Div(x, y) = x * 1 / y
-                cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["RECIPROCAL"] + ArchitectureFeatures.output_cycles_per_elem["MUL"]
+            elif op_type == "RECIPROCAL":
+                cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["RECIPROCAL"]
             elif op_type == "SQUARED_DIFFERENCE":
                 # SquaredDifference(x, y) = (x - y)(x - y)
                 cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["ADD/SUB"] + ArchitectureFeatures.output_cycles_per_elem["MUL"]

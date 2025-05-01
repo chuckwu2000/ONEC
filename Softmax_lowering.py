@@ -107,20 +107,19 @@ class SoftMax:
             }
             self.tensors.append(weights_tensor)
             weights_tensor_id = len(self.tensors) - 1
-
             # Step 4.2: Create the output tensor of the conv2d op
             conv_output_tensor = copy.deepcopy(self.tensors[exp_output_tensor_id])
             conv_output_tensor['name'] = 'softmax_lower_conv2d_%d' % i
             conv_output_tensor['shape'][-1] = 1
             # Since summarize the last axis(reduce_size) of exp(Xq - Xq_max) = (0, reduce_size], sum's output scale is (reduce_size / 127.0), zero point is 0
-            np_int_scale = np.float32(reduce_size / 127.0).view('int32')
+            conv_output_scale = reduce_size / 127.0
+            np_int_scale = np.float32(conv_output_scale).view('int32')
             np_arr = np.array([np_int_scale], dtype=np.int32)
             int_scale = np_arr.tolist()
             conv_output_tensor['quantization']['scale'] = int_scale
             conv_output_tensor['quantization']['zero_point'] = [0]
             self.tensors.append(conv_output_tensor)
             conv_output_tensor_id = len(self.tensors) - 1
-
             # Step 4.3: Create the conv2d op
             conv_op = {
                 "opcode_index": self.get_opcode_index(3),
@@ -140,16 +139,44 @@ class SoftMax:
             conv_opid = len(self.operators) - 1
             self.ops.append(Node(conv_op, conv_opid))
 
-            # Step 5: Divide the exponential tensor by the sum tensor
-            divide_op = {
-                "opcode_index": self.get_opcode_index(42),
-                "inputs": [exp_output_tensor_id, conv_output_tensor_id],
-                "outputs": [softmax_output_tensor_id],
-                "builtin_options_type": "DivOptions"
+            # Step 5: Compute the reciprocal of the sum tensor
+            # Step 5.1: Create the output tensor of the reciprocal op
+            reciprocal_output_tensor = copy.deepcopy(self.tensors[conv_output_tensor_id])
+            reciprocal_output_tensor['name'] = 'softmax_lower_reciprocal_%d' % i
+            # Calculate the output tensor's scale
+            real_input_127 = 1 / (conv_output_scale * 127.0)
+            real_input_1 = 1 / (conv_output_scale * 1)
+            real_input_max = max(real_input_127, real_input_1)
+            real_input_min = min(real_input_127, real_input_1)
+            reciprocal_output_scale = (real_input_max - real_input_min) / 127.0
+            np_int_scale = np.float32(reciprocal_output_scale).view('int32')
+            np_arr = np.array([np_int_scale], dtype=np.int32)
+            int_scale = np_arr.tolist()
+            reciprocal_output_tensor['quantization']['scale'] = int_scale
+            reciprocal_output_tensor['quantization']['zero_point'] = [0]
+            self.tensors.append(reciprocal_output_tensor)
+            reciprocal_output_tensor_id = len(self.tensors) - 1
+            # Step 5.2: Create the reciprocal op
+            reciprocal_op = {
+                "opcode_index": self.get_opcode_index(300),
+                "inputs": [conv_output_tensor_id],
+                "outputs": [reciprocal_output_tensor_id],
+                "builtin_options_type": "ReciprocalOptions"
             }
-            self.operators.append(divide_op)
-            divide_opid = len(self.operators) - 1
-            self.ops.append(Node(divide_op, divide_opid))
+            self.operators.append(reciprocal_op)
+            reciprocal_opid = len(self.operators) - 1
+            self.ops.append(Node(reciprocal_op, reciprocal_opid))
+
+            # Step 6: Multiply the exp tensor with the reciprocal tensor
+            mul_op = {
+                "opcode_index": self.get_opcode_index(18),
+                "inputs": [exp_output_tensor_id, reciprocal_output_tensor_id],
+                "outputs": [softmax_output_tensor_id],
+                "builtin_options_type": "MulOptions"
+            }
+            self.operators.append(mul_op)
+            mul_opid = len(self.operators) - 1
+            self.ops.append(Node(mul_op, mul_opid))
 
             # Update the parent and children of the lower ops
             # Orginal softmax op's input tensor now is the max_pool op & subtract op's input tensor
@@ -167,18 +194,20 @@ class SoftMax:
             self.ops[subtract_opid].children.append(exp_opid)
             self.ops[exp_opid].parents.append(subtract_opid)
             self.ops[exp_opid].children.append(conv_opid)
-            self.ops[exp_opid].children.append(divide_opid)
+            self.ops[exp_opid].children.append(mul_opid)
             self.ops[conv_opid].parents.append(exp_opid)
-            self.ops[conv_opid].children.append(divide_opid)
-            self.ops[divide_opid].parents.append(exp_opid)
-            self.ops[divide_opid].parents.append(conv_opid)
-            # Original softmax op's output tensor now is the divide op's output tensor
+            self.ops[conv_opid].children.append(reciprocal_opid)
+            self.ops[reciprocal_opid].parents.append(conv_opid)
+            self.ops[reciprocal_opid].children.append(mul_opid)
+            self.ops[mul_opid].parents.append(reciprocal_opid)
+            self.ops[mul_opid].parents.append(exp_opid)
+            # Original softmax op's output tensor now is the mul op's output tensor
             child_opid = op.children[0]
             for i, opid in enumerate(self.ops[child_opid].parents):
                 if opid == op.opid:
                     del self.ops[child_opid].parents[i]
-                    self.ops[child_opid].parents.append(divide_opid)
-                    self.ops[divide_opid].children.append(child_opid)
+                    self.ops[child_opid].parents.append(mul_opid)
+                    self.ops[mul_opid].children.append(child_opid)
                     break
             
         new_buffers, new_tensors, new_inputs, new_outputs, new_operators, new_opcodes = self.graph.export()
@@ -200,11 +229,3 @@ class SoftMax:
             if code.get('deprecated_builtin_code', 0) == deprecated_builtin_code:
                 return i
         raise 'opcode not found'
-
-    def int_list_to_byte_list(self, ints):
-        out = []
-        for num in ints:
-            if(type(num) != int):
-                raise "int_list_to_byte_list: type error"
-            out += [ b for b in (num).to_bytes(length = 4, byteorder = 'little')]
-        return out

@@ -10,6 +10,7 @@ from Sink_or_Hoist import Safe_Sinker_Hoister
 from TileSize_selection import TileSizeSelection
 from Softmax_lowering import SoftMax
 from Mean_convert import Mean
+from Logistic_lowering import Logistic
 from Normal_schedule import Normal_scheduler
 from Weight_reuse_schedule import Weight_reuse_scheduler
 from Pipeline_schedule import set_active_engine
@@ -33,6 +34,7 @@ parser.add_argument("--remove_data_layout_op", action='store_true')
 parser.add_argument("--move_data_layout_op", action='store_true')
 parser.add_argument("--softmax_lowering", action='store_true')
 parser.add_argument("--mean_convert", action='store_true')
+parser.add_argument("--logistic_lowering", action='store_true')
 parser.add_argument("--verbose_performance", action='store_true')
 
 # Test GeneSys's options
@@ -84,12 +86,13 @@ new_opcodes = copy.deepcopy(opcodes)
 # For tensor splitting
 has_split = False
 has_concat = False
-# For lowering the sotfmax op
+# For lowering the sotfmax op & logistic op
 has_max_pool = False
 has_sub = False
 has_exp = False
 has_conv = False
-has_div = False
+has_reciprocal = False
+has_mul = False
 # For convert the mean op
 has_depthwise_conv2d = False
 
@@ -106,8 +109,10 @@ for opcode in opcodes:
         has_exp = True
     elif opcode.get('deprecated_builtin_code',0) == 3:
         has_conv = True
-    elif opcode.get('deprecated_builtin_code',0) == 42:
-        has_div = True
+    elif opcode.get('deprecated_builtin_code',0) == 300:
+        has_reciprocal = True
+    elif opcode.get('deprecated_builtin_code',0) == 18:
+        has_mul = True
 
 if has_concat == False:
     new_opcodes.append({
@@ -146,11 +151,18 @@ if args.softmax_lowering:
             "version": 1,
             "builtin_code": "CONV_2D"
             })
-    if has_div == False:
+    if has_reciprocal == False:
         new_opcodes.append({
-            "deprecated_builtin_code": 42,
+            # This op is not in the official schema
+            "deprecated_builtin_code": 300,
             "version": 1,
-            "builtin_code": "DIV"
+            "builtin_code": "RECIPROCAL"
+            })
+    if has_mul == False:
+        new_opcodes.append({
+            "deprecated_builtin_code": 18,
+            "version": 1,
+            "builtin_code": "MUL"
             })
 if args.mean_convert:
     if has_depthwise_conv2d == False:
@@ -180,6 +192,9 @@ if args.softmax_lowering:
 # Perform mean convert
 if args.mean_convert:
     Mean(splitter).convert_mean_to_depthwise_conv()
+# Perform logistic lowering
+if args.logistic_lowering:
+    Logistic(splitter).logistic_lowering()
 # Perform data layout sinking or hoisting
 if args.move_data_layout_op and model_type == 0:
     Safe_Sinker_Hoister(splitter).data_layout_sink()

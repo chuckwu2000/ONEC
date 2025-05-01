@@ -58,6 +58,7 @@ for split_height in [split_size]:
         if not args.cancel_lowering:
             cmd += " --softmax_lowering"
             cmd += " --mean_convert"
+            cmd += " --logistic_lowering"
         if args.genesys:
             cmd += " --genesys"
         subprocess.run(cmd.split(' '))
