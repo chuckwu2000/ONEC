@@ -158,7 +158,7 @@ class SoftMax:
             reciprocal_output_tensor_id = len(self.tensors) - 1
             # Step 5.2: Create the reciprocal op
             reciprocal_op = {
-                "opcode_index": self.get_opcode_index(300),
+                "opcode_index": self.get_opcode_index(124),
                 "inputs": [conv_output_tensor_id],
                 "outputs": [reciprocal_output_tensor_id],
                 "builtin_options_type": "ReciprocalOptions"

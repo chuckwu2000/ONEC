@@ -81,7 +81,7 @@ class Logistic:
             reciprocal_output_tensor_id = logistic_output_tensor_id
             # Create the reciprocal op
             reciprocal_op = {
-                "opcode_index": self.get_opcode_index(300),
+                "opcode_index": self.get_opcode_index(124),
                 "inputs": [exp_output_tensor_id],
                 "outputs": [reciprocal_output_tensor_id],
                 "builtin_options_type": "ReciprocalOptions"

@@ -65,8 +65,8 @@ class Splitter:
             # 114: QUANTIZE
             # 126: BATCH_MATMUL
             # 127: GELU
-            # 300: RECIPROCAL
-            split_candidate = [0, 2, 3, 4, 6, 9, 14, 17, 18, 22, 25, 28, 34, 39, 40, 41, 47, 49, 65, 74, 76, 78, 82, 83, 97, 99, 102, 114, 126, 127, 300]
+            # 124: RECIPROCAL
+            split_candidate = [0, 2, 3, 4, 6, 9, 14, 17, 18, 22, 25, 28, 34, 39, 40, 41, 47, 49, 65, 74, 76, 78, 82, 83, 97, 99, 102, 114, 126, 127, 124]
             if opcode.get("deprecated_builtin_code", 0) in split_candidate:
                 self.splittable_opcode_idxes[opcode.get("deprecated_builtin_code", 0)] = i
 
@@ -80,7 +80,7 @@ class Splitter:
         self.splittable_opcode_idxes = {}
         for i, opcode in enumerate(self.opcodes):
             # See the corresponding number in the __init__ function
-            split_candidate = [0, 2, 3, 4, 6, 9, 14, 17, 18, 22, 25, 28, 34, 39, 40, 41, 47, 49, 65, 74, 76, 78, 82, 83, 97, 99, 102, 114, 126, 127, 300]
+            split_candidate = [0, 2, 3, 4, 6, 9, 14, 17, 18, 22, 25, 28, 34, 39, 40, 41, 47, 49, 65, 74, 76, 78, 82, 83, 97, 99, 102, 114, 126, 127, 124]
             if opcode.get("deprecated_builtin_code", 0) in split_candidate:
                 self.splittable_opcode_idxes[opcode.get("deprecated_builtin_code", 0)] = i
 
@@ -445,7 +445,7 @@ class Splitter:
             self.split_batch_matmul(opid, output_split)
         elif opcode_idx == self.splittable_opcode_idxes.get(127, -1):
             self.split_gelu(opid, output_split)
-        elif opcode_idx == self.splittable_opcode_idxes.get(300, -1):
+        elif opcode_idx == self.splittable_opcode_idxes.get(124, -1):
             self.split_reciprocal(opid, output_split)
 
         # Record the split opid in the same layer

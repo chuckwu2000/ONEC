@@ -129,11 +129,6 @@ class Normal_scheduler:
                         if tensor_metadata.pid == opid:
                             tensor_metadata.in_DRAM = False
                     self.tensor_in_SRAM.add(tensor_id)
-        # Update the allocated tensors
-        for tensor_id in self.tensor_info:
-            for tensor_metadata in self.tensor_info[tensor_id].tensors:
-                if tensor_metadata.in_DRAM == False:
-                    self.allocated_tensors[tensor_id] = self.tensor_info[tensor_id]
         return self.graph
     
     class virtual_tensor_allocate:

@@ -109,7 +109,7 @@ for opcode in opcodes:
         has_exp = True
     elif opcode.get('deprecated_builtin_code',0) == 3:
         has_conv = True
-    elif opcode.get('deprecated_builtin_code',0) == 300:
+    elif opcode.get('deprecated_builtin_code',0) == 124:
         has_reciprocal = True
     elif opcode.get('deprecated_builtin_code',0) == 18:
         has_mul = True
@@ -154,7 +154,7 @@ if args.softmax_lowering:
     if has_reciprocal == False:
         new_opcodes.append({
             # This op is not in the official schema
-            "deprecated_builtin_code": 300,
+            "deprecated_builtin_code": 124,
             "version": 1,
             "builtin_code": "RECIPROCAL"
             })
@@ -296,7 +296,7 @@ if args.verbose_performance:
 
 # Tensor allocation in DRAM (SRAM allocation is implemented above)
 mem_allocator.dram_allocate(weights_reuse_need_allocate_tensors)
-allocated_tensors = mem_allocator.allocated_tensors
+allocated_tensors = mem_allocator.need_allocate_tensors
 
 # Generate the code
 code_generator = CodeGen(pipeline_new_graph, allocated_tensors, pipeline_new_graph.cascade_matched_ops)
@@ -313,14 +313,15 @@ new_model['subgraphs'][0]['inputs'] = new_inputs
 new_model['subgraphs'][0]['outputs'] = new_outputs
 new_model['subgraphs'][0]['operators'] = new_operators
 
-# Save the npu instructions
-with open(args.code_path, 'w') as f:
-    f.write(code_generator.npu_code)
-
 # Save the rewritten model
 with open(json_model_path, 'w') as f:
     json.dump(new_model, f, indent=2)
 
 os.system(f'flatc -o {tmp_dir_path} --binary {schema_path} {json_model_path}')
 os.system(f'mv {os.path.join(tmp_dir_path, filename)} {args.out_path}')
+
+# Save the npu instructions
+with open(args.code_path, 'w') as f:
+    f.write(code_generator.npu_code)
+
 tmp_dir.cleanup()

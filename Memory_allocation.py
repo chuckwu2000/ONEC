@@ -38,7 +38,6 @@ class memory_allocator:
         self.graph = graph
         self.need_allocate_tensors = defaultdict(tensor_memory)
         self.need_allocate_tensor_ids = []
-        self.allocated_tensors = defaultdict(tensor_memory)
         self.init_all_tensors()
 
     def init_all_tensors(self):
@@ -163,4 +162,3 @@ class memory_allocator:
                 ordered_allocated_tensors.append(tensor_id)
                 # Sort the allocated tensors by start address(ascending) and if the start address is the same, sort by size(descending)
                 ordered_allocated_tensors = sorted(ordered_allocated_tensors, key=lambda t: (tensor_info[t].dram_start_addr, -tensor_info[t].size))
-            self.allocated_tensors[tensor_id] = tensor_info[tensor_id]

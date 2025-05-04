@@ -362,7 +362,8 @@ enum BuiltinOperator : int32 {
   NON_MAX_SUPPRESSION_V5 = 121,
   SCATTER_ND = 122,
   SELECT_V2 = 123,
-  DENSIFY = 124,
+  // DENSIFY = 124,
+  RECIPROCAL = 124,
   SEGMENT_SUM = 125,
   BATCH_MATMUL = 126,
   PLACEHOLDER_FOR_GREATER_OP_CODES = 127,
@@ -396,8 +397,7 @@ enum BuiltinOperator : int32 {
   UNSORTED_SEGMENT_SUM = 155,
   ATAN2 = 156,
   UNSORTED_SEGMENT_MIN = 157,
-  SIGN = 158,
-  RECIPROCAL = 300
+  SIGN = 158
 }
 // LINT.ThenChange(nnapi_linter/linter.proto)
 
@@ -501,7 +501,8 @@ union BuiltinOptions {
   NonMaxSuppressionV5Options,
   ScatterNdOptions,
   SelectV2Options,
-  DensifyOptions,
+  // DensifyOptions,
+  ReciprocalOptions,
   SegmentSumOptions,
   BatchMatMulOptions,
   CumsumOptions,
@@ -525,8 +526,7 @@ union BuiltinOptions {
   UnsortedSegmentMinOptions,
   UnsortedSegmentSumOptions,
   ATan2Options,
-  SignOptions,
-  ReciprocalOptions
+  SignOptions
 }
 
 // LINT.IfChange
@@ -1068,7 +1068,10 @@ table ScatterNdOptions {
 table SelectV2Options {
 }
 
-table DensifyOptions {
+// table DensifyOptions {
+// }
+
+table ReciprocalOptions {
 }
 
 table SegmentSumOptions {
@@ -1156,9 +1159,6 @@ table UnsortedSegmentMinOptions{
 table SignOptions {
 }
 
-table ReciprocalOptions {
-}
-
 
 // An OperatorCode can be an enum value (BuiltinOperator) if the operator is a
 // builtin, or a string if the operator is custom.
@@ -1166,7 +1166,7 @@ table OperatorCode {
   // This field is for backward compatibility. This field will be used when
   // the value of the extended builtin_code field has less than
   // BulitinOperator_PLACEHOLDER_FOR_GREATER_OP_CODES.
-  deprecated_builtin_code:int32;
+  deprecated_builtin_code:byte;
   custom_code:string;
 
   // The version of the operator. The version need to be bumped whenever new

@@ -167,13 +167,6 @@ class Weight_reuse_scheduler:
         self.graph.operators = []
         for op in self.graph.ordered_ops:
             self.graph.operators.append(op.info)
-
-        # Step 5: Update the allocated tensors
-        for tensor_id in self.tensor_info:
-            for tensor_metadata in self.tensor_info[tensor_id].tensors:
-                if tensor_metadata.in_DRAM == False:
-                    self.allocated_tensors[tensor_id] = self.tensor_info[tensor_id]
-
         print(f"peak SRAM usage: {self.virtual_tensor_allocator.max_use}")
         return self.graph
 
