@@ -1,15 +1,501 @@
 import numpy as np
 import math
 from collections import defaultdict
+from MyGraph import Graph
+
+op_mapping = {"IDLE": '0000', "CONV_2D": '0001', "FULLY_CONNECTED": '0010', "EXP": '0011', "RECIPROCAL": '0100', \
+              "ADD": '0101', "SUB": '0110', "MUL": '0111'}
 
 class OPGen:
-    def __init__(self, model, allocated_tensor, npu_code):
-        self.model = model
-        self.opcodes = model['operator_codes']
-        self.tensor = model['subgraphs'][0]['tensors']
-        self.buffers = model['buffers']
-        self.allocated_tensor = allocated_tensor
-        self.npu_code = npu_code
+    def __init__(self, graph: Graph, allocated_tensors):
+        self.opcodes = graph.opcodes
+        self.buffers = graph.buffers
+        self.tensors = graph.tensors
+        # Contain the tensor's storage info
+        self.allocated_tensors = allocated_tensors
+        self.op_code = ""
+        self.op_gen_id = 0
+        # Format: [4 ops, weight_num, sram_ids, 4 op_broadcast, 4 op_output_elements, op_0_input_elements + op_0_weight_elements + 3 op_weight_elements]
+        self.op_launch_related = defaultdict(dict)
+        self.op_metadata = defaultdict(str)
+
+    def op_code_gen(self, operators):
+        self.op_code = ""
+        # Some operator may be lowering to other operators
+        total_operators = 0
+        for operator in operators:
+            opcode_index = operator.get("opcode_index")
+            opcode_type = self.opcodes[opcode_index].get("builtin_code")
+            if opcode_type == "LOGISTIC":
+                total_operators += 3
+            else:
+                total_operators += 1
+        
+        # Our hardware now only support most 4 operators in one time
+        if True or total_operators < 5:
+            # Reset metadata index & op metadata
+            self.op_gen_id = 0
+            self.op_launch_related = defaultdict(dict)
+            self.op_metadata = defaultdict(str)
+            # Codegen for each operator
+            for operator in operators:
+                opcode_index = operator['opcode_index']
+                opcode_type = self.opcodes[opcode_index].get("builtin_code")
+                if opcode_type == 'FULLY_CONNECTED':
+                    self.fully_connected_codegen(operator)
+                elif opcode_type == 'CONV_2D':
+                    self.conv_codegen(operator)
+                elif opcode_type == 'ADD':
+                    self.add_codegen(operator)
+                elif opcode_type == 'SUB':
+                    self.sub_codegen(operator)
+                elif opcode_type == 'MUL':
+                    self.mul_codegen(operator)
+                elif opcode_type == 'EXP':
+                    self.exp_codegen(operator)
+                elif opcode_type == 'RECIPROCAL':
+                    self.reciprocal_codegen(operator)
+                elif opcode_type == 'CONCATENATION':
+                    self.concat_codegen(operator)
+                    return self.op_code
+                elif opcode_type == 'SPLIT':
+                    self.split_codegen(operator)
+                    return self.op_code
+                else:
+                    raise(f"[CODE_GEN] Unknown operator: {opcode_type}")
+        # else:
+            # raise BaseException(f"[CODE_GEN] Too many operators, first op: {operators[0]}, total: {total_operators}")
+        
+        # Final codegen
+        # Format: [4 ops, weight_num, sram_ids, 4 op_broadcast, 4 op_output_elements, op_0_input_elements + op_0_weight_elements + 3 op_weight_elements
+        #          + each op_metadata]
+        # ops (reversed order)
+        for i in range(total_operators - 1, -1, -1):
+            self.op_code += self.op_launch_related[i]["op_name"]
+        self.op_code += " "
+        # weight_num
+        weights_num = 0
+        for i in range(total_operators):
+            weights_num += self.op_launch_related[i]["weight_num"]
+        self.op_code += str(weights_num) + " "
+        # sram_ids
+        #TODO
+        # broadcast
+        for i in range(total_operators):
+            self.op_code += str(self.op_launch_related[i]["broadcast"]) + " "
+        # output_elements
+        for i in range(total_operators):
+            self.op_code += str(self.op_launch_related[i]["output_elements"]) + " "
+        # input_elements + weight_elements
+        self.op_code += str(self.op_launch_related[0]["input_elements"]) + " "
+        for i in range(1, total_operators):
+            self.op_code += str(self.op_launch_related[i]["weight_elements"]) + " "
+        # metadata
+        for i in range(total_operators):
+            self.op_code += self.op_metadata[i] + " "
+        # Magic number
+        self.op_code += str(1234567890)
+        return self.op_code
+        
+    def fully_connected_codegen(self, operator):
+        pass
+
+    def conv_codegen(self, operator):
+        self.op_launch_related[self.op_gen_id]['op_name'] = op_mapping["CONV_2D"]
+        # Conv's output tensor may depend on other input tensors
+        input_tensor_ids = []
+        input_tensors = []
+        pad_config = None
+        
+        if len(operator['inputs']) < 4:
+            # No need to consume other operators' output tensor (normally because the filter is 1x1)
+            input_tensor_ids.append(operator['inputs'][0])
+        else:
+            pad_config = self.buffers[self.tensors[operator['inputs'][3]]['buffer']]['data']
+            # Need to consume other operators' output tensor
+            for i in range(4, len(operator['inputs'])):
+                input_tensor_ids.append(operator['inputs'][i])
+        filter_tensor_id = operator['inputs'][1]
+        bias_tensor_id = operator['inputs'][2]
+        output_tensor_id = operator['outputs'][0]
+
+        # Check whether have constant tensors
+        constant_tensor_count = 0
+        if len(self.buffers[self.tensors[filter_tensor_id]['buffer']]) != 0:
+            constant_tensor_count += 1
+        if len(self.buffers[self.tensors[bias_tensor_id]['buffer']]) != 0:
+            constant_tensor_count += 1
+        self.op_launch_related[self.op_gen_id]['weight_num'] = constant_tensor_count
+
+        for input_tensor_id in input_tensor_ids:
+            input_tensors.append(self.tensors[input_tensor_id])
+        filter_tensor = self.tensors[filter_tensor_id]
+        bias_tensor = self.tensors[bias_tensor_id]
+        output_tensor = self.tensors[output_tensor_id]
+
+        # Check whether weight needs broadcast
+        weight_oc = filter_tensor['shape'][0]
+        oc = output_tensor['shape'][3]
+        if weight_oc != oc:
+            # Need to broadcast, 1: weight
+            self.op_launch_related[self.op_gen_id]["broadcast"] = 1
+        else:
+            self.op_launch_related[self.op_gen_id]["broadcast"] = 0
+        
+        stride_h = operator['builtin_options']['stride_h']
+        stride_w = operator['builtin_options']['stride_w']
+        pad_h = pad_config[0]
+
+        tokens = output_tensor['name'].split('_split_')
+        output_id = -1
+        if len(tokens) == 2:
+            if tokens[1].isnumeric():
+                output_id = int(tokens[1])
+        elif len(tokens) > 2:
+                raise(f"Invalid output tensor name: {output_tensor['name']}")
+        
+        # Initial the input tensor's range required
+        split_size = self.tensors[operator['inputs'][0]]['shape'][1]
+        input_range_required = defaultdict(list)
+        input_id_list = []
+        for input_tensor_id in input_tensor_ids:
+            input_tensor = self.tensors[input_tensor_id]
+            tokens = input_tensor['name'].split('_split_')
+            if tokens[1].isnumeric():
+                input_id = int(tokens[1])
+                # Put the input tensor's range reversed, for the following comparison to find the real boundry
+                input_range_required[input_id] = [(input_id + 1) * split_size - 1, input_id * split_size]
+                input_id_list.append(input_id)
+        
+        # Compute the start of the boundry of the input tensor
+        for out_h in range(split_size * output_id, split_size * (output_id + 1)):
+            in_h_origin = out_h * stride_h - pad_h
+            for kernel_h in range(filter_tensor['shape'][1]):
+                in_h = in_h_origin + kernel_h
+                # OverBound case, no need to consider over the maximum boundry, since it has considered in the model_gen
+                source_sid = in_h // split_size
+                if in_h < 0 or source_sid not in input_range_required:
+                    continue
+                else:
+                    # print(f"out_h: {out_h}, in_h: {in_h}, source_sid: {source_sid}")
+                    input_range_required[source_sid][0] = min(input_range_required[source_sid][0], in_h)
+                    input_range_required[source_sid][1] = max(input_range_required[source_sid][1], in_h)
+        total_input_elements = 0
+        input_tensor_idxs = []
+        if len(operator['inputs']) < 4:
+            input_tensor_idxs.append(0)
+        else:
+            for i in range(4, len(operator['inputs'])):
+                input_tensor_ids.append(i)
+        for input_tensor_idx in input_tensor_idxs:
+            batch = input_tensors[input_tensor_idx]['shape'][0]
+            height = input_range_required[input_tensor_idx][1] - input_range_required[input_tensor_idx][0]
+            width = input_tensors[input_tensor_idx]['shape'][2]
+            ic = input_tensors[input_tensor_idx]['shape'][3]
+            total_input_elements += batch * height * width * ic
+        self.op_launch_related[self.op_gen_id]['input_elements'] = total_input_elements
+        self.op_launch_related[self.op_gen_id]['weight_elements'] = self.Compute_tensor_size(filter_tensor)
+        self.op_launch_related[self.op_gen_id]['output_elements'] = self.Compute_tensor_size(output_tensor)
+
+        # TODO: May try to concatenate input_range_required first
+        for input_tensor_id, source_sid in zip(input_tensor_ids, input_id_list):
+            pass
+
+        input_quant_scale = np.int32(input_tensor['quantization']['scale'][0]).view('float32')
+        input_zero_point = input_tensor['quantization']['zero_point'][0]
+        weight_quant_scale = np.int32(filter_tensor['quantization']['scale'][0]).view('float32')
+        output_quant_scale = np.int32(output_tensor['quantization']['scale'][0]).view('float32')
+        output_zero_point = output_tensor['quantization']['zero_point'][0]
+
+        scale = input_quant_scale * weight_quant_scale / output_quant_scale
+        multiplier, shift = self.QuantizeMultiplier(scale)
+
+        # Set op metadata
+        self.op_metadata[self.op_gen_id] += str(stride_h) + " "
+        self.op_metadata[self.op_gen_id] += str(stride_w) + " "
+        self.op_metadata[self.op_gen_id] += str(pad_h) + " "
+        self.op_metadata[self.op_gen_id] += str(input_tensor['shape'][0]) + " "
+        self.op_metadata[self.op_gen_id] += str(input_tensor['shape'][1]) + " "
+        self.op_metadata[self.op_gen_id] += str(input_tensor['shape'][2]) + " "
+        self.op_metadata[self.op_gen_id] += str(input_tensor['shape'][3]) + " "
+        self.op_metadata[self.op_gen_id] += str(filter_tensor['shape'][0]) + " "
+        self.op_metadata[self.op_gen_id] += str(filter_tensor['shape'][1]) + " "
+        self.op_metadata[self.op_gen_id] += str(filter_tensor['shape'][2]) + " "
+        self.op_metadata[self.op_gen_id] += str(multiplier) + " "
+        self.op_metadata[self.op_gen_id] += str(shift) + " "
+        self.op_metadata[self.op_gen_id] += str(output_zero_point)
+
+        # Update the op_gen_id
+        self.op_gen_id += 1
+
+    def add_codegen(self, operator):
+        self.op_launch_related[self.op_gen_id]['op_name'] = op_mapping["ADD"]
+        input1_tensor_id = operator['inputs'][0]
+        input2_tensor_id = operator['inputs'][1]
+        output_tensor_id = operator['outputs'][0]
+
+        # Check whether have constant tensors
+        constant_tensor_count = 0
+        if len(self.buffers[self.tensors[input1_tensor_id]['buffer']]) != 0:
+            constant_tensor_count += 1
+        if len(self.buffers[self.tensors[input2_tensor_id]['buffer']]) != 0:
+            constant_tensor_count += 1
+        self.op_launch_related[self.op_gen_id]['weight_num'] = constant_tensor_count
+
+        input1_tensor = self.tensors[input1_tensor_id]
+        input2_tensor = self.tensors[input2_tensor_id]
+        output_tensor = self.tensors[output_tensor_id]
+
+        # Check which tensor needs broadcast
+        input1_size = self.Compute_tensor_size(input1_tensor)
+        input2_size = self.Compute_tensor_size(input2_tensor)
+        if input1_size > input2_size:
+            # Need to broadcast, 1: weight(input2)
+            self.op_launch_related[self.op_gen_id]["broadcast"] = 1
+        elif input1_size < input2_size:
+            # Need to broadcast, 2: data(input1)
+            self.op_launch_related[self.op_gen_id]["broadcast"] = 2
+        else:
+            # No need to broadcast
+            self.op_launch_related[self.op_gen_id]["broadcast"] = 0
+        
+        self.op_launch_related[self.op_gen_id]["input_elements"] = input1_size
+        self.op_launch_related[self.op_gen_id]["weight_elements"] = input2_size
+        self.op_launch_related[self.op_gen_id]["output_elements"] = self.Compute_tensor_size(output_tensor)
+        
+        input1_quant_scale = np.int32(input1_tensor['quantization']['scale'][0]).view('float32')
+        input1_zero_point = input1_tensor['quantization']['zero_point'][0]
+        input2_quant_scale = np.int32(input2_tensor['quantization']['scale'][0]).view('float32')
+        input2_zero_point = input2_tensor['quantization']['zero_point'][0]
+        twice_max_input_scale = 2 * max(input1_quant_scale, input2_quant_scale)
+        real_input1_scale = input1_quant_scale / twice_max_input_scale
+        real_input1_multiplier, real_input1_shift = self.QuantizeMultiplier(real_input1_scale)
+        real_input2_scale = input2_quant_scale / twice_max_input_scale
+        real_input2_multiplier, real_input2_shift = self.QuantizeMultiplier(real_input2_scale)
+        output_quant_scale = np.int32(output_tensor['quantization']['scale'][0]).view('float32')
+        real_output_scale = twice_max_input_scale / ((1 << 20) * output_quant_scale)
+        real_output_multiplier, real_output_shift = self.QuantizeMultiplier(real_output_scale)
+        output_zero_point = output_tensor['quantization']['zero_point'][0]
+
+        # Set op metadata
+        self.op_metadata[self.op_gen_id] += str(real_input1_multiplier) + " "
+        self.op_metadata[self.op_gen_id] += str(real_input1_shift) + " "
+        self.op_metadata[self.op_gen_id] += str(input1_zero_point) + " "
+        self.op_metadata[self.op_gen_id] += str(real_input2_multiplier) + " "
+        self.op_metadata[self.op_gen_id] += str(real_input2_shift) + " "
+        self.op_metadata[self.op_gen_id] += str(input2_zero_point) + " "
+        self.op_metadata[self.op_gen_id] += str(real_output_multiplier) + " "
+        self.op_metadata[self.op_gen_id] += str(real_output_shift) + " "
+        self.op_metadata[self.op_gen_id] += str(output_zero_point) + " "
+        self.op_metadata[self.op_gen_id] += str(20) + " "
+        self.op_metadata[self.op_gen_id] += str(-128) + " "
+        self.op_metadata[self.op_gen_id] += str(127)
+
+        # Update the op_gen_id
+        self.op_gen_id += 1
+
+    def sub_codegen(self, operator):
+        self.op_launch_related[self.op_gen_id]['op_name'] = op_mapping["SUB"]
+        input1_tensor_id = operator['inputs'][0]
+        input2_tensor_id = operator['inputs'][1]
+        output_tensor_id = operator['outputs'][0]
+
+        # Check whether have constant tensors
+        constant_tensor_count = 0
+        if len(self.buffers[self.tensors[input1_tensor_id]['buffer']]) != 0:
+            constant_tensor_count += 1
+        if len(self.buffers[self.tensors[input2_tensor_id]['buffer']]) != 0:
+            constant_tensor_count += 1
+        self.op_launch_related[self.op_gen_id]['weight_num'] = constant_tensor_count
+
+        input1_tensor = self.tensors[input1_tensor_id]
+        input2_tensor = self.tensors[input2_tensor_id]
+        output_tensor = self.tensors[output_tensor_id]
+
+        # Check which tensor needs broadcast
+        input1_size = self.Compute_tensor_size(input1_tensor)
+        input2_size = self.Compute_tensor_size(input2_tensor)
+        if input1_size > input2_size:
+            # Need to broadcast, 1: weight(input2)
+            self.op_launch_related[self.op_gen_id]["broadcast"] = 1
+        elif input1_size < input2_size:
+            # Need to broadcast, 2: data(input1)
+            self.op_launch_related[self.op_gen_id]["broadcast"] = 2
+        else:
+            # No need to broadcast
+            self.op_launch_related[self.op_gen_id]["broadcast"] = 0
+        
+        self.op_launch_related[self.op_gen_id]["input_elements"] = input1_size
+        self.op_launch_related[self.op_gen_id]["weight_elements"] = input2_size
+        self.op_launch_related[self.op_gen_id]["output_elements"] = self.Compute_tensor_size(output_tensor)
+
+        input1_quant_scale = np.int32(input1_tensor['quantization']['scale'][0]).view('float32')
+        input1_zero_point = input1_tensor['quantization']['zero_point'][0]
+        input2_quant_scale = np.int32(input2_tensor['quantization']['scale'][0]).view('float32')
+        input2_zero_point = input2_tensor['quantization']['zero_point'][0]
+        twice_max_input_scale = 2 * max(input1_quant_scale, input2_quant_scale)
+        real_input1_scale = input1_quant_scale / twice_max_input_scale
+        real_input1_multiplier, real_input1_shift = self.QuantizeMultiplier(real_input1_scale)
+        real_input2_scale = input2_quant_scale / twice_max_input_scale
+        real_input2_multiplier, real_input2_shift = self.QuantizeMultiplier(real_input2_scale)
+        output_quant_scale = np.int32(output_tensor['quantization']['scale'][0]).view('float32')
+        real_output_scale = twice_max_input_scale / ((1 << 20) * output_quant_scale)
+        real_output_multiplier, real_output_shift = self.QuantizeMultiplier(real_output_scale)
+        output_zero_point = output_tensor['quantization']['zero_point'][0]
+
+        # Set op metadata
+        self.op_metadata[self.op_gen_id] += str(real_input1_multiplier) + " "
+        self.op_metadata[self.op_gen_id] += str(real_input1_shift) + " "
+        self.op_metadata[self.op_gen_id] += str(input1_zero_point) + " "
+        self.op_metadata[self.op_gen_id] += str(real_input2_multiplier) + " "
+        self.op_metadata[self.op_gen_id] += str(real_input2_shift) + " "
+        self.op_metadata[self.op_gen_id] += str(input2_zero_point) + " "
+        self.op_metadata[self.op_gen_id] += str(real_output_multiplier) + " "
+        self.op_metadata[self.op_gen_id] += str(real_output_shift) + " "
+        self.op_metadata[self.op_gen_id] += str(output_zero_point) + " "
+        self.op_metadata[self.op_gen_id] += str(20) + " "
+        self.op_metadata[self.op_gen_id] += str(-128) + " "
+        self.op_metadata[self.op_gen_id] += str(127)
+
+        # Update the op_gen_id
+        self.op_gen_id += 1
+
+    def mul_codegen(self, operator):
+        self.op_launch_related[self.op_gen_id]['op_name'] = op_mapping["MUL"]
+        
+        input1_tensor_id = operator['inputs'][0]
+        input2_tensor_id = operator['inputs'][1]
+        output_tensor_id = operator['outputs'][0]
+
+        # Check whether have constant tensors
+        constant_tensor_count = 0
+        if len(self.buffers[self.tensors[input1_tensor_id]['buffer']]) != 0:
+            constant_tensor_count += 1
+        if len(self.buffers[self.tensors[input2_tensor_id]['buffer']]) != 0:
+            constant_tensor_count += 1
+        self.op_launch_related[self.op_gen_id]['weight_num'] = constant_tensor_count
+
+        input1_tensor = self.tensors[input1_tensor_id]
+        input2_tensor = self.tensors[input2_tensor_id]
+        output_tensor = self.tensors[output_tensor_id]
+
+        # Check which tensor needs broadcast
+        input1_size = self.Compute_tensor_size(input1_tensor)
+        input2_size = self.Compute_tensor_size(input2_tensor)
+        if input1_size > input2_size:
+            # Need to broadcast, 1: weight(input2)
+            self.op_launch_related[self.op_gen_id]["broadcast"] = 1
+        elif input1_size < input2_size:
+            # Need to broadcast, 2: data(input1)
+            self.op_launch_related[self.op_gen_id]["broadcast"] = 2
+        else:
+            # No need to broadcast
+            self.op_launch_related[self.op_gen_id]["broadcast"] = 0
+        self.op_launch_related[self.op_gen_id]["input_elements"] = input1_size
+        self.op_launch_related[self.op_gen_id]["weight_elements"] = input2_size
+        self.op_launch_related[self.op_gen_id]["output_elements"] = self.Compute_tensor_size(output_tensor)
+
+        input1_quant_scale = np.int32(input1_tensor['quantization']['scale'][0]).view('float32')
+        input1_zero_point = input1_tensor['quantization']['zero_point'][0]
+        input2_quant_scale = np.int32(input2_tensor['quantization']['scale'][0]).view('float32')
+        input2_zero_point = input2_tensor['quantization']['zero_point'][0]
+        output_quant_scale = np.int32(output_tensor['quantization']['scale'][0]).view('float32')
+        real_output_scale = input1_quant_scale * input2_quant_scale / output_quant_scale
+        real_output_multiplier, real_output_shift = self.QuantizeMultiplier(real_output_scale)
+        output_zero_point = output_tensor['quantization']['zero_point'][0]
+
+        # Set op metadata
+        self.op_metadata[self.op_gen_id] += str(input1_zero_point) + " "
+        self.op_metadata[self.op_gen_id] += str(input2_zero_point) + " "
+        self.op_metadata[self.op_gen_id] += str(real_output_multiplier) + " "
+        self.op_metadata[self.op_gen_id] += str(real_output_shift) + " "
+        self.op_metadata[self.op_gen_id] += str(output_zero_point) + " "
+        self.op_metadata[self.op_gen_id] += str(-128) + " "
+        self.op_metadata[self.op_gen_id] += str(127)
+
+        # Update the op_gen_id
+        self.op_gen_id += 1
+
+    def exp_codegen(self, operator):
+        self.op_launch_related[self.op_gen_id]['op_name'] = op_mapping["EXP"]
+        input_tensor_id = operator['inputs'][0]
+        output_tensor_id = operator['outputs'][0]
+
+        # No way has constant tensors
+        self.op_launch_related[self.op_gen_id]['weight_num'] = 0
+
+        input_tensor = self.tensors[input_tensor_id]
+        output_tensor = self.tensors[output_tensor_id]
+
+        # No way needs broadcast
+        self.op_launch_related[self.op_gen_id]["broadcast"] = 0
+        self.op_launch_related[self.op_gen_id]["input_elements"] = self.Compute_tensor_size(input_tensor)
+        self.op_launch_related[self.op_gen_id]["weight_elements"] = 0
+        self.op_launch_related[self.op_gen_id]["output_elements"] = self.Compute_tensor_size(output_tensor)
+
+        input_quant_scale = np.int32(input_tensor['quantization']['scale'][0]).view('float32')
+        input_multiplier, input_shift = self.QuantizeMultiplier(input_quant_scale)
+        input_zero_point = input_tensor['quantization']['zero_point'][0]
+        output_quant_scale = np.int32(output_tensor['quantization']['scale'][0]).view('float32')
+        output_multiplier, output_shift = self.QuantizeMultiplier(output_quant_scale)
+        output_zero_point = output_tensor['quantization']['zero_point'][0]
+
+        # Set op metadata
+        self.op_metadata[self.op_gen_id] += str(input_multiplier) + " "
+        self.op_metadata[self.op_gen_id] += str(input_shift) + " "
+        self.op_metadata[self.op_gen_id] += str(input_zero_point) + " "
+        self.op_metadata[self.op_gen_id] += str(output_multiplier) + " "
+        self.op_metadata[self.op_gen_id] += str(output_shift) + " "
+        self.op_metadata[self.op_gen_id] += str(output_zero_point) + " "
+        self.op_metadata[self.op_gen_id] += str(480)
+
+        # Update the op_gen_id
+        self.op_gen_id += 1
+
+    def reciprocal_codegen(self, operator):
+        self.op_launch_related[self.op_gen_id]['op_name'] = op_mapping["RECIPROCAL"]
+        input_tensor_id = operator['inputs'][0]
+        output_tensor_id = operator['outputs'][0]
+
+        # No way has constant tensors
+        self.op_launch_related[self.op_gen_id]['weight_num'] = 0
+
+        input_tensor = self.tensors[input_tensor_id]
+        output_tensor = self.tensors[output_tensor_id]
+
+        # No way needs broadcast
+        self.op_launch_related[self.op_gen_id]["broadcast"] = 0
+        self.op_launch_related[self.op_gen_id]["input_elements"] = self.Compute_tensor_size(input_tensor)
+        self.op_launch_related[self.op_gen_id]["weight_elements"] = 0
+        self.op_launch_related[self.op_gen_id]["output_elements"] = self.Compute_tensor_size(output_tensor)
+
+        input_quant_scale = np.int32(input_tensor['quantization']['scale'][0]).view('float32')
+        input_multiplier, input_shift = self.QuantizeMultiplier(input_quant_scale)
+        input_zero_point = input_tensor['quantization']['zero_point'][0]
+        output_quant_scale = np.int32(output_tensor['quantization']['scale'][0]).view('float32')
+        output_multiplier, output_shift = self.QuantizeMultiplier(output_quant_scale)
+        output_zero_point = output_tensor['quantization']['zero_point'][0]
+
+        # Set op metadata
+        self.op_metadata[self.op_gen_id] += str(input_multiplier) + " "
+        self.op_metadata[self.op_gen_id] += str(input_shift) + " "
+        self.op_metadata[self.op_gen_id] += str(input_zero_point) + " "
+        self.op_metadata[self.op_gen_id] += str(output_multiplier) + " "
+        self.op_metadata[self.op_gen_id] += str(output_shift) + " "
+        self.op_metadata[self.op_gen_id] += str(output_zero_point) + " "
+        self.op_metadata[self.op_gen_id] += str(480)
+
+        # Update the op_gen_id
+        self.op_gen_id += 1
+
+    # Need to codegen RISCV code to move data in external memory
+    def concat_codegen(self, operator):
+        # print(f"CONCAT: {operator['inputs']}, {operator['outputs']}")
+        pass
+
+    def split_codegen(self, operator):
+        # print(f"SPLIT: {operator['inputs']}, {operator['outputs']}")
+        pass
 
     def QuantizeMultiplier(self, scale):
         if scale == 0.0:
@@ -34,223 +520,3 @@ class OPGen:
         for dim in shape:
             size *= dim
         return size
-    
-    def CodeGen_DMA_start(self, src, size):
-        buffer = f"SET_DMA_SRC_ADDR {src}\n"
-        buffer += f"SET_DMA_LENGTH {size}\n"
-        buffer += "DMA_START\n"
-        return buffer
-    
-    def CodeGen_DMA_wait(self):
-        buffer = "DMA_WAIT\n"
-        return buffer
-
-    def CodeGen_Set_input_tensor(self, tensor, base, zero_point):
-        buffer = ""
-        buffer += f"SET_IFM_BASE {base}\n"
-        if len(tensor['shape']) == 4:
-            buffer += f"SET_IFM_HEIGHT {tensor['shape'][1]}\n"
-            buffer += f"SET_IFM_WIDTH {tensor['shape'][2]}\n"
-            buffer += f"SET_IFM_DEPTH {tensor['shape'][3]}\n"
-        elif len(tensor['shape']) == 2:
-            buffer += f"SET_IFM_HEIGHT {tensor['shape'][0]}\n"
-            buffer += f"SET_IFM_WIDTH {tensor['shape'][1]}\n"
-            buffer += f"SET_IFM_DEPTH 1\n"
-        buffer += f"SET_IFM_ZERO_POINT {zero_point}\n"
-        return buffer
-    
-    def CodeGen_Set_weight_tensor(self, tensor, base, zero_point):
-        buffer = ""
-        buffer += f"SET_WEIGHT_BASE {base}\n"
-        buffer += f"SET_WEIGHT_SIZE {self.Compute_tensor_size(tensor)}\n"
-        buffer += f"SET_WEIGHT_ZERO_POINT {zero_point}\n"
-        return buffer
-    
-    def CodeGen_Set_output_tensor(self, tensor, base, zero_point):
-        buffer = ""
-        buffer += f"SET_OFM_BASE {base}\n"
-        if len(tensor['shape']) == 4:
-            buffer += f"SET_OFM_HEIGHT {tensor['shape'][1]}\n"
-            buffer += f"SET_OFM_WIDTH {tensor['shape'][2]}\n"
-            buffer += f"SET_OFM_DEPTH {tensor['shape'][3]}\n"
-        elif len(tensor['shape']) == 2:
-            buffer += f"SET_OFM_HEIGHT {tensor['shape'][0]}\n"
-            buffer += f"SET_OFM_WIDTH {tensor['shape'][1]}\n"
-            buffer += f"SET_OFM_DEPTH 1\n"
-        buffer += f"SET_OFM_ZERO_POINT {zero_point}\n"
-        return buffer
-
-    def fully_connected_codegen(self, operator):
-        input_tensor_id = operator['inputs'][0]
-        weight_tensor_id = operator['inputs'][1]
-        output_tensor_id = operator['outputs'][0]
-
-        input_tensor = self.tensor[input_tensor_id]
-        weight_tensor = self.tensor[weight_tensor_id]
-        output_tensor = self.tensor[output_tensor_id]
-
-        input_quant_scale = np.int32(input_tensor['quantization']['scale'][0]).view('float32')
-        weight_quant_scale = np.int32(weight_tensor['quantization']['scale'][0]).view('float32')
-        output_qunat_scale = np.int32(output_tensor['quantization']['scale'][0]).view('float32')
-        scale = input_quant_scale * weight_quant_scale / output_qunat_scale
-        multiplier, shift = self.QuantizeMultiplier(scale)
-
-        input_quant_zp = input_tensor['quantization']['zero_point'][0]
-        weight_quant_zp = weight_tensor['quantization']['zero_point'][0]
-        output_quant_zp = output_tensor['quantization']['zero_point'][0]
-
-        code = ""
-        # Start to load weights
-        code += self.CodeGen_DMA_start(self.allocated_tensor[weight_tensor_id].start_address, self.Compute_tensor_size(weight_tensor))
-        # Set input tensor
-        code += self.CodeGen_Set_input_tensor(input_tensor, self.allocated_tensor[input_tensor_id].start_address, input_quant_zp)
-        # Set weight tensor
-        code += self.CodeGen_Set_weight_tensor(weight_tensor, self.allocated_tensor[weight_tensor_id].start_address, weight_quant_zp)
-        # Set output tensor
-        code += self.CodeGen_Set_output_tensor(output_tensor, self.allocated_tensor[output_tensor_id].start_address, output_quant_zp)
-        # Set scale
-        code += f"SET_MULTIPLIER {multiplier}\n"
-        code += f"SET_SHIFT {shift}\n"
-        code += self.CodeGen_DMA_wait()
-        code += "FULLY_CONNECTED\n"
-        self.npu_code += code
-
-    def batch_matmul_codegen(self, operator):
-        print(f"BATCH_MATMUL: {operator['inputs']}, {operator['outputs']}")
-
-    # TODO: Implement this function
-    def conv_codegen(self, operator):
-        # Conv's output tensor may depend on other input tensors
-        input_tensor_ids = []
-        input_tensors = []
-        pad_config = None
-        
-        if len(operator['inputs']) < 4:
-            # No need to consume other operators' output tensor (normally because the filter is 1x1)
-            input_tensor_ids.append(operator['inputs'][0])
-        else:
-            pad_config = self.buffers[self.tensor[operator['inputs'][3]]['buffer']]['data']
-            # Need to consume other operators' output tensor
-            for i in range(4, len(operator['inputs'])):
-                input_tensor_ids.append(operator['inputs'][i])
-        filter_tensor_id = operator['inputs'][1]
-        bias_tensor_id = operator['inputs'][2]
-        output_tensor_id = operator['outputs'][0]
-
-        for input_tensor_id in input_tensor_ids:
-            input_tensors.append(self.tensor[input_tensor_id])
-        filter_tensor = self.tensor[filter_tensor_id]
-        bias_tensor = self.tensor[bias_tensor_id]
-        output_tensor = self.tensor[output_tensor_id]
-
-        stride_h = operator['builtin_options']['stride_h']
-        pad_h = pad_config[0]
-        pad_w = pad_config[1]
-
-        tokens = output_tensor['name'].split('_split_')
-        output_id = -1
-        if len(tokens) == 2:
-            if tokens[1].isnumeric():
-                output_id = int(tokens[1])
-        elif len(tokens) > 2:
-                raise(f"Invalid output tensor name: {output_tensor['name']}")
-        
-        # Initial the input tensor's range required
-        split_size = self.tensor[operator['inputs'][0]]['shape'][1]
-        input_range_required = defaultdict(list)
-        input_id_list = []
-        for input_tensor_id in input_tensor_ids:
-            input_tensor = self.tensor[input_tensor_id]
-            tokens = input_tensor['name'].split('_split_')
-            if tokens[1].isnumeric():
-                input_id = int(tokens[1])
-                # Put the input tensor's range reversed, for the following comarison to find the real boundry
-                input_range_required[input_id] = [(input_id + 1) * split_size - 1, input_id * split_size]
-                input_id_list.append(input_id)
-        
-        # Compute the start of the boundry of the input tensor
-        for out_h in range(split_size * output_id, split_size * (output_id + 1)):
-            in_h_origin = out_h * stride_h - pad_h
-            for kernel_h in range(filter_tensor['shape'][1]):
-                in_h = in_h_origin + kernel_h
-                # OverBound case, no need to consider over the maximum boundry, since it has considered in the model_gen
-                source_sid = in_h // split_size
-                if in_h < 0 or source_sid not in input_range_required:
-                    continue
-                else:
-                    # print(f"out_h: {out_h}, in_h: {in_h}, source_sid: {source_sid}")
-                    input_range_required[source_sid][0] = min(input_range_required[source_sid][0], in_h)
-                    input_range_required[source_sid][1] = max(input_range_required[source_sid][1], in_h)
-
-        # TODO: Compose the IFM (future work) 
-        for input_tensor_id, source_sid in input_tensor_ids, input_id_list:
-            pass
-            # input_tensor = self.tensor[input_tensor_id]
-            # input_quant_scale = np.int32(input_tensor['quantization']['scale'][0]).view('float32')
-            # input_quant_zp = input_tensor['quantization']['zero_point'][0]
-
-            # code = self.CodeGen_Set_input_tensor(input_tensor, self.allocated_tensor[input_tensor_id].start_address, input_quant_zp)
-            # self.npu_code += code
-
-        # input_quant_scale = np.int32(input_tensor['quantization']['scale'][0]).view('float32')
-        # weight_quant_scale = np.int32(filter_tensor['quantization']['scale'][0]).view('float32')
-        # output_qunat_scale = np.int32(output_tensor['quantization']['scale'][0]).view('float32')
-        # scale = input_quant_scale * weight_quant_scale / output_qunat_scale
-        # multiplier, shift = self.QuantizeMultiplier(scale)
-
-        # input_quant_zp = input_tensor['quantization']['zero_point'][0]
-        # filter_quant_zp = filter_tensor['quantization']['zero_point'][0]
-        # output_quant_zp = output_tensor['quantization']['zero_point'][0]
-
-        # code = ""
-        # # Start to load weights
-        # code += self.CodeGen_DMA_start(self.allocated_tensor[filter_tensor_id].start_address, self.Compute_tensor_size(filter_tensor))
-        # # Set input tensor
-        # code += self.CodeGen_Set_input_tensor(input_tensor, self.allocated_tensor[input_tensor_id].start_address, input_quant_zp)
-        # # Set weight tensor
-        # code += self.CodeGen_Set_weight_tensor(filter_tensor, self.allocated_tensor[filter_tensor_id].start_address, filter_quant_zp)
-        # # Set output tensor
-        # code += self.CodeGen_Set_output_tensor(output_tensor, self.allocated_tensor[output_tensor_id].start_address, output_quant_zp)
-        # # Set scale
-        # code += f"SET_MULTIPLIER {multiplier}\n"
-        # code += f"SET_SHIFT {shift}\n"
-        # code += self.CodeGen_DMA_wait()
-        # code += "CONV\n"
-        # self.npu_code += code
-
-    def mul_codegen(self, operator):
-        print(f"MUL: {operator['inputs']}, {operator['outputs']}")
-
-    def add_codegen(self, operator):
-        print(f"ADD: {operator['inputs']}, {operator['outputs']}")
-
-    def softmax_codegen(self, operator):
-        print(f"SOFTMAX: {operator['inputs']}, {operator['outputs']}")
-
-    def concat_codegen(self, operator):
-        print(f"CONCAT: {operator['inputs']}, {operator['outputs']}")
-
-    def split_codegen(self, operator):
-        print(f"SPLIT: {operator['inputs']}, {operator['outputs']}")
-
-    def op_codegen(self, operator):
-        opcode_index = operator['opcode_index']
-        opcode_type = self.opcodes[opcode_index].get("builtin_code")
-        if opcode_type == 'FULLY_CONNECTED':
-            self.fully_connected_codegen(operator)
-        elif opcode_type == 'CONV_2D':
-            self.conv_codegen(operator)
-        elif opcode_type == 'BATCH_MATMUL':
-            self.batch_matmul_codegen(operator)
-        elif opcode_type == 'MUL':
-            self.mul_codegen(operator)
-        elif opcode_type == 'ADD':
-            self.add_codegen(operator)
-        elif opcode_type == 'SOFTMAX':
-            self.softmax_codegen(operator)
-        elif opcode_type == 'CONCATENATION':
-            self.concat_codegen(operator)
-        elif opcode_type == 'SPLIT':
-            self.split_codegen(operator)
-        else:
-            print(f"[CODE_GEN] Unknown operator: {opcode_type}")
