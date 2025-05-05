@@ -22,6 +22,6 @@ class Op_Classify:
 
         # The input of the operation
         self.unary_ops = ["LOGISTIC", "RSQRT", "GELU", "QUANTIZE", "DEQUANTIZE", \
-                          "TANH", "POW", "MEAN", "MAX_POOL_2D", "EXP"]
-        self.binary_ops = ["ADD", "SUB", "MUL", "RECIPROCAL", "SQUARED_DIFFERENCE", "BATCH_MATMUL"]
+                          "TANH", "POW", "MEAN", "MAX_POOL_2D", "EXP", "RECIPROCAL"]
+        self.binary_ops = ["ADD", "SUB", "MUL", "SQUARED_DIFFERENCE", "BATCH_MATMUL"]
         self.trinary_ops = ["CONV_2D", "DEPTHWISE_CONV_2D", "FULLY_CONNECTED"]

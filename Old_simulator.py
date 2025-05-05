@@ -1,4 +1,5 @@
 # This simulator is referenced from Planaria's implementation
+# SA(systolic_array): Planaria, VU(vector_unit): ONNXSim
 from MyGraph import Graph
 from Architecture_feature import ArchitectureFeatures
 from OpClassify import Op_Classify
