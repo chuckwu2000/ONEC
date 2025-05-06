@@ -247,6 +247,7 @@ normal_graph = normal_scheduler.normal_schedule()
 model_sim = simulator(normal_graph, normal_scheduler.tensor_info)
 if args.verbose_performance:
     normal_dma_cycles, normal_op_cycles, normal_total_cycles = model_sim.estimate_model(pipeline = False)
+    # model_sim.print_performance()
     print(f"After use cache: dma cycles = {normal_dma_cycles :.1f}, op cycles = {normal_op_cycles :.1f}, total cycles = {normal_total_cycles :.1f}")
     print(f"speedup = {((split_total_cycles/normal_total_cycles) - 1) * 100 :.2f}%")
 #####################################################

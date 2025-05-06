@@ -11,7 +11,7 @@ class ArchitectureFeatures:
     # DDR4 DRAM's DIMM always 64-bit wide, and can bursts of 8 data words -> gives 64 bytes per burst 
     # DMA will fetch SRAM_burst_length(bytes) in one cycle
     axi_bit_width = 512
-    core_clock = 2e9
+    core_clock = 3e8
     Sram_clock_scale = 10
     Dram_clock_scale = 1
     
