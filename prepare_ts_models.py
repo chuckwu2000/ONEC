@@ -19,6 +19,7 @@ parser.add_argument("--pad_fusion", action='store_true')
 parser.add_argument("--remove_data_layout_op", action='store_true')
 parser.add_argument("--cancel_move_data_layout_op", action='store_true')
 parser.add_argument("--cancel_lowering", action='store_true')
+parser.add_argument("--codegen", action='store_true')
 parser.add_argument("--genesys", action='store_true')
 args = parser.parse_args()
 rewriter_path = str(args.rewriter_path)
@@ -45,8 +46,7 @@ for split_height in [split_size]:
         cmd =   f"python {rewriter_path} {tflite_path} --schema_path {schema_path}" \
                 f" --exec_order {exec_order} --split_height {split_height} --token_size {token_size}" \
                 f" --model_type {model_type}" \
-                f" --out_path {out_path}" \
-                f" --code_path {code_path}"
+                f" --out_path {out_path}"
         if args.pad_fusion:
             cmd += " --pad_fusion"
         if args.verbose_performance:
@@ -59,6 +59,9 @@ for split_height in [split_size]:
             cmd += " --softmax_lowering"
             cmd += " --mean_convert"
             cmd += " --logistic_lowering"
+        if args.codegen:
+            cmd += " --codegen"
+            cmd += f" --code_path {code_path}"
         if args.genesys:
             cmd += " --genesys"
         subprocess.run(cmd.split(' '))

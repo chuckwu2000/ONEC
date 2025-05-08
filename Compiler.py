@@ -24,7 +24,6 @@ parser = argparse.ArgumentParser()
 parser.add_argument("model_path")
 parser.add_argument("--schema_path", nargs='?', default="utils/schema.fbs")
 parser.add_argument("--out_path")
-parser.add_argument("--code_path")
 parser.add_argument("--exec_order", nargs='?', default="DF")
 parser.add_argument("--split_height", nargs='?', type=int, required=False)
 parser.add_argument("--token_size", nargs='?', type=int, default=50)
@@ -35,6 +34,8 @@ parser.add_argument("--move_data_layout_op", action='store_true')
 parser.add_argument("--softmax_lowering", action='store_true')
 parser.add_argument("--mean_convert", action='store_true')
 parser.add_argument("--logistic_lowering", action='store_true')
+parser.add_argument("--codegen", action='store_true')
+parser.add_argument("--code_path")
 parser.add_argument("--verbose_performance", action='store_true')
 
 # Test GeneSys's options
@@ -300,8 +301,9 @@ mem_allocator.dram_allocate(weights_reuse_need_allocate_tensors)
 allocated_tensors = mem_allocator.need_allocate_tensors
 
 # Generate the code
-code_generator = CodeGen(pipeline_new_graph, allocated_tensors, pipeline_new_graph.cascade_matched_ops)
-code_generator.code_gen()
+if args.codegen:
+    code_generator = CodeGen(pipeline_new_graph, allocated_tensors, pipeline_new_graph.cascade_matched_ops)
+    code_generator.code_gen()
 
 # new_buffers, new_tensors, new_inputs, new_outputs, new_operators, new_opcodes = ori_graph.export()
 new_buffers, new_tensors, new_inputs, new_outputs, new_operators, new_opcodes = new_graph.export()
@@ -322,7 +324,8 @@ os.system(f'flatc -o {tmp_dir_path} --binary {schema_path} {json_model_path}')
 os.system(f'mv {os.path.join(tmp_dir_path, filename)} {args.out_path}')
 
 # Save the npu instructions
-with open(args.code_path, 'w') as f:
-    f.write(code_generator.npu_code)
+if args.codegen:
+    with open(args.code_path, 'w') as f:
+        f.write(code_generator.npu_code)
 
 tmp_dir.cleanup()

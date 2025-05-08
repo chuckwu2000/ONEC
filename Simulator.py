@@ -106,8 +106,7 @@ class simulator:
             if op_type == "QUANTIZE":
                 cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"]
             elif op_type == "DEQUANTIZE":
-                cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"]
-            
+                cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"] 
             op_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
         elif op_type in binary_elementwise_ops:
             ifm1 = tensors[inputs[0]]
@@ -196,7 +195,7 @@ class simulator:
         outputs = info.get("outputs")
 
         ofm = tensors[outputs[0]]
-        ofm_shape = copy.deepcopy(ofm.get("shape"))
+        ofm_shape = ofm.get("shape")
         if ofm.get("type") == "INT8":
             ifm_elem_size = 8
             ofm_elem_size = 8
@@ -311,12 +310,12 @@ class simulator:
                         dram_transfer_size += ifm_storge_size
                     break
         # Check weight tensor
-        initial_weight_dram_read = one_element_compute_needed * oc_finish_per_cycle * (ifm_elem_size / 8)
+        # Initial weight read need all weights
         if op_type in need_weights_ops:
             for tensor_metadata in self.tensor_info[inputs[1]].tensors:
                 if tensor_metadata.cid == opid:
                     if tensor_metadata.in_DRAM:
-                        initial_dram_reads += initial_weight_dram_read
+                        initial_dram_reads += weights_storage_size
                         dram_transfer_size += weights_storage_size
                     break
         # Check output tensor
@@ -329,22 +328,24 @@ class simulator:
                 break
 
         ############### Compute cycles & SRAM access cycles ###############
-        # SRAM transfer bytes per cycle
-        sram_bandwidth = (ArchitectureFeatures.axi_bit_width / 8) * ArchitectureFeatures.Sram_clock_scale
-
         # Every time deal with new ocs, the weight and init_inputs need to be reloaded
         compute_full_oc_times = math.ceil(OC / float(oc_finish_per_cycle))
         
         total_windows = B * OH * OW
-
-        weights_needed_size = initial_weight_dram_read
-        load_weights_cycles  = math.ceil(weights_needed_size / float(sram_bandwidth)) * compute_full_oc_times * total_windows
-        # Needed data in input tensor is not sequential at H dimension
-        load_inputs_cycles = FH * math.ceil(FW * IC * (ifm_elem_size / 8) / float(sram_bandwidth)) * total_windows
-        store_outputs_cycles = math.ceil(total_windows * OC / float(sram_bandwidth))
-
+        # Requantization is performed alongside MAC operations in the pipeline (compute an output likely takes 1 cycle)
         op_cycles = total_windows * compute_full_oc_times * ArchitectureFeatures.output_cycles_per_elem["MAC"]
-        op_cycles += load_weights_cycles + load_inputs_cycles + store_outputs_cycles
+        if op_type == "DEPTHWISE_CONV_2D":
+            op_cycles *= ofm_shape[3]
+
+        # ----- We assume that cost of access SRAM is zero (by prefetching) -----
+        # weights_needed_size = initial_weight_dram_read
+        # load_weights_cycles  = math.ceil(weights_needed_size / float(sram_bandwidth)) * compute_full_oc_times * total_windows
+        # # Needed data in input tensor is not sequential at H dimension
+        # load_inputs_cycles = FH * math.ceil(FW * IC * (ifm_elem_size / 8) / float(sram_bandwidth)) * total_windows
+        # # SRAM transfer bytes per cycle
+        # sram_bandwidth = (ArchitectureFeatures.axi_bit_width / 8) * ArchitectureFeatures.Sram_clock_scale
+        # store_outputs_cycles = math.ceil(total_windows * OC / float(sram_bandwidth))
+        # op_cycles += load_weights_cycles + load_inputs_cycles + store_outputs_cycles
 
         dram_transfer_size -= (initial_dram_reads + final_dram_writes)
         # DRAM transfer bytes per cycle
@@ -412,8 +413,6 @@ class simulator:
             cascade_matched_ops = self.model.cascade_matched_ops
             cascade_total_op = 0
             cascade_save_cycles = 0
-            # If the op has multiple consumers, we need to store the output tensor back to SRAM (for other consumers)
-            have_multi_consumer = True if len(self.ops[opid].children) > 1 else False
             # For now, assume the two op parallel execution will take the longer one
             for cascade_matched_op in cascade_matched_ops:
                 cascade_total_op += len(cascade_matched_op)
