@@ -2,16 +2,6 @@ from collections import defaultdict
 from Architecture_feature import Mem_area
 from Architecture_feature import ArchitectureFeatures
 
-# The operation that will be fall back to CPU (not contain RESHAPE)
-data_layout_ops = ["CONCATENATION", "SPLIT", "SPLIT_V", "TRANSPOSE", "RESIZE_NEAREST_NEIGHBOR", "PACK"]
-reduce_ops = ["REDUCE_MAX"]
-fall_back_cpu_ops = data_layout_ops + reduce_ops
-
-# The input of the operation
-binary_ops = ["ADD", "SUB", "MUL", "SQUARED_DIFFERENCE", "BATCH_MATMUL"]
-trinary_ops = ["CONV_2D", "DEPTHWISE_CONV_2D", "FULLY_CONNECTED"]
-weight_reuse_ops = trinary_ops
-
 class tensor_memory:
     def __init__(self, tensor_id):
         self.tensor_id = tensor_id
