@@ -1,4 +1,3 @@
-from Architecture_feature import ArchitectureFeatures
 from OpClassify import Op_Classify
 from collections import defaultdict
 
@@ -11,7 +10,7 @@ unary_ops = op_classify.unary_ops
 binary_ops = op_classify.binary_ops
 trinary_ops = op_classify.trinary_ops
 
-# At different time stamps, the tensor may allocate on different SRAMs
+# At different timestamps, the tensor may be allocated to different SRAMs
 class Distributed_SRAM_tensor_info:
     def __init__(self, pid, cid):
         self.pid = pid
@@ -27,6 +26,7 @@ class Distributed_SRAM_tensor:
 class Distributed_SRAM_allocator:
     def __init__(self, graph):
         self.graph = graph
+        self.ordered_ops = graph.ordered_ops
         self.total_SRAMs = 8
         self.tensor_info = defaultdict(Distributed_SRAM_tensor)
         self.need_allocate_tensor_ids = []
@@ -34,8 +34,7 @@ class Distributed_SRAM_allocator:
         self.set_tensor_live_range()
 
     def init_all_tensors(self):
-        ordered_ops = self.graph.ordered_ops
-        for op in ordered_ops:
+        for op in self.ordered_ops:
             for tensor_id in op.info['inputs']:
                 if tensor_id not in self.need_allocate_tensor_ids:
                     self.need_allocate_tensor_ids.append(tensor_id)
@@ -76,12 +75,13 @@ class Distributed_SRAM_allocator:
                     if not find_tensor_child:
                         continue
                     self.tensor_info[tensor_id].tensors.append(Distributed_SRAM_tensor_info(op.opid, child_id))
+                if len(op.children) == 0:
+                    self.tensor_info[tensor_id].tensors.append(Distributed_SRAM_tensor_info(op.opid, op.opid))
         # In here, we don't check if the tensor overuse the DRAM (since OEM's NPU not connect to DRAM now)
         # TODO: If NPU connect DRAM in the future, can reference Memory_allocation.py
 
     def set_tensor_live_range(self):
-        ordered_ops = self.graph.ordered_ops
-        for order, op in enumerate(ordered_ops):
+        for order, op in enumerate(self.ordered_ops):
             opcode_index = op.info.get('opcode_index')
             opcode_type = self.graph.opcodes[opcode_index].get('builtin_code')
             if opcode_type in elem_wise_ops or opcode_type in mac_ops:
@@ -89,7 +89,7 @@ class Distributed_SRAM_allocator:
                     if tensor_id == -1:
                         continue
                     # Update the tensor's first time used
-                    if order < self.tensor_info[tensor_id].live_range.get('first_time_used', len(ordered_ops)):
+                    if order < self.tensor_info[tensor_id].live_range.get('first_time_used', len(self.ordered_ops)):
                         self.tensor_info[tensor_id].live_range['first_time_used'] = order
                     # Update the tensor's last time used
                     if order > self.tensor_info[tensor_id].live_range.get('last_time_used', -1):
@@ -107,21 +107,27 @@ class Distributed_SRAM_allocator:
     def allocate_tensors(self):
         cascade_patterns = self.find_cascade_pattern()
         visited = [False for _ in range(len(self.graph.ordered_ops))]
-        for op in self.ordered_ops:
+        for order, op in enumerate(self.ordered_ops):
             if visited[op.opid]:
                 continue
+            # Check whether have producer-consumer relationship between previous op and current op
+            can_consume_directly = False
+            previous_op = self.graph.ordered_ops[order - 1] if order > 0 else None
+            if previous_op != None:
+                for child in previous_op.children:
+                    if child == op.opid:
+                        can_consume_directly = True
+                        break
+            # Check whether the op is the start of the cascade pattern
             find_in_cascade = False
             for cascade_pattern in cascade_patterns:
                 # Launch concurrent run pattern
                 if op.opid == cascade_pattern[0]:
                     operator_ids = [ids for ids in cascade_pattern]
-                    # OEM's NPU support only 4 operators in concurrent run
-                    while len(operator_ids) > 4:
-                        operator_ids.pop()
                     operators = []
                     for opid in operator_ids:
                         operators.append(self.graph.ops[opid])
-                    while(not self.allocate_success(operators)):
+                    while(not self.allocate_success(operators, can_consume_directly)):
                         # If the allocation is not successful, try to decrease the number of operators
                         operator_ids.pop()
                         operators.pop()
@@ -132,11 +138,20 @@ class Distributed_SRAM_allocator:
                     break
             # Launch single operator
             if not find_in_cascade:
+                # The fall back cpu op won't participate in the SRAM allocation
+                opcode_idx = op.info.get('opcode_index')
+                opcode_type = self.graph.opcodes[opcode_idx].get('builtin_code')
+                if opcode_type in fall_back_cpu_ops:
+                    continue
+
                 operator = self.graph.ops[op.opid]
                 operators = [operator]
-                if not self.allocate_success(operators):
+                if not self.allocate_success(operators, can_consume_directly):
+                    for op in operators:
+                        print(f"op info: {op.info}")
                     raise ValueError("The allocation of the operator is not successful")
                 visited[op.opid] = True
+        return self.tensor_info
 
     def find_cascade_pattern(self):
         cascade_matched_ops_list = []
@@ -170,13 +185,25 @@ class Distributed_SRAM_allocator:
                     if not have_producer_consumer:
                         break
 
+                    # Need to handle the reshape case at codegen time
                     if opcode_type == "RESHAPE":
+                        cascade_matched_ops.append(next_op.opid)
+                        have_matched[next_order] = True
                         now_order = next_order
                         next_order += 1
                         continue
 
-                    # Check if the next operator is a mac-main op
-                    if opcode_type in elem_wise_ops and len(cascade_matched_ops) < 4:
+                    # OEM's NPU can't support the cascade pattern with more than 4 ops (not including the reshape op)
+                    num_cascade_matched_ops = 0
+                    for opid in cascade_matched_ops:
+                        opcode_index = self.graph.ops[opid].info.get('opcode_index')
+                        opcode_type = self.graph.opcodes[opcode_index].get('builtin_code')
+                        if opcode_type in mac_ops or opcode_type in elem_wise_ops:
+                            num_cascade_matched_ops += 1
+                    if num_cascade_matched_ops > 4:
+                        break
+
+                    if opcode_type in elem_wise_ops:
                         cascade_matched_ops.append(next_op.opid)
                         have_matched[next_order] = True
                         now_order = next_order
@@ -190,41 +217,69 @@ class Distributed_SRAM_allocator:
                 have_matched[order] = True
         return cascade_matched_ops_list
         
-    def allocate_success(self, operators):
+    # Use Chaitin-Briggs algorithm to color the graph
+    def allocate_success(self, operators, can_consume_directly):
+        class ColoringNode:
+            def __init__(self):
+                # The node's neighbors, which may decrease by removing the node (element's data type: Distributed_SRAM_tensor_info)
+                self.neighbors = []
+                # For coloring use, avoid using the same color
+                self.neighbors_list = []
+                self.color = -1
+
         class ColoringGraph:
             def __init__(self, colors):
                 self.colors = colors
-                self.edges = []
-                self.nodes = []
+                self.nodes = {}
 
         # The color we can allocate to the tensor (False means color not used)
         colors = [False for _ in range(self.total_SRAMs)]
-        # Collect all need allocate tensors
+        # Steps 1: Collect all tensors(Distributed_SRAM_tensor_info) that need to be allocated
         candidate_tensors = []
+        # Our cascade pattern may have reshape op, we only need to allocate either the input or output tensor to the SRAM
+        # So, we treat it as a problem of resolving alias tensors
+        alias_tensors = {}
         total_operators = len(operators)
         for op_idx, op in enumerate(operators):
-            next_op = operators[op_idx + 1] if op_idx + 1 < total_operators else None
-            # Collect input tensors
+            next_op_idx = op_idx + 1
+            next_op = operators[next_op_idx] if next_op_idx < total_operators else None
             opcode_index = op.info['opcode_index']
             opcode_type = self.graph.opcodes[opcode_index].get('builtin_code')
+            # Our codegen phase will skip the reshape op, since it won't influence the data
+            if opcode_type == "RESHAPE":
+                # We build alias relation {input_tensor: output_tensor}, so we need to skip the output tensor to be added to the candidate tensors
+                # This check will perform in "Collect input tensors" phase
+                reshape_can_consume_directly = can_consume_directly and op_idx == 0
+                self.add_alias_pattern(op, alias_tensors, reshape_can_consume_directly)
+                continue
+            # Collect input tensors
             if opcode_type in unary_ops:
-                input_need = 0
-            elif opcode_type in binary_ops:
                 input_need = 1
-            elif opcode_type in trinary_ops:
+            elif opcode_type in binary_ops:
                 input_need = 2
+            elif opcode_type in trinary_ops:
+                input_need = 3
+            else:
+                input_need = len(op.info['inputs'])
             for tensor_id in op.info['inputs'][0: input_need]:
                 if tensor_id == -1:
                     continue
                 # Based on pid & cid to find the tensor
                 for tensor in self.tensor_info[tensor_id].tensors:
                     if tensor.cid == op.opid:
-                        # Check the tensor is already allocated
-                        if tensor.sram_idx != -1:
+                        # Check whether this tensor is alias tensor
+                        is_alias_tensor = False
+                        for alias_tensor in alias_tensors.values():
+                            if alias_tensor == tensor:
+                                is_alias_tensor = True
+                        if is_alias_tensor:
+                            break
+                        # Check the tensor whether is already allocated and for now we only accept sram be reused between the concurrent run pattern
+                        if can_consume_directly and op_idx == 0 and tensor.sram_idx != -1:
                             # If the tensor is already allocated, we use it directly and mark the color
                             colors[tensor.sram_idx] = True
                         else:
-                            candidate_tensors.append(tensor_id)
+                            candidate_tensors.append(tensor)
                         break
             # Collect output tensors
             for tensor_id in op.info['outputs']:
@@ -234,9 +289,87 @@ class Distributed_SRAM_allocator:
                         # OEM's NPU can flow output data into buffer(no need to store back to SRAM), then next op can consume the output tensor from buffer
                         # If the next op won't consume the output tensor immediately, we need to store the output tensor back to SRAM
                         if next_op != None and tensor.cid != next_op.opid:
-                            candidate_tensors.append(tensor_id)
+                            candidate_tensors.append(tensor)
                 
-        # Check if the operators' tensors can be allocated in the SRAM
-        # TODO: build graph...
+        # Steps 2: Build the interference graph
         coloring_graph = ColoringGraph(colors)
+        for tensor in candidate_tensors:
+            coloring_graph.nodes.update({tensor: ColoringNode()})
+        # Use O(n-square) approach to build the graph
+        # TODO: Potential improvements in future work
+        for tensor1 in candidate_tensors:
+            for tensor2 in candidate_tensors:
+                if tensor1 == tensor2:
+                    continue
+                # Check if the two tensors' live range overlap
+                # If the two tensors' live range overlap, we need to add an edge between them
+                if tensor1.live_range['first_time_used'] <= tensor2.live_range['last_time_used'] and \
+                   tensor2.live_range['first_time_used'] <= tensor1.live_range['last_time_used']:
+                    coloring_graph.nodes[tensor1].neighbors.append(tensor2)
+                    coloring_graph.nodes[tensor1].neighbors_list.append(tensor2)
+                    coloring_graph.nodes[tensor2].neighbors.append(tensor1)
+                    coloring_graph.nodes[tensor2].neighbors_list.append(tensor1)
+        # Steps 3: Check which nodes can be trivially pushed to stack
+        empty_colors = 0
+        for color_been_used in colors:
+            if not color_been_used:
+                empty_colors += 1
+        stack = []
+        # Store a copy of the tensor to node mapping for final color assignment
+        tensor_node_mapping = {}
+        for tensor, node in coloring_graph.nodes.items():
+            tensor_node_mapping.update({tensor: node})
+        # Pick the node which its degree is less than empty_colors and push it to the stack
+        for tensor, node in list(coloring_graph.nodes.items()):
+            if len(node.neighbors) < empty_colors:
+                stack.append(node)
+                # Remove the edge in the graph
+                for node_II in coloring_graph.nodes.values():
+                    if tensor in node_II.neighbors:
+                        node_II.neighbors.remove(tensor)
+                # Remove the node from the graph
+                coloring_graph.nodes.pop(tensor, None)
+        # If all nodes' neighbors are smaller than empty_colors, we can definitely color the graph
+        # Original Chaitin-Briggs algorithm can further consider the degree of the node which is equal to empty_colors, but in here we don't consider it
+        if len(coloring_graph.nodes) != 0:
+            return False
+        # Steps 4: Pop the nodes from stack and try to color
+        while len(stack) != 0:
+            node = stack.pop()
+            # In here, we don't consider to reuse the same color(SRAM), since the concurrent run pattern will use those SRAMs at the same time
+            for neighbor in node.neighbors_list:
+                if neighbor.sram_idx != -1:
+                    if empty_colors == 0:
+                        return False
+                    for color_idx, color_been_used in enumerate(colors):
+                        if not color_been_used:
+                            node.color = color_idx
+                            colors[color_idx] = True
+                            empty_colors -= 1
+                            break
+        # Steps 5: Assign the color to the tensor
+        for tensor in candidate_tensors:
+            tensor.sram_idx = tensor_node_mapping[tensor].color
+        for allocated_tensor, alias_tensor in alias_tensors.items():
+            alias_tensor.sram_idx = allocated_tensor.sram_idx
         return True
+    
+    # This function is used to add the alias pattern(reshape op's input tensor and output tensor) 
+    def add_alias_pattern(self, op, alias_tensors, can_consume_directly):
+        tensor_id = op.info['inputs'][0]
+        for tensor in self.tensor_info[tensor_id].tensors:
+            if tensor.cid == op.opid:
+                input_tensor = tensor
+                if can_consume_directly and tensor.sram_idx != -1:
+                    break
+                alias_tensors.update({input_tensor: None})
+                break
+        tensor_id = op.info['outputs'][0]
+        for tensor in self.tensor_info[tensor_id].tensors:
+            if tensor.pid == op.opid:
+                output_tensor = tensor
+                if input_tensor in alias_tensors.keys():
+                    alias_tensors[input_tensor] = output_tensor
+                else:
+                    tensor.sram_idx = input_tensor.sram_idx
+                break
