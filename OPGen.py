@@ -1,13 +1,20 @@
 import numpy as np
 import math
 from collections import defaultdict
-from MyGraph import Graph
+from MyGraph import Graph, Node
+from Distributed_SRAM_allocator import Distributed_SRAM_tensor
+from OpClassify import Op_Classify
+
+op_classify = Op_Classify()
+mac_ops = op_classify.mac_ops
+unary_ops = op_classify.unary_ops
+binary_ops = op_classify.binary_ops
 
 op_mapping = {"IDLE": '0000', "CONV_2D": '0001', "FULLY_CONNECTED": '0010', "EXP": '0011', "RECIPROCAL": '0100', \
               "ADD": '0101', "SUB": '0110', "MUL": '0111'}
 
 class OPGen:
-    def __init__(self, graph: Graph, allocated_tensors):
+    def __init__(self, graph : Graph, allocated_tensors : dict[int, Distributed_SRAM_tensor]):
         self.opcodes = graph.opcodes
         self.buffers = graph.buffers
         self.tensors = graph.tensors
@@ -19,119 +26,161 @@ class OPGen:
         self.op_launch_related = defaultdict(dict)
         self.op_metadata = defaultdict(str)
 
-    def op_code_gen(self, operators):
+    def op_code_gen(self, ops : list[Node]):
         self.op_code = ""
-        # Some operator may be lowering to other operators
-        total_operators = 0
-        for operator in operators:
-            opcode_index = operator.get("opcode_index")
+        # Some op may be lowered to other ops
+        total_ops = 0
+        for op in ops:
+            opcode_index = op.info.get("opcode_index")
             opcode_type = self.opcodes[opcode_index].get("builtin_code")
             if opcode_type == "LOGISTIC":
-                total_operators += 3
+                total_ops += 3
             else:
-                total_operators += 1
+                total_ops += 1
         
-        # Our hardware now only support most 4 operators in one time
-        if True or total_operators < 5:
+        # Our hardware now only support most 4 ops in one time
+        if total_ops < 5:
             # Reset metadata index & op metadata
             self.op_gen_id = 0
             self.op_launch_related = defaultdict(dict)
             self.op_metadata = defaultdict(str)
-            # Codegen for each operator
-            for operator in operators:
-                opcode_index = operator['opcode_index']
+            # First op's classify (influence number of sram used)
+            first_op_index = ops[0].info.get("opcode_index")
+            first_op_opcode_type = self.opcodes[first_op_index].get("builtin_code")
+            first_op_is_mac = False
+            first_op_is_unary_elementwise = False
+            first_op_is_binary_elementwise = False
+            if  first_op_opcode_type in mac_ops:
+                first_op_is_mac = True
+            elif first_op_opcode_type in unary_ops:
+                first_op_is_unary_elementwise = True
+            elif first_op_opcode_type in binary_ops:
+                first_op_is_binary_elementwise = True
+            # Codegen for each op
+            for op in ops:
+                opcode_index = op.info.get("opcode_index")
                 opcode_type = self.opcodes[opcode_index].get("builtin_code")
                 if opcode_type == 'FULLY_CONNECTED':
-                    self.fully_connected_codegen(operator)
+                    self.fully_connected_codegen(op)
                 elif opcode_type == 'CONV_2D':
-                    self.conv_codegen(operator)
+                    self.conv_codegen(op)
                 elif opcode_type == 'ADD':
-                    self.add_codegen(operator)
+                    self.add_codegen(op)
                 elif opcode_type == 'SUB':
-                    self.sub_codegen(operator)
+                    self.sub_codegen(op)
                 elif opcode_type == 'MUL':
-                    self.mul_codegen(operator)
+                    self.mul_codegen(op)
                 elif opcode_type == 'EXP':
-                    self.exp_codegen(operator)
+                    self.exp_codegen(op)
                 elif opcode_type == 'RECIPROCAL':
-                    self.reciprocal_codegen(operator)
+                    self.reciprocal_codegen(op)
                 elif opcode_type == 'CONCATENATION':
-                    self.concat_codegen(operator)
+                    self.concat_codegen(op)
                     return self.op_code
                 elif opcode_type == 'SPLIT':
-                    self.split_codegen(operator)
+                    self.split_codegen(op)
                     return self.op_code
                 else:
-                    raise(f"[CODE_GEN] Unknown operator: {opcode_type}")
-        # else:
-            # raise BaseException(f"[CODE_GEN] Too many operators, first op: {operators[0]}, total: {total_operators}")
+                    raise(f"[CODE_GEN] Unknown op: {opcode_type}")
+        else:
+            raise BaseException(f"[CODE_GEN] Too many ops, first op: {ops[0]}, total: {total_ops}")
         
         # Final codegen
         # Format: [4 ops, weight_num, sram_ids, 4 op_broadcast, 4 op_output_elements, op_0_input_elements + op_0_weight_elements + 3 op_weight_elements
         #          + each op_metadata]
         # ops (reversed order)
-        for i in range(total_operators - 1, -1, -1):
+        for i in range(total_ops - 1, -1, -1):
             self.op_code += self.op_launch_related[i]["op_name"]
         self.op_code += " "
         # weight_num
         weights_num = 0
-        for i in range(total_operators):
+        for i in range(total_ops):
             weights_num += self.op_launch_related[i]["weight_num"]
         self.op_code += str(weights_num) + " "
-        # sram_ids
-        #TODO
+        # sram_ids (store_sram_idx, op0_weight_idx0, op0_weight_idx1, op1_weight_idx0, op2_weight_idx0, op3_weight_idx0)
+        # If not use: set to 0
+        self.op_code += str(self.op_launch_related[total_ops - 1]["output_sram_id"]) + " "
+        if first_op_is_mac or first_op_is_binary_elementwise:
+            self.op_code += str(self.op_launch_related[0]["input0_sram_id"]) + " "
+            self.op_code += str(self.op_launch_related[0]["input1_sram_id"]) + " "
+        elif first_op_is_unary_elementwise:
+            self.op_code += str(self.op_launch_related[0]["input0_sram_id"]) + " "
+            self.op_code += str(0) + " "
+        else:
+            raise(f"[CODE_GEN] Unknown first op: {first_op_opcode_type}")
+        for i in range(1, 4):
+            if i < total_ops:
+                # OEM's NPU default to put last op's output tensor to buffer and consume as second operand
+                self.op_code += str(self.op_launch_related[i].get("input0_sram_id", 0)) + " "
+            else:
+                self.op_code += str(0) + " "
         # broadcast
-        for i in range(total_operators):
+        for i in range(total_ops):
             self.op_code += str(self.op_launch_related[i]["broadcast"]) + " "
         # output_elements
-        for i in range(total_operators):
+        for i in range(total_ops):
             self.op_code += str(self.op_launch_related[i]["output_elements"]) + " "
         # input_elements + weight_elements
         self.op_code += str(self.op_launch_related[0]["input_elements"]) + " "
-        for i in range(1, total_operators):
+        for i in range(1, total_ops):
             self.op_code += str(self.op_launch_related[i]["weight_elements"]) + " "
         # metadata
-        for i in range(total_operators):
+        for i in range(total_ops):
             self.op_code += self.op_metadata[i] + " "
-        # Magic number
-        self.op_code += str(1234567890)
         return self.op_code
         
-    def fully_connected_codegen(self, operator):
+    def fully_connected_codegen(self, op):
         pass
 
-    def conv_codegen(self, operator):
+    # Not consider bias tensor for now
+    def conv_codegen(self, op : Node):
         self.op_launch_related[self.op_gen_id]['op_name'] = op_mapping["CONV_2D"]
         # Conv's output tensor may depend on other input tensors
         input_tensor_ids = []
         input_tensors = []
         pad_config = None
         
-        if len(operator['inputs']) < 4:
-            # No need to consume other operators' output tensor (normally because the filter is 1x1)
-            input_tensor_ids.append(operator['inputs'][0])
+        if len(op.info['inputs']) < 4:
+            # No need to consume other ops' output tensor (normally because the filter is 1x1)
+            input_tensor_ids.append(op.info['inputs'][0])
         else:
-            pad_config = self.buffers[self.tensors[operator['inputs'][3]]['buffer']]['data']
-            # Need to consume other operators' output tensor
-            for i in range(4, len(operator['inputs'])):
-                input_tensor_ids.append(operator['inputs'][i])
-        filter_tensor_id = operator['inputs'][1]
-        bias_tensor_id = operator['inputs'][2]
-        output_tensor_id = operator['outputs'][0]
+            pad_config = self.buffers[self.tensors[op.info['inputs'][3]]['buffer']]['data']
+            # Need to consume other ops' output tensor
+            for i in range(4, len(op.info['inputs'])):
+                input_tensor_ids.append(op.info['inputs'][i])
+        filter_tensor_id = op.info['inputs'][1]
+        output_tensor_id = op.info['outputs'][0]
 
         # Check whether have constant tensors
-        constant_tensor_count = 0
+        conv_input_tensor_count = 0
         if len(self.buffers[self.tensors[filter_tensor_id]['buffer']]) != 0:
-            constant_tensor_count += 1
-        if len(self.buffers[self.tensors[bias_tensor_id]['buffer']]) != 0:
-            constant_tensor_count += 1
-        self.op_launch_related[self.op_gen_id]['weight_num'] = constant_tensor_count
+            conv_input_tensor_count += 1
+        # Plus 1: input tensor
+        self.op_launch_related[self.op_gen_id]['weight_num'] = conv_input_tensor_count + 1
 
         for input_tensor_id in input_tensor_ids:
             input_tensors.append(self.tensors[input_tensor_id])
+        # This is temperal handling, actually need to perform data concatenation in the later stage
+        input_tensor_id = input_tensor_ids[math.floor(len(input_tensor_ids) / 2)]
         filter_tensor = self.tensors[filter_tensor_id]
-        bias_tensor = self.tensors[bias_tensor_id]
         output_tensor = self.tensors[output_tensor_id]
+
+        # Set distributed SRAM
+        allocated_input_tensor = self.allocated_tensors[input_tensor_id]
+        for tensor in allocated_input_tensor.tensors:
+            if tensor.cid == op.opid:
+                self.op_launch_related[self.op_gen_id]['input0_sram_id'] = tensor.sram_id if tensor.sram_id != -1 else 0
+                break
+        allocated_filter_tensor = self.allocated_tensors[filter_tensor_id]
+        for tensor in allocated_filter_tensor.tensors:
+            if tensor.cid == op.opid:
+                self.op_launch_related[self.op_gen_id]['input1_sram_id'] = tensor.sram_id if tensor.sram_id != -1 else 0
+                break
+        allocated_output_tensor = self.allocated_tensors[output_tensor_id]
+        for tensor in allocated_output_tensor.tensors:
+            if tensor.pid == op.opid:
+                self.op_launch_related[self.op_gen_id]['output_sram_id'] = tensor.sram_id if tensor.sram_id != -1 else 0
+                break
 
         # Check whether weight needs broadcast
         weight_oc = filter_tensor['shape'][0]
@@ -142,8 +191,8 @@ class OPGen:
         else:
             self.op_launch_related[self.op_gen_id]["broadcast"] = 0
         
-        stride_h = operator['builtin_options']['stride_h']
-        stride_w = operator['builtin_options']['stride_w']
+        stride_h = op.info['builtin_options']['stride_h']
+        stride_w = op.info['builtin_options']['stride_w']
         pad_h = pad_config[0]
 
         tokens = output_tensor['name'].split('_split_')
@@ -155,7 +204,7 @@ class OPGen:
                 raise(f"Invalid output tensor name: {output_tensor['name']}")
         
         # Initial the input tensor's range required
-        split_size = self.tensors[operator['inputs'][0]]['shape'][1]
+        split_size = self.tensors[op.info['inputs'][0]]['shape'][1]
         input_range_required = defaultdict(list)
         input_id_list = []
         for input_tensor_id in input_tensor_ids:
@@ -182,10 +231,10 @@ class OPGen:
                     input_range_required[source_sid][1] = max(input_range_required[source_sid][1], in_h)
         total_input_elements = 0
         input_tensor_idxs = []
-        if len(operator['inputs']) < 4:
+        if len(op.info['inputs']) < 4:
             input_tensor_idxs.append(0)
         else:
-            for i in range(4, len(operator['inputs'])):
+            for i in range(4, len(op.info['inputs'])):
                 input_tensor_ids.append(i)
         for input_tensor_idx in input_tensor_idxs:
             batch = input_tensors[input_tensor_idx]['shape'][0]
@@ -228,11 +277,11 @@ class OPGen:
         # Update the op_gen_id
         self.op_gen_id += 1
 
-    def add_codegen(self, operator):
+    def add_codegen(self, op : Node):
         self.op_launch_related[self.op_gen_id]['op_name'] = op_mapping["ADD"]
-        input1_tensor_id = operator['inputs'][0]
-        input2_tensor_id = operator['inputs'][1]
-        output_tensor_id = operator['outputs'][0]
+        input1_tensor_id = op.info['inputs'][0]
+        input2_tensor_id = op.info['inputs'][1]
+        output_tensor_id = op.info['outputs'][0]
 
         # Check whether have constant tensors
         constant_tensor_count = 0
@@ -245,6 +294,23 @@ class OPGen:
         input1_tensor = self.tensors[input1_tensor_id]
         input2_tensor = self.tensors[input2_tensor_id]
         output_tensor = self.tensors[output_tensor_id]
+
+        # Set distributed SRAM
+        allocated_input1_tensor = self.allocated_tensors[input1_tensor_id]
+        for tensor in allocated_input1_tensor.tensors:
+            if tensor.cid == op.opid:
+                self.op_launch_related[self.op_gen_id]['input0_sram_id'] = tensor.sram_id if tensor.sram_id != -1 else 0
+                break
+        allocated_input2_tensor = self.allocated_tensors[input2_tensor_id]
+        for tensor in allocated_input2_tensor.tensors:
+            if tensor.cid == op.opid:
+                self.op_launch_related[self.op_gen_id]['input1_sram_id'] = tensor.sram_id if tensor.sram_id != -1 else 0
+                break
+        allocated_output_tensor = self.allocated_tensors[output_tensor_id]
+        for tensor in allocated_output_tensor.tensors:
+            if tensor.pid == op.opid:
+                self.op_launch_related[self.op_gen_id]['output_sram_id'] = tensor.sram_id if tensor.sram_id != -1 else 0
+                break
 
         # Check which tensor needs broadcast
         input1_size = self.Compute_tensor_size(input1_tensor)
@@ -294,11 +360,11 @@ class OPGen:
         # Update the op_gen_id
         self.op_gen_id += 1
 
-    def sub_codegen(self, operator):
+    def sub_codegen(self, op : Node):
         self.op_launch_related[self.op_gen_id]['op_name'] = op_mapping["SUB"]
-        input1_tensor_id = operator['inputs'][0]
-        input2_tensor_id = operator['inputs'][1]
-        output_tensor_id = operator['outputs'][0]
+        input1_tensor_id = op.info['inputs'][0]
+        input2_tensor_id = op.info['inputs'][1]
+        output_tensor_id = op.info['outputs'][0]
 
         # Check whether have constant tensors
         constant_tensor_count = 0
@@ -311,6 +377,23 @@ class OPGen:
         input1_tensor = self.tensors[input1_tensor_id]
         input2_tensor = self.tensors[input2_tensor_id]
         output_tensor = self.tensors[output_tensor_id]
+
+        # Set distributed SRAM
+        allocated_input1_tensor = self.allocated_tensors[input1_tensor_id]
+        for tensor in allocated_input1_tensor.tensors:
+            if tensor.cid == op.opid:
+                self.op_launch_related[self.op_gen_id]['input0_sram_id'] = tensor.sram_id if tensor.sram_id != -1 else 0
+                break
+        allocated_input2_tensor = self.allocated_tensors[input2_tensor_id]
+        for tensor in allocated_input2_tensor.tensors:
+            if tensor.cid == op.opid:
+                self.op_launch_related[self.op_gen_id]['input1_sram_id'] = tensor.sram_id if tensor.sram_id != -1 else 0
+                break
+        allocated_output_tensor = self.allocated_tensors[output_tensor_id]
+        for tensor in allocated_output_tensor.tensors:
+            if tensor.pid == op.opid:
+                self.op_launch_related[self.op_gen_id]['output_sram_id'] = tensor.sram_id if tensor.sram_id != -1 else 0
+                break
 
         # Check which tensor needs broadcast
         input1_size = self.Compute_tensor_size(input1_tensor)
@@ -360,12 +443,12 @@ class OPGen:
         # Update the op_gen_id
         self.op_gen_id += 1
 
-    def mul_codegen(self, operator):
+    def mul_codegen(self, op : Node):
         self.op_launch_related[self.op_gen_id]['op_name'] = op_mapping["MUL"]
         
-        input1_tensor_id = operator['inputs'][0]
-        input2_tensor_id = operator['inputs'][1]
-        output_tensor_id = operator['outputs'][0]
+        input1_tensor_id = op.info['inputs'][0]
+        input2_tensor_id = op.info['inputs'][1]
+        output_tensor_id = op.info['outputs'][0]
 
         # Check whether have constant tensors
         constant_tensor_count = 0
@@ -378,6 +461,23 @@ class OPGen:
         input1_tensor = self.tensors[input1_tensor_id]
         input2_tensor = self.tensors[input2_tensor_id]
         output_tensor = self.tensors[output_tensor_id]
+
+        # Set distributed SRAM
+        allocated_input1_tensor = self.allocated_tensors[input1_tensor_id]
+        for tensor in allocated_input1_tensor.tensors:
+            if tensor.cid == op.opid:
+                self.op_launch_related[self.op_gen_id]['input0_sram_id'] = tensor.sram_id if tensor.sram_id != -1 else 0
+                break
+        allocated_input2_tensor = self.allocated_tensors[input2_tensor_id]
+        for tensor in allocated_input2_tensor.tensors:
+            if tensor.cid == op.opid:
+                self.op_launch_related[self.op_gen_id]['input1_sram_id'] = tensor.sram_id if tensor.sram_id != -1 else 0
+                break
+        allocated_output_tensor = self.allocated_tensors[output_tensor_id]
+        for tensor in allocated_output_tensor.tensors:
+            if tensor.pid == op.opid:
+                self.op_launch_related[self.op_gen_id]['output_sram_id'] = tensor.sram_id if tensor.sram_id != -1 else 0
+                break
 
         # Check which tensor needs broadcast
         input1_size = self.Compute_tensor_size(input1_tensor)
@@ -416,16 +516,28 @@ class OPGen:
         # Update the op_gen_id
         self.op_gen_id += 1
 
-    def exp_codegen(self, operator):
+    def exp_codegen(self, op : Node):
         self.op_launch_related[self.op_gen_id]['op_name'] = op_mapping["EXP"]
-        input_tensor_id = operator['inputs'][0]
-        output_tensor_id = operator['outputs'][0]
+        input_tensor_id = op.info['inputs'][0]
+        output_tensor_id = op.info['outputs'][0]
 
         # No way has constant tensors
         self.op_launch_related[self.op_gen_id]['weight_num'] = 0
 
         input_tensor = self.tensors[input_tensor_id]
         output_tensor = self.tensors[output_tensor_id]
+
+        # Set distributed SRAM
+        allocated_input_tensor = self.allocated_tensors[input_tensor_id]
+        for tensor in allocated_input_tensor.tensors:
+            if tensor.cid == op.opid:
+                self.op_launch_related[self.op_gen_id]['input0_sram_id'] = tensor.sram_id if tensor.sram_id != -1 else 0
+                break
+        allocated_output_tensor = self.allocated_tensors[output_tensor_id]
+        for tensor in allocated_output_tensor.tensors:
+            if tensor.pid == op.opid:
+                self.op_launch_related[self.op_gen_id]['output_sram_id'] = tensor.sram_id if tensor.sram_id != -1 else 0
+                break
 
         # No way needs broadcast
         self.op_launch_related[self.op_gen_id]["broadcast"] = 0
@@ -452,16 +564,28 @@ class OPGen:
         # Update the op_gen_id
         self.op_gen_id += 1
 
-    def reciprocal_codegen(self, operator):
+    def reciprocal_codegen(self, op : Node):
         self.op_launch_related[self.op_gen_id]['op_name'] = op_mapping["RECIPROCAL"]
-        input_tensor_id = operator['inputs'][0]
-        output_tensor_id = operator['outputs'][0]
+        input_tensor_id = op.info['inputs'][0]
+        output_tensor_id = op.info['outputs'][0]
 
         # No way has constant tensors
         self.op_launch_related[self.op_gen_id]['weight_num'] = 0
 
         input_tensor = self.tensors[input_tensor_id]
         output_tensor = self.tensors[output_tensor_id]
+
+        # Set distributed SRAM
+        allocated_input_tensor = self.allocated_tensors[input_tensor_id]
+        for tensor in allocated_input_tensor.tensors:
+            if tensor.cid == op.opid:
+                self.op_launch_related[self.op_gen_id]['input0_sram_id'] = tensor.sram_id if tensor.sram_id != -1 else 0
+                break
+        allocated_output_tensor = self.allocated_tensors[output_tensor_id]
+        for tensor in allocated_output_tensor.tensors:
+            if tensor.pid == op.opid:
+                self.op_launch_related[self.op_gen_id]['output_sram_id'] = tensor.sram_id if tensor.sram_id != -1 else 0
+                break
 
         # No way needs broadcast
         self.op_launch_related[self.op_gen_id]["broadcast"] = 0
@@ -489,12 +613,12 @@ class OPGen:
         self.op_gen_id += 1
 
     # Need to codegen RISCV code to move data in external memory
-    def concat_codegen(self, operator):
-        # print(f"CONCAT: {operator['inputs']}, {operator['outputs']}")
+    def concat_codegen(self, op : Node):
+        # print(f"CONCAT: {op.info['inputs']}, {op.info['outputs']}")
         pass
 
-    def split_codegen(self, operator):
-        # print(f"SPLIT: {operator['inputs']}, {operator['outputs']}")
+    def split_codegen(self, op : Node):
+        # print(f"SPLIT: {op.info['inputs']}, {op.info['outputs']}")
         pass
 
     def QuantizeMultiplier(self, scale):
