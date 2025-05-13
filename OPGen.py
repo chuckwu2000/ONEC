@@ -125,11 +125,11 @@ class OPGen:
             self.op_code += str(self.op_launch_related[i]["output_elements"]) + " "
         # input_elements + weight_elements
         self.op_code += str(self.op_launch_related[0]["input_elements"]) + " "
-        for i in range(1, total_ops):
+        for i in range(0, total_ops):
             self.op_code += str(self.op_launch_related[i]["weight_elements"]) + " "
         # metadata
         for i in range(total_ops):
-            self.op_code += self.op_metadata[i] + " "
+            self.op_code += self.op_metadata[i]
         return self.op_code
         
     def fully_connected_codegen(self, op):
@@ -185,14 +185,9 @@ class OPGen:
                 self.op_launch_related[self.op_gen_id]['output_sram_id'] = tensor.sram_id if tensor.sram_id != -1 else 0
                 break
 
-        # Check whether weight needs broadcast
-        weight_oc = filter_tensor['shape'][0]
-        oc = output_tensor['shape'][3]
-        if weight_oc != oc:
-            # Need to broadcast, 1: weight
-            self.op_launch_related[self.op_gen_id]["broadcast"] = 1
-        else:
-            self.op_launch_related[self.op_gen_id]["broadcast"] = 0
+        # Conv usually no need to consider broadcast
+        # Need to broadcast, 1: weight 2: data (since OEM's NPU will flow the previous op's output to the second operand)
+        self.op_launch_related[self.op_gen_id]["broadcast"] = 0
         
         stride_h = op.info['builtin_options']['stride_h']
         stride_w = op.info['builtin_options']['stride_w']
@@ -234,14 +229,16 @@ class OPGen:
                     input_range_required[source_sid][1] = max(input_range_required[source_sid][1], in_h)
         total_input_elements = 0
         input_tensor_idxs = []
-        if len(op.info['inputs']) < 4:
+        if len(op.info['inputs']) <= 5:
             input_tensor_idxs.append(0)
         else:
             for i in range(4, len(op.info['inputs'])):
-                input_tensor_ids.append(i)
+                input_tensor_idxs.append(i)
         for input_tensor_idx in input_tensor_idxs:
             batch = input_tensors[input_tensor_idx]['shape'][0]
-            height = input_range_required[input_tensor_idx][1] - input_range_required[input_tensor_idx][0]
+            # Since input_id_list start from 0, but the input_tensor_idx may start from 4 (because of our tiling)
+            range_idx = input_tensor_idx - input_tensor_idxs[0]
+            height = input_range_required[input_id_list[range_idx]][1] - input_range_required[input_id_list[range_idx]][0] + 1
             width = input_tensors[input_tensor_idx]['shape'][2]
             ic = input_tensors[input_tensor_idx]['shape'][3]
             total_input_elements += batch * height * width * ic
@@ -318,18 +315,17 @@ class OPGen:
         # Check which tensor needs broadcast
         input1_size = self.Compute_tensor_size(input1_tensor)
         input2_size = self.Compute_tensor_size(input2_tensor)
+        # Need to broadcast, 1: weight 2: data (since OEM's NPU will flow the previous op's output to the second operand)
         if input1_size > input2_size:
-            # Need to broadcast, 1: weight(input2)
-            self.op_launch_related[self.op_gen_id]["broadcast"] = 1
-        elif input1_size < input2_size:
-            # Need to broadcast, 2: data(input1)
             self.op_launch_related[self.op_gen_id]["broadcast"] = 2
+        elif input1_size < input2_size:
+            self.op_launch_related[self.op_gen_id]["broadcast"] = 1
         else:
             # No need to broadcast
             self.op_launch_related[self.op_gen_id]["broadcast"] = 0
         
-        self.op_launch_related[self.op_gen_id]["input_elements"] = input1_size
-        self.op_launch_related[self.op_gen_id]["weight_elements"] = input2_size
+        self.op_launch_related[self.op_gen_id]["input_elements"] = input2_size
+        self.op_launch_related[self.op_gen_id]["weight_elements"] = input1_size
         self.op_launch_related[self.op_gen_id]["output_elements"] = self.Compute_tensor_size(output_tensor)
         
         input1_quant_scale = np.int32(input1_tensor['quantization']['scale'][0]).view('float32')
@@ -347,18 +343,18 @@ class OPGen:
         output_zero_point = output_tensor['quantization']['zero_point'][0]
 
         # Set op metadata
-        self.op_metadata[self.op_gen_id] += str(real_input1_multiplier) + " "
-        self.op_metadata[self.op_gen_id] += str(real_input1_shift) + " "
         self.op_metadata[self.op_gen_id] += str(input1_zero_point) + " "
-        self.op_metadata[self.op_gen_id] += str(real_input2_multiplier) + " "
-        self.op_metadata[self.op_gen_id] += str(real_input2_shift) + " "
         self.op_metadata[self.op_gen_id] += str(input2_zero_point) + " "
+        self.op_metadata[self.op_gen_id] += str(20) + " "
+        self.op_metadata[self.op_gen_id] += str(real_input1_multiplier) + " "
+        self.op_metadata[self.op_gen_id] += str(real_input2_multiplier) + " "
+        self.op_metadata[self.op_gen_id] += str(real_input1_shift) + " "
+        self.op_metadata[self.op_gen_id] += str(real_input2_shift) + " "
         self.op_metadata[self.op_gen_id] += str(real_output_multiplier) + " "
         self.op_metadata[self.op_gen_id] += str(real_output_shift) + " "
         self.op_metadata[self.op_gen_id] += str(output_zero_point) + " "
-        self.op_metadata[self.op_gen_id] += str(20) + " "
         self.op_metadata[self.op_gen_id] += str(-128) + " "
-        self.op_metadata[self.op_gen_id] += str(127)
+        self.op_metadata[self.op_gen_id] += str(127) + " "
 
         # Update the op_gen_id
         self.op_gen_id += 1
@@ -401,18 +397,17 @@ class OPGen:
         # Check which tensor needs broadcast
         input1_size = self.Compute_tensor_size(input1_tensor)
         input2_size = self.Compute_tensor_size(input2_tensor)
+        # Need to broadcast, 1: weight 2: data (since OEM's NPU will flow the previous op's output to the second operand)
         if input1_size > input2_size:
-            # Need to broadcast, 1: weight(input2)
-            self.op_launch_related[self.op_gen_id]["broadcast"] = 1
-        elif input1_size < input2_size:
-            # Need to broadcast, 2: data(input1)
             self.op_launch_related[self.op_gen_id]["broadcast"] = 2
+        elif input1_size < input2_size:
+            self.op_launch_related[self.op_gen_id]["broadcast"] = 1
         else:
             # No need to broadcast
             self.op_launch_related[self.op_gen_id]["broadcast"] = 0
         
-        self.op_launch_related[self.op_gen_id]["input_elements"] = input1_size
-        self.op_launch_related[self.op_gen_id]["weight_elements"] = input2_size
+        self.op_launch_related[self.op_gen_id]["input_elements"] = input2_size
+        self.op_launch_related[self.op_gen_id]["weight_elements"] = input1_size
         self.op_launch_related[self.op_gen_id]["output_elements"] = self.Compute_tensor_size(output_tensor)
 
         input1_quant_scale = np.int32(input1_tensor['quantization']['scale'][0]).view('float32')
@@ -430,18 +425,18 @@ class OPGen:
         output_zero_point = output_tensor['quantization']['zero_point'][0]
 
         # Set op metadata
-        self.op_metadata[self.op_gen_id] += str(real_input1_multiplier) + " "
-        self.op_metadata[self.op_gen_id] += str(real_input1_shift) + " "
         self.op_metadata[self.op_gen_id] += str(input1_zero_point) + " "
-        self.op_metadata[self.op_gen_id] += str(real_input2_multiplier) + " "
-        self.op_metadata[self.op_gen_id] += str(real_input2_shift) + " "
         self.op_metadata[self.op_gen_id] += str(input2_zero_point) + " "
+        self.op_metadata[self.op_gen_id] += str(20) + " "
+        self.op_metadata[self.op_gen_id] += str(real_input1_multiplier) + " "
+        self.op_metadata[self.op_gen_id] += str(real_input2_multiplier) + " "
+        self.op_metadata[self.op_gen_id] += str(real_input1_shift) + " "
+        self.op_metadata[self.op_gen_id] += str(real_input2_shift) + " "
         self.op_metadata[self.op_gen_id] += str(real_output_multiplier) + " "
         self.op_metadata[self.op_gen_id] += str(real_output_shift) + " "
         self.op_metadata[self.op_gen_id] += str(output_zero_point) + " "
-        self.op_metadata[self.op_gen_id] += str(20) + " "
         self.op_metadata[self.op_gen_id] += str(-128) + " "
-        self.op_metadata[self.op_gen_id] += str(127)
+        self.op_metadata[self.op_gen_id] += str(127) + " "
 
         # Update the op_gen_id
         self.op_gen_id += 1
@@ -485,17 +480,16 @@ class OPGen:
         # Check which tensor needs broadcast
         input1_size = self.Compute_tensor_size(input1_tensor)
         input2_size = self.Compute_tensor_size(input2_tensor)
+        # Need to broadcast, 1: weight 2: data (since OEM's NPU will flow the previous op's output to the second operand)
         if input1_size > input2_size:
-            # Need to broadcast, 1: weight(input2)
-            self.op_launch_related[self.op_gen_id]["broadcast"] = 1
-        elif input1_size < input2_size:
-            # Need to broadcast, 2: data(input1)
             self.op_launch_related[self.op_gen_id]["broadcast"] = 2
+        elif input1_size < input2_size:
+            self.op_launch_related[self.op_gen_id]["broadcast"] = 1
         else:
             # No need to broadcast
             self.op_launch_related[self.op_gen_id]["broadcast"] = 0
-        self.op_launch_related[self.op_gen_id]["input_elements"] = input1_size
-        self.op_launch_related[self.op_gen_id]["weight_elements"] = input2_size
+        self.op_launch_related[self.op_gen_id]["input_elements"] = input2_size
+        self.op_launch_related[self.op_gen_id]["weight_elements"] = input1_size
         self.op_launch_related[self.op_gen_id]["output_elements"] = self.Compute_tensor_size(output_tensor)
 
         input1_quant_scale = np.int32(input1_tensor['quantization']['scale'][0]).view('float32')
@@ -556,13 +550,13 @@ class OPGen:
         output_zero_point = output_tensor['quantization']['zero_point'][0]
 
         # Set op metadata
+        self.op_metadata[self.op_gen_id] += str(480) + " "
+        self.op_metadata[self.op_gen_id] += str(input_zero_point) + " "
         self.op_metadata[self.op_gen_id] += str(input_multiplier) + " "
         self.op_metadata[self.op_gen_id] += str(input_shift) + " "
-        self.op_metadata[self.op_gen_id] += str(input_zero_point) + " "
         self.op_metadata[self.op_gen_id] += str(output_multiplier) + " "
         self.op_metadata[self.op_gen_id] += str(output_shift) + " "
         self.op_metadata[self.op_gen_id] += str(output_zero_point) + " "
-        self.op_metadata[self.op_gen_id] += str(480)
 
         # Update the op_gen_id
         self.op_gen_id += 1
@@ -604,13 +598,13 @@ class OPGen:
         output_zero_point = output_tensor['quantization']['zero_point'][0]
 
         # Set op metadata
+        self.op_metadata[self.op_gen_id] += str(480) + " "
+        self.op_metadata[self.op_gen_id] += str(input_zero_point) + " "
         self.op_metadata[self.op_gen_id] += str(input_multiplier) + " "
         self.op_metadata[self.op_gen_id] += str(input_shift) + " "
-        self.op_metadata[self.op_gen_id] += str(input_zero_point) + " "
         self.op_metadata[self.op_gen_id] += str(output_multiplier) + " "
         self.op_metadata[self.op_gen_id] += str(output_shift) + " "
         self.op_metadata[self.op_gen_id] += str(output_zero_point) + " "
-        self.op_metadata[self.op_gen_id] += str(480)
 
         # Update the op_gen_id
         self.op_gen_id += 1
