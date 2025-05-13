@@ -80,8 +80,11 @@ class OPGen:
                 elif opcode_type == 'SPLIT':
                     self.split_codegen(op)
                     return self.op_code
+                elif opcode_type == 'RESHAPE':
+                    return self.op_code
                 else:
-                    raise(f"[CODE_GEN] Unknown op: {opcode_type}")
+                    print(f"[CODE_GEN] Unknown op: {opcode_type}")
+                    return self.op_code
         else:
             raise BaseException(f"[CODE_GEN] Too many ops, first op: {ops[0]}, total: {total_ops}")
         
