@@ -22,7 +22,7 @@ class OPGen:
         self.allocated_tensors = allocated_tensors
         self.op_code = ""
         self.op_gen_id = 0
-        # Format: [4 ops, weight_num, sram_ids, 4 op_broadcast, 4 op_output_elements, op_0_input_elements + op_0_weight_elements + 3 op_weight_elements]
+        # Format: [4 ops, dram_transfer, sram_ids, 4 op_broadcast, 4 op_output_elements, op_0_input_elements + op_0_weight_elements + 3 op_weight_elements]
         self.op_launch_related = defaultdict(dict)
         self.op_metadata = defaultdict(str)
 
@@ -74,11 +74,17 @@ class OPGen:
                     self.exp_codegen(op)
                 elif opcode_type == 'RECIPROCAL':
                     self.reciprocal_codegen(op)
+                elif opcode_type == 'PACK':
+                    # self.pack_codegen(op)
+                    return self.op_code
                 elif opcode_type == 'CONCATENATION':
                     self.concat_codegen(op)
                     return self.op_code
                 elif opcode_type == 'SPLIT':
                     self.split_codegen(op)
+                    return self.op_code
+                elif opcode_type == 'TRANSPOSE':
+                    # self.transpose_codegen(op)
                     return self.op_code
                 elif opcode_type == 'RESHAPE':
                     return self.op_code
@@ -89,17 +95,17 @@ class OPGen:
             raise BaseException(f"[CODE_GEN] Too many ops, first op: {ops[0]}, total: {total_ops}")
         
         # Final codegen
-        # Format: [4 ops, weight_num, sram_ids, 4 op_broadcast, 4 op_output_elements, op_0_input_elements + op_0_weight_elements + 3 op_weight_elements
+        # Format: [4 ops, dram_transfer, sram_ids, 4 op_broadcast, 4 op_output_elements, op_0_input_elements + op_0_weight_elements + 3 op_weight_elements
         #          + each op_metadata]
         # ops (reversed order)
-        for i in range(total_ops - 1, -1, -1):
-            self.op_code += self.op_launch_related[i]["op_name"]
+        for i in range(3, -1, -1):
+            self.op_code += self.op_launch_related[i].get("op_name", op_mapping['IDLE'])
         self.op_code += " "
-        # weight_num
-        weights_num = 0
+        # dram_transfer
+        dram_transfer = 0
         for i in range(total_ops):
-            weights_num += self.op_launch_related[i]["weight_num"]
-        self.op_code += str(weights_num) + " "
+            dram_transfer += self.op_launch_related[i].get("dram_transfer", 0)
+        self.op_code += str(dram_transfer) + " "
         # sram_ids (store_sram_idx, op0_weight_idx0, op0_weight_idx1, op1_weight_idx0, op2_weight_idx0, op3_weight_idx0)
         # If not use: set to 0
         self.op_code += str(self.op_launch_related[total_ops - 1]["output_sram_id"]) + " "
@@ -113,13 +119,16 @@ class OPGen:
             raise(f"[CODE_GEN] Unknown first op: {first_op_opcode_type}")
         for i in range(1, 4):
             if i < total_ops:
-                # OEM's NPU default to put last op's output tensor to buffer and consume as second operand
-                self.op_code += str(self.op_launch_related[i].get("input0_sram_id", 0)) + " "
+                # OEM's NPU treat weight as the tensor that need to access from SRAM
+                self.op_code += str(self.op_launch_related[i].get("weight", 0)) + " "
             else:
                 self.op_code += str(0) + " "
         # broadcast
-        for i in range(total_ops):
-            self.op_code += str(self.op_launch_related[i]["broadcast"]) + " "
+        for i in range(0, 4):
+            if i < total_ops:
+                self.op_code += str(self.op_launch_related[i]["broadcast"]) + " "
+            else:
+                self.op_code += str(0) + " "
         # output_elements
         for i in range(total_ops):
             self.op_code += str(self.op_launch_related[i]["output_elements"]) + " "
@@ -133,7 +142,94 @@ class OPGen:
         return self.op_code
         
     def fully_connected_codegen(self, op):
-        pass
+        self.op_launch_related[self.op_gen_id]['op_name'] = op_mapping["CONV_2D"]
+        # Conv's output tensor may depend on other input tensors
+        input_tensor_ids = []
+        input_tensors = []
+        
+        if len(op.info['inputs']) < 4:
+            # No need to consume other ops' output tensor (normally because the filter is 1x1)
+            input_tensor_ids.append(op.info['inputs'][0])
+        else:
+            # Need to consume other ops' output tensor
+            for i in range(4, len(op.info['inputs'])):
+                input_tensor_ids.append(op.info['inputs'][i])
+        weight_tensor_id = op.info['inputs'][1]
+        output_tensor_id = op.info['outputs'][0]
+
+        for input_tensor_id in input_tensor_ids:
+            input_tensors.append(self.tensors[input_tensor_id])
+        # This is temperal handling, actually need to perform data concatenation in the later stage
+        input_tensor_id = input_tensor_ids[0]
+        input_tensor = self.tensors[input_tensor_id]
+        weight_tensor = self.tensors[weight_tensor_id]
+        output_tensor = self.tensors[output_tensor_id]
+
+        self.op_launch_related[self.op_gen_id]['dram_transfer'] = 0
+        # Set distributed SRAM
+        allocated_input_tensor = self.allocated_tensors[input_tensor_id]
+        for tensor in allocated_input_tensor.tensors:
+            if tensor.cid == op.opid:
+                self.op_launch_related[self.op_gen_id]['input0_sram_id'] = tensor.sram_id if tensor.sram_id != -1 else 0
+                if tensor.sram_id != -1 and tensor.dram_access:
+                    self.op_launch_related[self.op_gen_id]['dram_transfer'] += 1
+                break
+        allocated_weight_tensor = self.allocated_tensors[weight_tensor_id]
+        for tensor in allocated_weight_tensor.tensors:
+            if tensor.cid == op.opid:
+                self.op_launch_related[self.op_gen_id]['input1_sram_id'] = tensor.sram_id if tensor.sram_id != -1 else 0
+                if tensor.sram_id != -1 and tensor.dram_access:
+                    self.op_launch_related[self.op_gen_id]['dram_transfer'] += 1
+                break
+        allocated_output_tensor = self.allocated_tensors[output_tensor_id]
+        for tensor in allocated_output_tensor.tensors:
+            if tensor.pid == op.opid:
+                self.op_launch_related[self.op_gen_id]['output_sram_id'] = tensor.sram_id if tensor.sram_id != -1 else 0
+                break
+
+        # FC usually no need to consider broadcast
+        # Need to broadcast, 1: weight 2: data (since OEM's NPU will flow the previous op's output to the second operand)
+        self.op_launch_related[self.op_gen_id]["broadcast"] = 0
+        
+        stride_h = 1
+        stride_w = 1
+        pad_h = 0
+
+        weight_shape = weight_tensor['shape']
+        ofm_shape = output_tensor['shape']
+        total_input_elements = ofm_shape[-2] * weight_shape[1]
+        self.op_launch_related[self.op_gen_id]['input_elements'] = total_input_elements
+        self.op_launch_related[self.op_gen_id]['weight_elements'] = self.Compute_tensor_size(weight_tensor)
+        self.op_launch_related[self.op_gen_id]['output_elements'] = self.Compute_tensor_size(output_tensor)
+
+        # TODO: May try to concatenate input_range_required first
+
+        input_quant_scale = np.int32(input_tensor['quantization']['scale'][0]).view('float32')
+        input_zero_point = input_tensor['quantization']['zero_point'][0]
+        weight_quant_scale = np.int32(weight_tensor['quantization']['scale'][0]).view('float32')
+        output_quant_scale = np.int32(output_tensor['quantization']['scale'][0]).view('float32')
+        output_zero_point = output_tensor['quantization']['zero_point'][0]
+
+        scale = input_quant_scale * weight_quant_scale / output_quant_scale
+        multiplier, shift = self.QuantizeMultiplier(scale)
+
+        # Set op metadata
+        self.op_metadata[self.op_gen_id] += str(stride_h) + " "
+        self.op_metadata[self.op_gen_id] += str(stride_w) + " "
+        self.op_metadata[self.op_gen_id] += str(pad_h) + " "
+        self.op_metadata[self.op_gen_id] += str(1) + " "
+        self.op_metadata[self.op_gen_id] += str(output_tensor['shape'][-2]) + " "
+        self.op_metadata[self.op_gen_id] += str(1) + " "
+        self.op_metadata[self.op_gen_id] += str(weight_tensor['shape'][1]) + " "
+        self.op_metadata[self.op_gen_id] += str(weight_tensor['shape'][0]) + " "
+        self.op_metadata[self.op_gen_id] += str(1) + " "
+        self.op_metadata[self.op_gen_id] += str(1) + " "
+        self.op_metadata[self.op_gen_id] += str(multiplier) + " "
+        self.op_metadata[self.op_gen_id] += str(shift) + " "
+        self.op_metadata[self.op_gen_id] += str(output_zero_point) + " "
+
+        # Update the op_gen_id
+        self.op_gen_id += 1
 
     # Not consider bias tensor for now
     def conv_codegen(self, op : Node):
@@ -154,13 +250,6 @@ class OPGen:
         filter_tensor_id = op.info['inputs'][1]
         output_tensor_id = op.info['outputs'][0]
 
-        # Check whether have constant tensors
-        conv_input_tensor_count = 0
-        if len(self.buffers[self.tensors[filter_tensor_id]['buffer']]) != 0:
-            conv_input_tensor_count += 1
-        # Plus 1: input tensor
-        self.op_launch_related[self.op_gen_id]['weight_num'] = conv_input_tensor_count + 1
-
         for input_tensor_id in input_tensor_ids:
             input_tensors.append(self.tensors[input_tensor_id])
         # This is temperal handling, actually need to perform data concatenation in the later stage
@@ -168,16 +257,21 @@ class OPGen:
         filter_tensor = self.tensors[filter_tensor_id]
         output_tensor = self.tensors[output_tensor_id]
 
+        self.op_launch_related[self.op_gen_id]['dram_transfer'] = 0
         # Set distributed SRAM
         allocated_input_tensor = self.allocated_tensors[input_tensor_id]
         for tensor in allocated_input_tensor.tensors:
             if tensor.cid == op.opid:
                 self.op_launch_related[self.op_gen_id]['input0_sram_id'] = tensor.sram_id if tensor.sram_id != -1 else 0
+                if tensor.sram_id != -1 and tensor.dram_access:
+                    self.op_launch_related[self.op_gen_id]['dram_transfer'] += 1
                 break
         allocated_filter_tensor = self.allocated_tensors[filter_tensor_id]
         for tensor in allocated_filter_tensor.tensors:
             if tensor.cid == op.opid:
                 self.op_launch_related[self.op_gen_id]['input1_sram_id'] = tensor.sram_id if tensor.sram_id != -1 else 0
+                if tensor.sram_id != -1 and tensor.dram_access:
+                    self.op_launch_related[self.op_gen_id]['dram_transfer'] += 1
                 break
         allocated_output_tensor = self.allocated_tensors[output_tensor_id]
         for tensor in allocated_output_tensor.tensors:
@@ -191,7 +285,16 @@ class OPGen:
         
         stride_h = op.info['builtin_options']['stride_h']
         stride_w = op.info['builtin_options']['stride_w']
-        pad_h = pad_config[0]
+
+        if pad_config is None:
+            if op.info['builtin_options'].get('padding', 'SAME') == 'SAME':
+                out_shape = output_tensor['shape']
+                total_pad_h = (out_shape[1] - 1) * stride_h + filter_tensor['shape'][1] - out_shape[1]
+                pad_h = total_pad_h // 2 if total_pad_h > 0 else 0
+            else:
+                pad_h = 0
+        else:
+            pad_h = pad_config[0]
 
         tokens = output_tensor['name'].split('_split_')
         output_id = -1
@@ -272,7 +375,7 @@ class OPGen:
         self.op_metadata[self.op_gen_id] += str(filter_tensor['shape'][2]) + " "
         self.op_metadata[self.op_gen_id] += str(multiplier) + " "
         self.op_metadata[self.op_gen_id] += str(shift) + " "
-        self.op_metadata[self.op_gen_id] += str(output_zero_point)
+        self.op_metadata[self.op_gen_id] += str(output_zero_point) + " "
 
         # Update the op_gen_id
         self.op_gen_id += 1
@@ -283,28 +386,29 @@ class OPGen:
         input2_tensor_id = op.info['inputs'][1]
         output_tensor_id = op.info['outputs'][0]
 
-        # Check whether have constant tensors
-        constant_tensor_count = 0
-        if len(self.buffers[self.tensors[input1_tensor_id]['buffer']]) != 0:
-            constant_tensor_count += 1
-        if len(self.buffers[self.tensors[input2_tensor_id]['buffer']]) != 0:
-            constant_tensor_count += 1
-        self.op_launch_related[self.op_gen_id]['weight_num'] = constant_tensor_count
-
         input1_tensor = self.tensors[input1_tensor_id]
         input2_tensor = self.tensors[input2_tensor_id]
         output_tensor = self.tensors[output_tensor_id]
 
+        self.op_launch_related[self.op_gen_id]['dram_transfer'] = 0
         # Set distributed SRAM
         allocated_input1_tensor = self.allocated_tensors[input1_tensor_id]
         for tensor in allocated_input1_tensor.tensors:
             if tensor.cid == op.opid:
                 self.op_launch_related[self.op_gen_id]['input0_sram_id'] = tensor.sram_id if tensor.sram_id != -1 else 0
+                if tensor.sram_id != -1:
+                    self.op_launch_related[self.op_gen_id]['weight'] = tensor.sram_id
+                if tensor.sram_id != -1 and tensor.dram_access:
+                    self.op_launch_related[self.op_gen_id]['dram_transfer'] += 1
                 break
         allocated_input2_tensor = self.allocated_tensors[input2_tensor_id]
         for tensor in allocated_input2_tensor.tensors:
             if tensor.cid == op.opid:
                 self.op_launch_related[self.op_gen_id]['input1_sram_id'] = tensor.sram_id if tensor.sram_id != -1 else 0
+                if tensor.sram_id != -1:
+                    self.op_launch_related[self.op_gen_id]['weight'] = tensor.sram_id
+                if tensor.sram_id != -1 and tensor.dram_access:
+                    self.op_launch_related[self.op_gen_id]['dram_transfer'] += 1
                 break
         allocated_output_tensor = self.allocated_tensors[output_tensor_id]
         for tensor in allocated_output_tensor.tensors:
@@ -365,28 +469,29 @@ class OPGen:
         input2_tensor_id = op.info['inputs'][1]
         output_tensor_id = op.info['outputs'][0]
 
-        # Check whether have constant tensors
-        constant_tensor_count = 0
-        if len(self.buffers[self.tensors[input1_tensor_id]['buffer']]) != 0:
-            constant_tensor_count += 1
-        if len(self.buffers[self.tensors[input2_tensor_id]['buffer']]) != 0:
-            constant_tensor_count += 1
-        self.op_launch_related[self.op_gen_id]['weight_num'] = constant_tensor_count
-
         input1_tensor = self.tensors[input1_tensor_id]
         input2_tensor = self.tensors[input2_tensor_id]
         output_tensor = self.tensors[output_tensor_id]
 
+        self.op_launch_related[self.op_gen_id]['dram_transfer'] = 0
         # Set distributed SRAM
         allocated_input1_tensor = self.allocated_tensors[input1_tensor_id]
         for tensor in allocated_input1_tensor.tensors:
             if tensor.cid == op.opid:
                 self.op_launch_related[self.op_gen_id]['input0_sram_id'] = tensor.sram_id if tensor.sram_id != -1 else 0
+                if tensor.sram_id != -1:
+                    self.op_launch_related[self.op_gen_id]['weight'] = tensor.sram_id
+                if tensor.sram_id != -1 and tensor.dram_access:
+                    self.op_launch_related[self.op_gen_id]['dram_transfer'] += 1
                 break
         allocated_input2_tensor = self.allocated_tensors[input2_tensor_id]
         for tensor in allocated_input2_tensor.tensors:
             if tensor.cid == op.opid:
                 self.op_launch_related[self.op_gen_id]['input1_sram_id'] = tensor.sram_id if tensor.sram_id != -1 else 0
+                if tensor.sram_id != -1:
+                    self.op_launch_related[self.op_gen_id]['weight'] = tensor.sram_id
+                if tensor.sram_id != -1 and tensor.dram_access:
+                    self.op_launch_related[self.op_gen_id]['dram_transfer'] += 1
                 break
         allocated_output_tensor = self.allocated_tensors[output_tensor_id]
         for tensor in allocated_output_tensor.tensors:
@@ -448,28 +553,29 @@ class OPGen:
         input2_tensor_id = op.info['inputs'][1]
         output_tensor_id = op.info['outputs'][0]
 
-        # Check whether have constant tensors
-        constant_tensor_count = 0
-        if len(self.buffers[self.tensors[input1_tensor_id]['buffer']]) != 0:
-            constant_tensor_count += 1
-        if len(self.buffers[self.tensors[input2_tensor_id]['buffer']]) != 0:
-            constant_tensor_count += 1
-        self.op_launch_related[self.op_gen_id]['weight_num'] = constant_tensor_count
-
         input1_tensor = self.tensors[input1_tensor_id]
         input2_tensor = self.tensors[input2_tensor_id]
         output_tensor = self.tensors[output_tensor_id]
 
+        self.op_launch_related[self.op_gen_id]['dram_transfer'] = 0
         # Set distributed SRAM
         allocated_input1_tensor = self.allocated_tensors[input1_tensor_id]
         for tensor in allocated_input1_tensor.tensors:
             if tensor.cid == op.opid:
                 self.op_launch_related[self.op_gen_id]['input0_sram_id'] = tensor.sram_id if tensor.sram_id != -1 else 0
+                if tensor.sram_id != -1:
+                    self.op_launch_related[self.op_gen_id]['weight'] = tensor.sram_id
+                if tensor.sram_id != -1 and tensor.dram_access:
+                    self.op_launch_related[self.op_gen_id]['dram_transfer'] += 1
                 break
         allocated_input2_tensor = self.allocated_tensors[input2_tensor_id]
         for tensor in allocated_input2_tensor.tensors:
             if tensor.cid == op.opid:
                 self.op_launch_related[self.op_gen_id]['input1_sram_id'] = tensor.sram_id if tensor.sram_id != -1 else 0
+                if tensor.sram_id != -1:
+                    self.op_launch_related[self.op_gen_id]['weight'] = tensor.sram_id
+                if tensor.sram_id != -1 and tensor.dram_access:
+                    self.op_launch_related[self.op_gen_id]['dram_transfer'] += 1
                 break
         allocated_output_tensor = self.allocated_tensors[output_tensor_id]
         for tensor in allocated_output_tensor.tensors:
@@ -508,7 +614,7 @@ class OPGen:
         self.op_metadata[self.op_gen_id] += str(real_output_shift) + " "
         self.op_metadata[self.op_gen_id] += str(output_zero_point) + " "
         self.op_metadata[self.op_gen_id] += str(-128) + " "
-        self.op_metadata[self.op_gen_id] += str(127)
+        self.op_metadata[self.op_gen_id] += str(127) + " "
 
         # Update the op_gen_id
         self.op_gen_id += 1
@@ -518,17 +624,17 @@ class OPGen:
         input_tensor_id = op.info['inputs'][0]
         output_tensor_id = op.info['outputs'][0]
 
-        # No way has constant tensors
-        self.op_launch_related[self.op_gen_id]['weight_num'] = 0
-
         input_tensor = self.tensors[input_tensor_id]
         output_tensor = self.tensors[output_tensor_id]
 
+        self.op_launch_related[self.op_gen_id]['dram_transfer'] = 0
         # Set distributed SRAM
         allocated_input_tensor = self.allocated_tensors[input_tensor_id]
         for tensor in allocated_input_tensor.tensors:
             if tensor.cid == op.opid:
                 self.op_launch_related[self.op_gen_id]['input0_sram_id'] = tensor.sram_id if tensor.sram_id != -1 else 0
+                if tensor.sram_id != -1 and tensor.dram_access:
+                    self.op_launch_related[self.op_gen_id]['dram_transfer'] += 1
                 break
         allocated_output_tensor = self.allocated_tensors[output_tensor_id]
         for tensor in allocated_output_tensor.tensors:
@@ -566,17 +672,17 @@ class OPGen:
         input_tensor_id = op.info['inputs'][0]
         output_tensor_id = op.info['outputs'][0]
 
-        # No way has constant tensors
-        self.op_launch_related[self.op_gen_id]['weight_num'] = 0
-
         input_tensor = self.tensors[input_tensor_id]
         output_tensor = self.tensors[output_tensor_id]
 
+        self.op_launch_related[self.op_gen_id]['dram_transfer'] = 0
         # Set distributed SRAM
         allocated_input_tensor = self.allocated_tensors[input_tensor_id]
         for tensor in allocated_input_tensor.tensors:
             if tensor.cid == op.opid:
                 self.op_launch_related[self.op_gen_id]['input0_sram_id'] = tensor.sram_id if tensor.sram_id != -1 else 0
+                if tensor.sram_id != -1 and tensor.dram_access:
+                    self.op_launch_related[self.op_gen_id]['dram_transfer'] += 1
                 break
         allocated_output_tensor = self.allocated_tensors[output_tensor_id]
         for tensor in allocated_output_tensor.tensors:

@@ -17,6 +17,7 @@ class Distributed_SRAM_tensor_info:
         self.cid = cid
         self.live_range = defaultdict(int)
         self.sram_id = -1
+        self.dram_access = True
 
 class Distributed_SRAM_tensor:
     def __init__(self):
@@ -262,6 +263,8 @@ class Distributed_SRAM_allocator:
         candidate_tensors = []
         total_operators = len(operators)
         for op_idx, op in enumerate(operators):
+            prev_op_idx = op_idx - 1
+            prev_op = operators[prev_op_idx] if prev_op_idx >= 0 else None
             next_op_idx = op_idx + 1
             next_op = operators[next_op_idx] if next_op_idx < total_operators else None
             opcode_index = op.info['opcode_index']
@@ -277,21 +280,23 @@ class Distributed_SRAM_allocator:
                 input_need = 2
             else:
                 input_need = len(op.info['inputs'])
-            # The input_need's value can be decreased by 1 in unary_ops and binary_ops if operators > 1, 
-            # because the intermediate tensor is flow to buffer not store back to SRAM)
-            if len(operators) > 1:
-                if opcode_type in unary_ops or opcode_type in binary_ops:
-                    input_need -= 1
             for tensor_id in op.info['inputs'][0: input_need]:
                 if tensor_id == -1:
                     continue
                 # Based on pid & cid to find the tensor
                 for tensor in self.tensor_info[tensor_id].tensors:
                     if tensor.cid == op.opid:
+                        # In OEM's NPU the intermediate tensor is flow to buffer not store back to SRAM
+                        if prev_op != None and tensor.pid == prev_op.opid:
+                            break
                         # Check the tensor whether is already allocated and for now we only accept sram be reused between the concurrent run pattern
                         if can_consume_directly and op_idx == 0 and tensor.sram_id != -1:
                             # If the tensor is already allocated, we use it directly and mark the color
                             colors[tensor.sram_id] = True
+                            tensor.dram_access = False
+                        # No need to access the DRAM, since it will be allocated to the SRAM in the future
+                        if tensor in candidate_tensors:
+                            tensor.dram_access = False
                         else:
                             candidate_tensors.append(tensor)
                         break
@@ -300,7 +305,6 @@ class Distributed_SRAM_allocator:
                 for tensor in self.tensor_info[tensor_id].tensors:
                     # Won't break as early as possible, since same tensor may be used by different ops
                     if tensor.pid == op.opid:
-                        # OEM's NPU can flow output data into buffer(no need to store back to SRAM), then next op can consume the output tensor from buffer
                         # If the next op won't consume the output tensor immediately, we need to store the output tensor back to SRAM
                         if next_op == None:
                             candidate_tensors.append(tensor)
@@ -323,8 +327,6 @@ class Distributed_SRAM_allocator:
                    tensor2.live_range['first_time_used'] <= tensor1.live_range['last_time_used']:
                     coloring_graph.nodes[tensor1].neighbors.append(tensor2)
                     coloring_graph.nodes[tensor1].neighbors_list.append(tensor2)
-                    coloring_graph.nodes[tensor2].neighbors.append(tensor1)
-                    coloring_graph.nodes[tensor2].neighbors_list.append(tensor1)
         # Steps 3: Check which nodes can be trivially pushed to stack
         empty_colors = 0
         for color_been_used in colors:
