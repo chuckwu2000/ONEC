@@ -100,12 +100,12 @@ class OPGen:
         # ops (reversed order)
         for i in range(3, -1, -1):
             self.op_code += self.op_launch_related[i].get("op_name", op_mapping['IDLE'])
-        self.op_code += " "
+        self.op_code += "\n"
         # dram_transfer
         dram_transfer = 0
         for i in range(total_ops):
             dram_transfer += self.op_launch_related[i].get("dram_transfer", 0)
-        self.op_code += str(dram_transfer) + " "
+        self.op_code += str(dram_transfer) + "\n"
         # sram_ids (store_sram_idx, op0_weight_idx0, op0_weight_idx1, op1_weight_idx0, op2_weight_idx0, op3_weight_idx0)
         # If not use: set to 0
         self.op_code += str(self.op_launch_related[total_ops - 1]["output_sram_id"]) + " "
@@ -118,27 +118,26 @@ class OPGen:
         else:
             raise(f"[CODE_GEN] Unknown first op: {first_op_opcode_type}")
         for i in range(1, 4):
-            if i < total_ops:
-                # OEM's NPU treat weight as the tensor that need to access from SRAM
-                self.op_code += str(self.op_launch_related[i].get("weight", 0)) + " "
-            else:
-                self.op_code += str(0) + " "
+            # OEM's NPU treat weight as the tensor that need to access from SRAM
+            self.op_code += str(self.op_launch_related[i].get("weight", 0)) + " "
+        self.op_code += "\n"
         # broadcast
         for i in range(0, 4):
-            if i < total_ops:
-                self.op_code += str(self.op_launch_related[i]["broadcast"]) + " "
-            else:
-                self.op_code += str(0) + " "
+            self.op_code += str(self.op_launch_related[i].get("broadcast", 0)) + " "
+        self.op_code += "\n"
         # output_elements
-        for i in range(total_ops):
-            self.op_code += str(self.op_launch_related[i]["output_elements"]) + " "
+        for i in range(0, 4):
+            self.op_code += str(self.op_launch_related[i].get("output_elements", 0)) + " "
+        self.op_code += "\n"
         # input_elements + weight_elements
         self.op_code += str(self.op_launch_related[0]["input_elements"]) + " "
-        for i in range(0, total_ops):
-            self.op_code += str(self.op_launch_related[i]["weight_elements"]) + " "
+        for i in range(0, 4):
+            self.op_code += str(self.op_launch_related[i].get("weight_elements", 0)) + " "
+        self.op_code += "\n\n"
         # metadata
         for i in range(total_ops):
             self.op_code += self.op_metadata[i]
+            self.op_code += "\n"
         return self.op_code
         
     def fully_connected_codegen(self, op):
@@ -216,17 +215,17 @@ class OPGen:
         # Set op metadata
         self.op_metadata[self.op_gen_id] += str(stride_h) + " "
         self.op_metadata[self.op_gen_id] += str(stride_w) + " "
-        self.op_metadata[self.op_gen_id] += str(pad_h) + " "
+        self.op_metadata[self.op_gen_id] += str(pad_h) + "\n"
         self.op_metadata[self.op_gen_id] += str(1) + " "
         self.op_metadata[self.op_gen_id] += str(output_tensor['shape'][-2]) + " "
         self.op_metadata[self.op_gen_id] += str(1) + " "
-        self.op_metadata[self.op_gen_id] += str(weight_tensor['shape'][1]) + " "
+        self.op_metadata[self.op_gen_id] += str(weight_tensor['shape'][1]) + "\n"
         self.op_metadata[self.op_gen_id] += str(weight_tensor['shape'][0]) + " "
         self.op_metadata[self.op_gen_id] += str(1) + " "
-        self.op_metadata[self.op_gen_id] += str(1) + " "
+        self.op_metadata[self.op_gen_id] += str(1) + "\n"
         self.op_metadata[self.op_gen_id] += str(multiplier) + " "
         self.op_metadata[self.op_gen_id] += str(shift) + " "
-        self.op_metadata[self.op_gen_id] += str(output_zero_point) + " "
+        self.op_metadata[self.op_gen_id] += str(output_zero_point) + "\n"
 
         # Update the op_gen_id
         self.op_gen_id += 1
@@ -365,17 +364,17 @@ class OPGen:
         # Set op metadata
         self.op_metadata[self.op_gen_id] += str(stride_h) + " "
         self.op_metadata[self.op_gen_id] += str(stride_w) + " "
-        self.op_metadata[self.op_gen_id] += str(pad_h) + " "
+        self.op_metadata[self.op_gen_id] += str(pad_h) + "\n"
         self.op_metadata[self.op_gen_id] += str(input_tensor['shape'][0]) + " "
         self.op_metadata[self.op_gen_id] += str(input_tensor['shape'][1]) + " "
         self.op_metadata[self.op_gen_id] += str(input_tensor['shape'][2]) + " "
-        self.op_metadata[self.op_gen_id] += str(input_tensor['shape'][3]) + " "
+        self.op_metadata[self.op_gen_id] += str(input_tensor['shape'][3]) + "\n"
         self.op_metadata[self.op_gen_id] += str(filter_tensor['shape'][0]) + " "
         self.op_metadata[self.op_gen_id] += str(filter_tensor['shape'][1]) + " "
-        self.op_metadata[self.op_gen_id] += str(filter_tensor['shape'][2]) + " "
+        self.op_metadata[self.op_gen_id] += str(filter_tensor['shape'][2]) + "\n"
         self.op_metadata[self.op_gen_id] += str(multiplier) + " "
         self.op_metadata[self.op_gen_id] += str(shift) + " "
-        self.op_metadata[self.op_gen_id] += str(output_zero_point) + " "
+        self.op_metadata[self.op_gen_id] += str(output_zero_point) + "\n"
 
         # Update the op_gen_id
         self.op_gen_id += 1
@@ -458,7 +457,7 @@ class OPGen:
         self.op_metadata[self.op_gen_id] += str(real_output_shift) + " "
         self.op_metadata[self.op_gen_id] += str(output_zero_point) + " "
         self.op_metadata[self.op_gen_id] += str(-128) + " "
-        self.op_metadata[self.op_gen_id] += str(127) + " "
+        self.op_metadata[self.op_gen_id] += str(127) + "\n"
 
         # Update the op_gen_id
         self.op_gen_id += 1
@@ -541,7 +540,7 @@ class OPGen:
         self.op_metadata[self.op_gen_id] += str(real_output_shift) + " "
         self.op_metadata[self.op_gen_id] += str(output_zero_point) + " "
         self.op_metadata[self.op_gen_id] += str(-128) + " "
-        self.op_metadata[self.op_gen_id] += str(127) + " "
+        self.op_metadata[self.op_gen_id] += str(127) + "\n"
 
         # Update the op_gen_id
         self.op_gen_id += 1
@@ -614,7 +613,7 @@ class OPGen:
         self.op_metadata[self.op_gen_id] += str(real_output_shift) + " "
         self.op_metadata[self.op_gen_id] += str(output_zero_point) + " "
         self.op_metadata[self.op_gen_id] += str(-128) + " "
-        self.op_metadata[self.op_gen_id] += str(127) + " "
+        self.op_metadata[self.op_gen_id] += str(127) + "\n"
 
         # Update the op_gen_id
         self.op_gen_id += 1
@@ -662,7 +661,7 @@ class OPGen:
         self.op_metadata[self.op_gen_id] += str(input_shift) + " "
         self.op_metadata[self.op_gen_id] += str(output_multiplier) + " "
         self.op_metadata[self.op_gen_id] += str(output_shift) + " "
-        self.op_metadata[self.op_gen_id] += str(output_zero_point) + " "
+        self.op_metadata[self.op_gen_id] += str(output_zero_point) + "\n"
 
         # Update the op_gen_id
         self.op_gen_id += 1
@@ -710,7 +709,7 @@ class OPGen:
         self.op_metadata[self.op_gen_id] += str(input_shift) + " "
         self.op_metadata[self.op_gen_id] += str(output_multiplier) + " "
         self.op_metadata[self.op_gen_id] += str(output_shift) + " "
-        self.op_metadata[self.op_gen_id] += str(output_zero_point) + " "
+        self.op_metadata[self.op_gen_id] += str(output_zero_point) + "\n"
 
         # Update the op_gen_id
         self.op_gen_id += 1

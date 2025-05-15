@@ -111,17 +111,12 @@ class Distributed_SRAM_allocator:
         self.non_allocated_cascade_patterns = self.find_cascade_pattern()
         self.update_reshape_related_tensors()
         visited = [False for _ in range(len(self.graph.ordered_ops))]
-        for order, op in enumerate(self.ordered_ops):
+        pattern_output_tensors = []
+        for op in self.ordered_ops:
             if visited[op.opid]:
                 continue
-            # Check whether have producer-consumer relationship between previous op and current op
-            can_consume_directly = False
-            previous_op = self.graph.ordered_ops[order - 1] if order > 0 else None
-            if previous_op != None:
-                for child in previous_op.children:
-                    if child == op.opid:
-                        can_consume_directly = True
-                        break
+            # Update the last pattern's utput tensors
+            last_pattern_output_tensors = pattern_output_tensors
             # Check whether the op is the start of the cascade pattern
             find_in_cascade = False
             for cascade_pattern in list(self.non_allocated_cascade_patterns):
@@ -131,7 +126,10 @@ class Distributed_SRAM_allocator:
                     operators = []
                     for opid in operator_ids:
                         operators.append(self.graph.ops[opid])
-                    while(not self.allocate_success(operators, can_consume_directly)):
+                    while(True):
+                        allocate_success, pattern_output_tensors = self.allocate_success(operators, last_pattern_output_tensors)
+                        if allocate_success:
+                            break
                         # If the allocation is not successful, try to decrease the number of operators
                         operator_ids.pop()
                         operators.pop()
@@ -151,10 +149,9 @@ class Distributed_SRAM_allocator:
 
                 operator = self.graph.ops[op.opid]
                 operators = [operator]
-                if not self.allocate_success(operators, can_consume_directly):
-                    for op in operators:
-                        print(f"op info: {op.info}")
-                    raise ValueError("The allocation of the single operator is not successful")
+                allocate_success, pattern_output_tensors = self.allocate_success(operators, last_pattern_output_tensors)
+                if not allocate_success:
+                    raise ValueError("The allocation of the single operator is not successful\n" + f"op info: {op.info}")
                 visited[op.opid] = True
         return self.tensor_info
 
@@ -243,7 +240,7 @@ class Distributed_SRAM_allocator:
             self.tensor_info[output_tensor_id].tensors = [input_tensor]
         
     # Use Chaitin-Briggs algorithm to color the graph
-    def allocate_success(self, operators, can_consume_directly):
+    def allocate_success(self, operators, last_pattern_output_tensors):
         class ColoringNode:
             def __init__(self):
                 # The node's neighbors, which may decrease by removing the node (element's data type: Distributed_SRAM_tensor_info)
@@ -261,6 +258,8 @@ class Distributed_SRAM_allocator:
         colors = [False for _ in range(self.total_SRAMs)]
         # Steps 1: Collect all tensors(Distributed_SRAM_tensor_info) that need to be allocated
         candidate_tensors = []
+        # Store the output tensors of the concurrent run pattern, that subsequent patterns can directly reuse the same SRAM
+        pattern_output_tensors = []
         total_operators = len(operators)
         for op_idx, op in enumerate(operators):
             prev_op_idx = op_idx - 1
@@ -290,10 +289,11 @@ class Distributed_SRAM_allocator:
                         if prev_op != None and tensor.pid == prev_op.opid:
                             break
                         # Check the tensor whether is already allocated and for now we only accept sram be reused between the concurrent run pattern
-                        if can_consume_directly and op_idx == 0 and tensor.sram_id != -1:
+                        if tensor in last_pattern_output_tensors and tensor.sram_id != -1:
                             # If the tensor is already allocated, we use it directly and mark the color
                             colors[tensor.sram_id] = True
                             tensor.dram_access = False
+                            break
                         # No need to access the DRAM, since it will be allocated to the SRAM in the future
                         if tensor in candidate_tensors:
                             tensor.dram_access = False
@@ -308,9 +308,11 @@ class Distributed_SRAM_allocator:
                         # If the next op won't consume the output tensor immediately, we need to store the output tensor back to SRAM
                         if next_op == None:
                             candidate_tensors.append(tensor)
+                            pattern_output_tensors.append(tensor)
                         if next_op != None and tensor.cid != next_op.opid:
                             candidate_tensors.append(tensor)
-                
+                            pattern_output_tensors.append(tensor)
+
         # Steps 2: Build the interference graph
         coloring_graph = ColoringGraph(colors)
         for tensor in candidate_tensors:
@@ -351,13 +353,13 @@ class Distributed_SRAM_allocator:
         # Original Chaitin-Briggs algorithm can further consider the degree of the node which is equal to empty_colors(by spilling), 
         # but in here we don't consider it
         if len(coloring_graph.nodes) != 0:
-            return False
+            return False, []
         # Steps 4: Pop the nodes from stack and try to color
         while len(stack) != 0:
             node = stack.pop()
             # In here, we don't consider to reuse the same color(SRAM), since the concurrent run pattern will use those SRAMs at the same time
             if empty_colors == 0:
-                return False
+                return False, []
             for color_idx, color_been_used in enumerate(colors):
                 if not color_been_used:
                     node.color = color_idx
@@ -367,4 +369,4 @@ class Distributed_SRAM_allocator:
         # Steps 5: Assign the color to the tensor
         for tensor in candidate_tensors:
             tensor.sram_id = tensor_node_mapping[tensor].color
-        return True
+        return True, pattern_output_tensors

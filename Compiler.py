@@ -18,6 +18,7 @@ from Pipeline_schedule import pipeline_schedule
 from GeneSys_schedule import genesys_schedule
 from Simulator import simulator
 from Memory_allocation import memory_allocator
+from Distributed_SRAM_allocator import Distributed_SRAM_allocator
 from CodeGen import CodeGen
 
 parser = argparse.ArgumentParser()
@@ -188,10 +189,10 @@ if args.pad_fusion and model_type == 1:
 if args.remove_data_layout_op and model_type == 0:
     Eliminater(splitter).Eliminate_useless_data_layout_op()
 # Perform softmax lowering
-if args.softmax_lowering:
+if args.softmax_lowering and not args.codegen:
     SoftMax(splitter).softmax_lowering()
 # Perform mean convert
-if args.mean_convert:
+if args.mean_convert and not args.codegen:
     Mean(splitter).convert_mean_to_depthwise_conv()
 # Perform logistic lowering
 if args.logistic_lowering:
@@ -238,71 +239,74 @@ if args.verbose_performance:
     print(f"Original: dma cycles = {split_dma_cycles :.1f}, op cycles = {split_op_cycles :.1f}, total cycles = {split_total_cycles :.1f}")
 ##############################################
 
-################## NORMAL SCHEDULE ##################
-# This normal scheduler won't change execution order, just set the tensor's storage area
-normal_graph = copy.deepcopy(new_graph)
-normal_need_allocate_tensors = copy.deepcopy(mem_allocator.need_allocate_tensors)
-normal_scheduler = Normal_scheduler(normal_graph, normal_need_allocate_tensors)
-normal_graph = normal_scheduler.normal_schedule()
+if not args.codegen:
+    ################## NORMAL SCHEDULE ##################
+    # This normal scheduler won't change execution order, just set the tensor's storage area
+    normal_graph = copy.deepcopy(new_graph)
+    normal_need_allocate_tensors = copy.deepcopy(mem_allocator.need_allocate_tensors)
+    normal_scheduler = Normal_scheduler(normal_graph, normal_need_allocate_tensors)
+    normal_graph = normal_scheduler.normal_schedule()
 
-model_sim = simulator(normal_graph, normal_scheduler.tensor_info)
-if args.verbose_performance:
-    normal_dma_cycles, normal_op_cycles, normal_total_cycles = model_sim.estimate_model(pipeline = False)
-    # model_sim.print_performance()
-    print(f"After use cache: dma cycles = {normal_dma_cycles :.1f}, op cycles = {normal_op_cycles :.1f}, total cycles = {normal_total_cycles :.1f}")
-    print(f"speedup = {((split_total_cycles/normal_total_cycles) - 1) * 100 :.2f}%")
-#####################################################
+    model_sim = simulator(normal_graph, normal_scheduler.tensor_info)
+    if args.verbose_performance:
+        normal_dma_cycles, normal_op_cycles, normal_total_cycles = model_sim.estimate_model(pipeline = False)
+        # model_sim.print_performance()
+        print(f"After use cache: dma cycles = {normal_dma_cycles :.1f}, op cycles = {normal_op_cycles :.1f}, total cycles = {normal_total_cycles :.1f}")
+        print(f"speedup = {((split_total_cycles/normal_total_cycles) - 1) * 100 :.2f}%")
+    #####################################################
 
-################## WEIGHTS REUSE ##################
-# Perform the weight reuse schedule on the new_graph
-same_layer_next_opids = splitter.same_layer_next_opids
-weights_reuse_need_allocate_tensors = copy.deepcopy(mem_allocator.need_allocate_tensors)
-weight_reuse_scheduler = Weight_reuse_scheduler(new_graph, weights_reuse_need_allocate_tensors, same_layer_next_opids)
-weight_reuse_graph = weight_reuse_scheduler.weight_reuse_schedule()
+    ################## WEIGHTS REUSE ##################
+    # Perform the weight reuse schedule on the new_graph
+    same_layer_next_opids = splitter.same_layer_next_opids
+    weights_reuse_need_allocate_tensors = copy.deepcopy(mem_allocator.need_allocate_tensors)
+    weight_reuse_scheduler = Weight_reuse_scheduler(new_graph, weights_reuse_need_allocate_tensors, same_layer_next_opids)
+    weight_reuse_graph = weight_reuse_scheduler.weight_reuse_schedule()
 
-model_sim = simulator(weight_reuse_graph, weight_reuse_scheduler.tensor_info)
-if args.verbose_performance:
-    reuse_dma_cycles, reuse_op_cycles, reuse_total_cycles = model_sim.estimate_model(pipeline = False)
-    # model_sim.print_performance()
-    print(f"After weight reuse schedule: dma cycles = {reuse_dma_cycles :.1f}, op cycles = {reuse_op_cycles :.1f}, total cycles = {reuse_total_cycles :.1f}")
-    print(f"speedup = {((split_total_cycles/reuse_total_cycles) - 1) * 100 :.2f}%")
-###################################################
+    model_sim = simulator(weight_reuse_graph, weight_reuse_scheduler.tensor_info)
+    if args.verbose_performance:
+        reuse_dma_cycles, reuse_op_cycles, reuse_total_cycles = model_sim.estimate_model(pipeline = False)
+        # model_sim.print_performance()
+        print(f"After weight reuse schedule: dma cycles = {reuse_dma_cycles :.1f}, op cycles = {reuse_op_cycles :.1f}, total cycles = {reuse_total_cycles :.1f}")
+        print(f"speedup = {((split_total_cycles/reuse_total_cycles) - 1) * 100 :.2f}%")
+    ###################################################
 
-# print(f"Diff data reuse:")
-# for tensor_id in weight_reuse_scheduler.tensor_info:
-#     for me_id, tensor in enumerate(weight_reuse_scheduler.tensor_info[tensor_id].tensors):
-#         if tensor.in_DRAM != normal_scheduler.tensor_info[tensor_id].tensors[me_id].in_DRAM:
-#             print(f"tensor_id = {tensor_id}, pid = {tensor.pid}, cid = {tensor.cid}, in_DRAM = {tensor.in_DRAM}, normal_in_DRAM = diff")
+    # print(f"Diff data reuse:")
+    # for tensor_id in weight_reuse_scheduler.tensor_info:
+    #     for me_id, tensor in enumerate(weight_reuse_scheduler.tensor_info[tensor_id].tensors):
+    #         if tensor.in_DRAM != normal_scheduler.tensor_info[tensor_id].tensors[me_id].in_DRAM:
+    #             print(f"tensor_id = {tensor_id}, pid = {tensor.pid}, cid = {tensor.cid}, in_DRAM = {tensor.in_DRAM}, normal_in_DRAM = diff")
 
-################## PIPELINE SCHEDULE ##################
-# Perform software pipeline schedule
-# Test GeneSys's options
-genesys_options = {"no_intermediate_tensor_reuse": False, "can_not_followed_multi_child": False}
-if args.genesys:
-    genesys_options = {"no_intermediate_tensor_reuse": True, "can_not_followed_multi_child": True}
-    pipeline_new_graph = genesys_schedule(weight_reuse_graph, weights_reuse_need_allocate_tensors, genesys_options)
-else:
-    pipeline_new_graph = pipeline_schedule(weight_reuse_graph)
-
-# Estimate the performance after pipeline schedule
-model_sim = simulator(pipeline_new_graph, weights_reuse_need_allocate_tensors)
-if args.verbose_performance:
-    pipeline_dma_cycles, pipeline_op_cycles, pipeline_total_cycles = model_sim.estimate_model(pipeline = True)
-    # model_sim.print_performance()
+    ################## PIPELINE SCHEDULE ##################
+    # Perform software pipeline schedule
+    # Test GeneSys's options
+    genesys_options = {"no_intermediate_tensor_reuse": False, "can_not_followed_multi_child": False}
     if args.genesys:
-        print(f"After GeneSys schedule: dma cycles = {pipeline_dma_cycles :.1f}, op cycles = {pipeline_op_cycles :.1f}, total cycles = {pipeline_total_cycles :.1f}")
+        genesys_options = {"no_intermediate_tensor_reuse": True, "can_not_followed_multi_child": True}
+        pipeline_new_graph = genesys_schedule(weight_reuse_graph, weights_reuse_need_allocate_tensors, genesys_options)
     else:
-        print(f"After pipeline schedule: dma cycles = {pipeline_dma_cycles :.1f}, op cycles = {pipeline_op_cycles :.1f}, total cycles = {pipeline_total_cycles :.1f}")
-    print(f"speedup = {((split_total_cycles/pipeline_total_cycles) - 1) * 100 :.2f}%")
-#######################################################
+        pipeline_new_graph = pipeline_schedule(weight_reuse_graph)
 
-# Tensor allocation in DRAM (SRAM allocation is implemented above)
-mem_allocator.dram_allocate(weights_reuse_need_allocate_tensors)
-allocated_tensors = mem_allocator.need_allocate_tensors
+    # Estimate the performance after pipeline schedule
+    model_sim = simulator(pipeline_new_graph, weights_reuse_need_allocate_tensors)
+    if args.verbose_performance:
+        pipeline_dma_cycles, pipeline_op_cycles, pipeline_total_cycles = model_sim.estimate_model(pipeline = True)
+        # model_sim.print_performance()
+        if args.genesys:
+            print(f"After GeneSys schedule: dma cycles = {pipeline_dma_cycles :.1f}, op cycles = {pipeline_op_cycles :.1f}, total cycles = {pipeline_total_cycles :.1f}")
+        else:
+            print(f"After pipeline schedule: dma cycles = {pipeline_dma_cycles :.1f}, op cycles = {pipeline_op_cycles :.1f}, total cycles = {pipeline_total_cycles :.1f}")
+        print(f"speedup = {((split_total_cycles/pipeline_total_cycles) - 1) * 100 :.2f}%")
+    #######################################################
 
-# Generate the code
+    # Tensor allocation in DRAM (SRAM allocation is implemented above)
+    mem_allocator.dram_allocate(weights_reuse_need_allocate_tensors)
+    allocated_tensors = mem_allocator.need_allocate_tensors
+
+# Generate the code for OEM's NPU
 if args.codegen:
-    code_generator = CodeGen(pipeline_new_graph, allocated_tensors, pipeline_new_graph.cascade_matched_ops)
+    distributed_SRAM_allocator = Distributed_SRAM_allocator(new_graph)
+    distributed_SRAM_allocator.allocate_tensors()
+    code_generator = CodeGen(new_graph, distributed_SRAM_allocator.tensor_info, distributed_SRAM_allocator.cascade_patterns)
     code_generator.code_gen()
 
 # new_buffers, new_tensors, new_inputs, new_outputs, new_operators, new_opcodes = ori_graph.export()
