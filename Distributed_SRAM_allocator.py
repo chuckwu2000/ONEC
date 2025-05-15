@@ -157,6 +157,8 @@ class Distributed_SRAM_allocator:
 
     def find_cascade_pattern(self):
         cascade_matched_ops_list = []
+        # Based on the opcode type (element-wise ops)
+        used_units = []
         have_matched = [False for _ in range(len(self.graph.ordered_ops))]
         for order, op in enumerate(self.graph.ordered_ops):
             if have_matched[order]:
@@ -166,6 +168,7 @@ class Distributed_SRAM_allocator:
             # Our cascade pattern always start from the mac-main op
             if opcode_type in mac_ops:
                 cascade_matched_ops = [op.opid]
+                used_units = []
                 now_order = order
                 next_order = order + 1
                 while next_order < len(self.graph.ordered_ops):
@@ -176,6 +179,10 @@ class Distributed_SRAM_allocator:
                     next_op = self.graph.ordered_ops[next_order]
                     opcode_index = next_op.info.get('opcode_index')
                     opcode_type = self.graph.opcodes[opcode_index].get('builtin_code')
+
+                    if opcode_type in used_units:
+                        break
+                    used_units.append(opcode_type)
 
                     # If the child op need to perform reduce operation, we can't let it directly consume the output of mac-main-op
                     if opcode_type in reduce_ops:
