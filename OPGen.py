@@ -141,7 +141,7 @@ class OPGen:
         return self.op_code
         
     def fully_connected_codegen(self, op):
-        self.op_launch_related[self.op_gen_id]['op_name'] = op_mapping["CONV_2D"]
+        self.op_launch_related[self.op_gen_id]['op_name'] = op_mapping["FULLY_CONNECTED"]
         # Conv's output tensor may depend on other input tensors
         input_tensor_ids = []
         input_tensors = []
@@ -375,6 +375,10 @@ class OPGen:
         self.op_metadata[self.op_gen_id] += str(multiplier) + " "
         self.op_metadata[self.op_gen_id] += str(shift) + " "
         self.op_metadata[self.op_gen_id] += str(output_zero_point) + "\n"
+
+        # Customize for our NPU SPEC
+        if filter_tensor['shape'][1] == 1 and filter_tensor['shape'][2] == 1:
+            self.op_launch_related[self.op_gen_id]['op_name'] = op_mapping["FULLY_CONNECTED"]
 
         # Update the op_gen_id
         self.op_gen_id += 1
