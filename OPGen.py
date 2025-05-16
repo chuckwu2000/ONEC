@@ -336,12 +336,10 @@ class OPGen:
             input_tensor_idxs.append(0)
         else:
             for i in range(4, len(op.info['inputs'])):
-                input_tensor_idxs.append(i)
+                input_tensor_idxs.append(i - 4)
         for input_tensor_idx in input_tensor_idxs:
             batch = input_tensors[input_tensor_idx]['shape'][0]
-            # Since input_id_list start from 0, but the input_tensor_idx may start from 4 (because of our tiling)
-            range_idx = input_tensor_idx - input_tensor_idxs[0]
-            height = input_range_required[input_id_list[range_idx]][1] - input_range_required[input_id_list[range_idx]][0] + 1
+            height = input_range_required[input_id_list[input_tensor_idx]][1] - input_range_required[input_id_list[input_tensor_idx]][0] + 1
             width = input_tensors[input_tensor_idx]['shape'][2]
             ic = input_tensors[input_tensor_idx]['shape'][3]
             total_input_elements += batch * height * width * ic

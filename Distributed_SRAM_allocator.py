@@ -314,16 +314,27 @@ class Distributed_SRAM_allocator:
                         break
             # Collect output tensors
             for tensor_id in op.info['outputs']:
-                for tensor in self.tensor_info[tensor_id].tensors:
-                    # Won't break as early as possible, since same tensor may be used by different ops
-                    if tensor.pid == op.opid:
-                        # If the next op won't consume the output tensor immediately, we need to store the output tensor back to SRAM
-                        if next_op == None:
-                            candidate_tensors.append(tensor)
-                            pattern_output_tensors.append(tensor)
-                        if next_op != None and tensor.cid != next_op.opid:
-                            candidate_tensors.append(tensor)
-                            pattern_output_tensors.append(tensor)
+                # May encount that output tensor consume by more than 8 ops (can't allocate each tensor_info to different SRAM)
+                if len(self.tensor_info[tensor_id].tensors) >= self.total_SRAMs - 2:
+                    # Such case's outputs consume timestamp usually is not very close, so we only allocate first tensor_info
+                    tensor = self.tensor_info[tensor_id].tensors[0]
+                    if next_op == None:
+                        candidate_tensors.append(tensor)
+                        pattern_output_tensors.append(tensor)
+                    if next_op != None and tensor.cid != next_op.opid:
+                        candidate_tensors.append(tensor)
+                        pattern_output_tensors.append(tensor)
+                else:
+                    for tensor in self.tensor_info[tensor_id].tensors:
+                        # Won't break as early as possible, since same tensor may be used by different ops
+                        if tensor.pid == op.opid:
+                            # If the next op won't consume the output tensor immediately, we need to store the output tensor back to SRAM
+                            if next_op == None:
+                                candidate_tensors.append(tensor)
+                                pattern_output_tensors.append(tensor)
+                            if next_op != None and tensor.cid != next_op.opid:
+                                candidate_tensors.append(tensor)
+                                pattern_output_tensors.append(tensor)
 
         # Steps 2: Build the interference graph
         coloring_graph = ColoringGraph(colors)
