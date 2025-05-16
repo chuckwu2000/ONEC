@@ -15,6 +15,7 @@ op_mapping = {"IDLE": '0000', "CONV_2D": '0001', "FULLY_CONNECTED": '0010', "EXP
 
 class OPGen:
     def __init__(self, graph : Graph, allocated_tensors : dict[int, Distributed_SRAM_tensor]):
+        self.graph = graph
         self.opcodes = graph.opcodes
         self.buffers = graph.buffers
         self.tensors = graph.tensors

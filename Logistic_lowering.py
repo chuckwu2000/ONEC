@@ -15,6 +15,7 @@ class Logistic:
         self.ops = self.graph.ops
 
     # This lowering may loss precision
+    # logistic(x) = 1 / (1 + exp(-x))
     def logistic_lowering(self):
         # Find all logistic ops
         logistic_ops = self.find_logistic_op()

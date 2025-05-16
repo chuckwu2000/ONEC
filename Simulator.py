@@ -98,7 +98,7 @@ class simulator:
                 cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["MUL"] * (Exponent - 1)
             elif op_type == "TANH":
                 # Tanh(x): 2 * Logistic(2 * x) - 1
-                cycle_per_elem = (ArchitectureFeatures.output_cycles_per_elem["LOGISTIC"] + ArchitectureFeatures.output_cycles_per_elem["ADD/SUB"])
+                cycle_per_elem = (ArchitectureFeatures.output_cycles_per_elem["LOGISTIC"])
             elif op_type == "GELU":
                 # Gelu(x) = x * logistic(1.702 * x)
                 cycle_per_elem = (ArchitectureFeatures.output_cycles_per_elem["LOGISTIC"] + ArchitectureFeatures.output_cycles_per_elem["MUL"])

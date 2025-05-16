@@ -5,7 +5,9 @@ import os
 from MyGraph import Graph
 from AutoSplit import Splitter
 import tempfile
+from Init_opcodes import Init_opcodes
 from Eliminate_data_layout_op import Eliminater
+from Lowering_for_codegen import Lowering_for_codegen
 from Sink_or_Hoist import Safe_Sinker_Hoister
 from TileSize_selection import TileSizeSelection
 from Softmax_lowering import SoftMax
@@ -84,99 +86,8 @@ for operator in operators:
         operator['opcode_index'] = 0
 
 new_opcodes = copy.deepcopy(opcodes)
-
-# For tensor splitting
-has_split = False
-has_concat = False
-# For lowering the sotfmax op & logistic op
-has_max_pool = False
-has_sub = False
-has_exp = False
-has_conv = False
-has_reciprocal = False
-has_mul = False
-# For convert the mean op
-has_depthwise_conv2d = False
-
-for opcode in opcodes:
-    if opcode.get('deprecated_builtin_code',0) == 2:
-        has_concat = True
-    elif opcode.get('deprecated_builtin_code',0) ==49:
-        has_split = True
-    elif opcode.get('deprecated_builtin_code',0) == 17:
-        has_max_pool = True
-    elif opcode.get('deprecated_builtin_code',0) == 41:
-        has_sub = True
-    elif opcode.get('deprecated_builtin_code',0) == 47:
-        has_exp = True
-    elif opcode.get('deprecated_builtin_code',0) == 3:
-        has_conv = True
-    elif opcode.get('deprecated_builtin_code',0) == 124:
-        has_reciprocal = True
-    elif opcode.get('deprecated_builtin_code',0) == 18:
-        has_mul = True
-
-if has_concat == False:
-    new_opcodes.append({
-        "deprecated_builtin_code": 2,
-        "version": 1,
-        "builtin_code": "CONCATENATION"
-        })
-if has_split == False:
-    new_opcodes.append({
-        "deprecated_builtin_code": 49,
-        "version": 1,
-        "builtin_code": "SPLIT"
-        })
-if args.softmax_lowering:
-    if has_max_pool == False:
-        new_opcodes.append({
-            "deprecated_builtin_code": 17,
-            "version": 1,
-            "builtin_code": "MAX_POOL_2D"
-            })
-    if has_sub == False:
-        new_opcodes.append({
-            "deprecated_builtin_code": 41,
-            "version": 1,
-            "builtin_code": "SUB"
-            })
-    if has_exp == False:
-        new_opcodes.append({
-            "deprecated_builtin_code": 47,
-            "version": 1,
-            "builtin_code": "EXP"
-            })
-    if has_conv == False:
-        new_opcodes.append({
-            "deprecated_builtin_code": 3,
-            "version": 1,
-            "builtin_code": "CONV_2D"
-            })
-    if has_reciprocal == False:
-        new_opcodes.append({
-            # This op is not in the official schema
-            "deprecated_builtin_code": 124,
-            "version": 1,
-            "builtin_code": "RECIPROCAL"
-            })
-    if has_mul == False:
-        new_opcodes.append({
-            "deprecated_builtin_code": 18,
-            "version": 1,
-            "builtin_code": "MUL"
-            })
-if args.mean_convert:
-    if has_depthwise_conv2d == False:
-        new_opcodes.append({
-            "deprecated_builtin_code": 4,
-            "version": 1,
-            "builtin_code": "DEPTHWISE_CONV_2D"
-            })
-
-new_model = copy.deepcopy(model)
-
-new_model['operator_codes'] = new_opcodes
+init_opcoder = Init_opcodes(opcodes, new_opcodes, args.codegen)
+init_opcoder.init_opcodes()
 
 ori_graph = Graph(operators, tensors, buffers, new_opcodes, subgraphs[0]['inputs'], subgraphs[0]['outputs'], args.exec_order)
 
@@ -188,6 +99,8 @@ if args.pad_fusion and model_type == 1:
 # When encount bert model, try to eliminate some data layout ops (only take effect on bert model)
 if args.remove_data_layout_op and model_type == 0:
     Eliminater(splitter).Eliminate_useless_data_layout_op()
+if args.codegen:
+    Lowering_for_codegen(splitter).lowering()
 # Perform softmax lowering
 if args.softmax_lowering and not args.codegen:
     SoftMax(splitter).softmax_lowering()
@@ -314,6 +227,8 @@ new_buffers, new_tensors, new_inputs, new_outputs, new_operators, new_opcodes = 
 # new_buffers, new_tensors, new_inputs, new_outputs, new_operators, new_opcodes = normal_graph.export()
 # new_buffers, new_tensors, new_inputs, new_outputs, new_operators, new_opcodes = weight_reuse_graph.export()
 # new_buffers, new_tensors, new_inputs, new_outputs, new_operators, new_opcodes = pipeline_new_graph.export()
+new_model = copy.deepcopy(model)
+new_model['operator_codes'] = new_opcodes
 new_model['buffers'] = new_buffers
 new_model['subgraphs'][0]['tensors'] = new_tensors
 new_model['subgraphs'][0]['inputs'] = new_inputs
