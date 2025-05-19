@@ -105,7 +105,7 @@ if args.codegen:
 if args.softmax_lowering and not args.codegen:
     SoftMax(splitter).softmax_lowering()
 # Perform mean convert
-if args.mean_convert and not args.codegen:
+if args.mean_convert:
     Mean(splitter).convert_mean_to_depthwise_conv()
 # Perform logistic lowering
 if args.logistic_lowering:

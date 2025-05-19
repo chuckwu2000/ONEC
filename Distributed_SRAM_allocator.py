@@ -2,8 +2,8 @@ from OpClassify import Op_Classify
 from collections import defaultdict
 
 op_classify = Op_Classify()
-elem_wise_ops = op_classify.elementwise_ops
-mac_ops = op_classify.mac_ops
+elem_wise_ops = ["ADD", "SUB", "MUL", "RECIPROCAL", "EXP"]
+mac_ops = ["CONV_2D", "FULLY_CONNECTED"]
 data_layout_ops = op_classify.data_layout_ops
 reduce_ops = op_classify.reduce_ops
 unary_ops = op_classify.unary_ops

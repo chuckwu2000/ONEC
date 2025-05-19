@@ -99,6 +99,7 @@ class Lowering_for_codegen:
             self.buffers.append(shape_buffer)
             shape_buffer_id = len(self.buffers) - 1
             shape_tensor = {
+                "shape": [len(reshape_shape)],
                 "type": "INT32",
                 "buffer": shape_buffer_id,
                 "name": "gelu_lower_reshape_shape_%d" % i
