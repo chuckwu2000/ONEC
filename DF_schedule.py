@@ -9,7 +9,7 @@ unary_ops = op_classify.unary_ops
 binary_ops = op_classify.binary_ops
 trinary_ops = op_classify.trinary_ops
 
-class Normal_scheduler:
+class DF_scheduler:
     def __init__(self, graph, need_allocate_tensors):
         self.graph = graph
         self.tensor_info = need_allocate_tensors
@@ -18,7 +18,7 @@ class Normal_scheduler:
         self.need_virtual_allocate_opids = set()
         self.virtual_tensor_allocator = self.virtual_tensor_allocate(graph)
 
-    def normal_schedule(self):
+    def df_schedule(self):
         ordered_ops = self.graph.ordered_ops
         for op in ordered_ops:
             opid = op.opid

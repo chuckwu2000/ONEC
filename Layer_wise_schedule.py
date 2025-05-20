@@ -9,61 +9,49 @@ unary_ops = op_classify.unary_ops
 binary_ops = op_classify.binary_ops
 trinary_ops = op_classify.trinary_ops
 
-# Based on the DF order, but consider the limited SRAM size
-class Weight_reuse_scheduler:
+# Based on the DF order, but DF's depth is 1
+class Layer_wise_scheduler:
     def __init__(self, graph, need_allocate_tensors, same_layer_next_opids):
         self.graph = graph
         self.tensor_info = need_allocate_tensors
         # same_layer_next_opids[x] = (x's head_opid, x's next_opid, #ops in layer)
         self.same_layer_next_opids = same_layer_next_opids
         self.visited = [False for _ in range(len(self.graph.ops))]
-        # scheduled only update when the SRAM overuse or in the tail of schedule
         self.scheduled = [False for _ in range(len(self.graph.ops))]
         self.tensor_in_SRAM = set()
         self.need_virtual_allocate_opids = set()
         self.opids_in_block = set()
         self.new_order = 0
-        self.weights_reuse_mapping = {}
+        self.layer_wise_mapping = {}
         self.virtual_tensor_allocator = self.virtual_tensor_allocate(graph)
 
-    def weight_reuse_schedule(self):
-        ops = self.graph.ops
-        block_id = 0
+    def layer_wise_schedule(self):
         # Traverse the DF order to reschedule
         ordered_ops = self.graph.ordered_ops
         for op in ordered_ops:
             if self.visited[op.opid]:
                 continue
-            # Step 1: Fetch opids in the same layer
+            self.tensor_in_SRAM = set()
+            self.opids_in_block = set()
+            # Steps 1: Fetch opids in the same layer
             same_layer_opids = self.collect_same_layer_opids_in_same_block(op.opid)
             self.opids_in_block.update(same_layer_opids)
 
-            # Step 2: Perform virtual tensor allocation to calculate the real SRAM peak usage
+            # Steps 2: Update the schedule order
+            re_order_opids = sorted(self.opids_in_block, key = lambda x: self.graph.ops[x].schedule_order)
+            for opid in re_order_opids:
+                self.layer_wise_mapping[opid] = self.new_order
+                self.new_order += 1
+                self.scheduled[opid] = True
+
+            # Steps 3: Allocate reuseable tensors in SRAM (tensor in SRAM's address)
             opcode_index = op.info.get('opcode_index')
             opcode_type = self.graph.opcodes[opcode_index].get('builtin_code')
-            # Only update the opids in the block, if opcode_type is element-wise or mac
             if opcode_type in elem_wise_ops or opcode_type in mac_ops:
                 self.need_virtual_allocate_opids.update(same_layer_opids)
-                overuse_sram = self.virtual_tensor_allocator.virtual_tensor_allocate(self.need_virtual_allocate_opids, self.tensor_info)
-                if overuse_sram:
-                    # Reschedule the opids in the block (without current layer's opid)
-                    self.opids_in_block.difference_update(same_layer_opids)
-                    re_order_opids = sorted(self.opids_in_block, key=lambda x: self.graph.ops[x].schedule_order)
-                    for opid in re_order_opids:
-                        self.weights_reuse_mapping[opid] = self.new_order
-                        self.new_order += 1
-                        self.scheduled[opid] = True
-                        ops[opid].block_id = block_id
-                    # Reinitialize the block
-                    block_id += 1
-                    self.tensor_in_SRAM = set()
-                    self.opids_in_block = set()
-                    self.opids_in_block.update(same_layer_opids)
-                    self.need_virtual_allocate_opids = set()
-                    self.need_virtual_allocate_opids.update(same_layer_opids)
-                    _ = self.virtual_tensor_allocator.virtual_tensor_allocate(self.need_virtual_allocate_opids, self.tensor_info)
+                self.virtual_tensor_allocator.virtual_tensor_allocate(self.need_virtual_allocate_opids, self.tensor_info)
 
-            # Step 3: Update the tensor metadata (tensor's storage area)
+            # Steps 4: Update the tensor metadata (tensor's storage area)
             # Operation that will execute in CPU
             if opcode_type in fall_back_cpu_ops:
                 for opid in same_layer_opids:
@@ -153,22 +141,15 @@ class Weight_reuse_scheduler:
                             if tensor_metadata.pid == opid:
                                 tensor_metadata.in_DRAM = False
                         self.tensor_in_SRAM.add(tensor_id)
-        # Last block's weight reuse schedule mapping
-        re_order_opids = sorted(self.opids_in_block, key=lambda x: self.graph.ops[x].schedule_order)
-        for opid in re_order_opids:
-            self.weights_reuse_mapping[opid] = self.new_order
-            self.new_order += 1
-            self.scheduled[opid] = True
-        # Step 4: Update the order of the operations
+        # Step 5: Update the order of the operations
         for op in self.graph.ops:
-            op.schedule_order = self.weights_reuse_mapping[op.opid]
+            op.schedule_order = self.layer_wise_mapping[op.opid]
         # Update the schedule order in the ordered_ops
         self.graph.ordered_ops = sorted(self.graph.ops, key=lambda x: x.schedule_order)
         # Update the operators in the split_graph
         self.graph.operators = []
         for op in self.graph.ordered_ops:
             self.graph.operators.append(op.info)
-        print(f"peak SRAM usage: {self.virtual_tensor_allocator.max_use}")
         return self.graph
 
     def collect_same_layer_opids_in_same_block(self, opid):

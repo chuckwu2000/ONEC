@@ -305,3 +305,6 @@ class Graph:
     def export(self):
         self.ensure_order()
         return self.buffers, self.tensors, self.inputs, self.outputs, self.operators, self.opcodes
+    
+    def export_without_reschedule(self):
+        return self.buffers, self.tensors, self.inputs, self.outputs, self.operators, self.opcodes

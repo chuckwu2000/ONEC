@@ -8,12 +8,13 @@ import tempfile
 from Init_opcodes import Init_opcodes
 from Eliminate_data_layout_op import Eliminater
 from Lowering_for_codegen import Lowering_for_codegen
-from Sink_or_Hoist import Safe_Sinker_Hoister
-from TileSize_selection import TileSizeSelection
 from Softmax_lowering import SoftMax
 from Mean_convert import Mean
 from Logistic_lowering import Logistic
-from Normal_schedule import Normal_scheduler
+from Sink_or_Hoist import Safe_Sinker_Hoister
+from TileSize_selection import TileSizeSelection
+from Layer_wise_schedule import Layer_wise_scheduler
+from DF_schedule import DF_scheduler
 from Weight_reuse_schedule import Weight_reuse_scheduler
 from Pipeline_schedule import set_active_engine
 from Pipeline_schedule import pipeline_schedule
@@ -135,7 +136,7 @@ else:
     split_height = args.split_height
 splitter.split_height = split_height
 
-################## BASELINE ##################
+################## PERFORM SPLIT ##################
 new_graph = splitter.perform_split()
 
 # Memory allocation(not perform cache optimization)
@@ -143,30 +144,38 @@ mem_allocator = memory_allocator(new_graph)
 
 # Set each operator's active engine
 set_active_engine(new_graph)
+###################################################
 
-# Estimate the performance before pipeline schedule
-model_sim = simulator(new_graph, mem_allocator.need_allocate_tensors)
+################## BASELINE ##################
+# Our baseline adopts the BF order execution order (same to layer-wise execution order)
+layer_wise_graph = copy.deepcopy(new_graph)
+layer_wise_need_allocate_tensors = copy.deepcopy(mem_allocator.need_allocate_tensors)
+same_layer_next_opids = splitter.same_layer_next_opids
+layer_wise_scheduler = Layer_wise_scheduler(layer_wise_graph, layer_wise_need_allocate_tensors, same_layer_next_opids)
+layer_wise_graph = layer_wise_scheduler.layer_wise_schedule()
+
+# Estimate the performance of layer-wise schedule (baseline)
+model_sim = simulator(layer_wise_graph, layer_wise_scheduler.tensor_info)
 if args.verbose_performance:
-    split_dma_cycles, split_op_cycles, split_total_cycles = model_sim.estimate_model(pipeline = False)
+    baseline_dma_cycles, baseline_op_cycles, baseline_total_cycles = model_sim.estimate_model(pipeline = False)
     # model_sim.print_performance()
-    print(f"Original: dma cycles = {split_dma_cycles :.1f}, op cycles = {split_op_cycles :.1f}, total cycles = {split_total_cycles :.1f}")
+    print(f"Baseline schedule: dma cycles = {baseline_dma_cycles :.1f}, op cycles = {baseline_op_cycles :.1f}, total cycles = {baseline_total_cycles :.1f}")
 ##############################################
 
 if not args.codegen:
-    ################## NORMAL SCHEDULE ##################
-    # This normal scheduler won't change execution order, just set the tensor's storage area
-    normal_graph = copy.deepcopy(new_graph)
-    normal_need_allocate_tensors = copy.deepcopy(mem_allocator.need_allocate_tensors)
-    normal_scheduler = Normal_scheduler(normal_graph, normal_need_allocate_tensors)
-    normal_graph = normal_scheduler.normal_schedule()
+    ################## DF SCHEDULE ##################
+    df_graph = copy.deepcopy(new_graph)
+    df_need_allocate_tensors = copy.deepcopy(mem_allocator.need_allocate_tensors)
+    df_scheduler = DF_scheduler(df_graph, df_need_allocate_tensors)
+    df_graph = df_scheduler.df_schedule()
 
-    model_sim = simulator(normal_graph, normal_scheduler.tensor_info)
+    model_sim = simulator(df_graph, df_scheduler.tensor_info)
     if args.verbose_performance:
-        normal_dma_cycles, normal_op_cycles, normal_total_cycles = model_sim.estimate_model(pipeline = False)
+        df_dma_cycles, df_op_cycles, df_total_cycles = model_sim.estimate_model(pipeline = False)
         # model_sim.print_performance()
-        print(f"After use cache: dma cycles = {normal_dma_cycles :.1f}, op cycles = {normal_op_cycles :.1f}, total cycles = {normal_total_cycles :.1f}")
-        print(f"speedup = {((split_total_cycles/normal_total_cycles) - 1) * 100 :.2f}%")
-    #####################################################
+        print(f"After use cache: dma cycles = {df_dma_cycles :.1f}, op cycles = {df_op_cycles :.1f}, total cycles = {df_total_cycles :.1f}")
+        print(f"speedup = {((baseline_total_cycles/df_total_cycles) - 1) * 100 :.2f}%")
+    ##############################################
 
     ################## WEIGHTS REUSE ##################
     # Perform the weight reuse schedule on the new_graph
@@ -180,7 +189,7 @@ if not args.codegen:
         reuse_dma_cycles, reuse_op_cycles, reuse_total_cycles = model_sim.estimate_model(pipeline = False)
         # model_sim.print_performance()
         print(f"After weight reuse schedule: dma cycles = {reuse_dma_cycles :.1f}, op cycles = {reuse_op_cycles :.1f}, total cycles = {reuse_total_cycles :.1f}")
-        print(f"speedup = {((split_total_cycles/reuse_total_cycles) - 1) * 100 :.2f}%")
+        print(f"speedup = {((baseline_total_cycles/reuse_total_cycles) - 1) * 100 :.2f}%")
     ###################################################
 
     # print(f"Diff data reuse:")
@@ -208,7 +217,7 @@ if not args.codegen:
             print(f"After GeneSys schedule: dma cycles = {pipeline_dma_cycles :.1f}, op cycles = {pipeline_op_cycles :.1f}, total cycles = {pipeline_total_cycles :.1f}")
         else:
             print(f"After pipeline schedule: dma cycles = {pipeline_dma_cycles :.1f}, op cycles = {pipeline_op_cycles :.1f}, total cycles = {pipeline_total_cycles :.1f}")
-        print(f"speedup = {((split_total_cycles/pipeline_total_cycles) - 1) * 100 :.2f}%")
+        print(f"speedup = {((baseline_total_cycles/pipeline_total_cycles) - 1) * 100 :.2f}%")
     #######################################################
 
     # Tensor allocation in DRAM (SRAM allocation is implemented above)
@@ -224,9 +233,10 @@ if args.codegen:
 
 # new_buffers, new_tensors, new_inputs, new_outputs, new_operators, new_opcodes = ori_graph.export()
 new_buffers, new_tensors, new_inputs, new_outputs, new_operators, new_opcodes = new_graph.export()
+# new_buffers, new_tensors, new_inputs, new_outputs, new_operators, new_opcodes = layer_wise_graph.export_without_reschedule()
 # new_buffers, new_tensors, new_inputs, new_outputs, new_operators, new_opcodes = normal_graph.export()
-# new_buffers, new_tensors, new_inputs, new_outputs, new_operators, new_opcodes = weight_reuse_graph.export()
-# new_buffers, new_tensors, new_inputs, new_outputs, new_operators, new_opcodes = pipeline_new_graph.export()
+# new_buffers, new_tensors, new_inputs, new_outputs, new_operators, new_opcodes = weight_reuse_graph.export_without_reschedule()
+# new_buffers, new_tensors, new_inputs, new_outputs, new_operators, new_opcodes = pipeline_new_graph.export_without_reschedule()
 new_model = copy.deepcopy(model)
 new_model['operator_codes'] = new_opcodes
 new_model['buffers'] = new_buffers
