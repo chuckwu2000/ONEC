@@ -1,5 +1,6 @@
 from OpClassify import Op_Classify
 from collections import defaultdict
+import copy
 
 op_classify = Op_Classify()
 elem_wise_ops = ["ADD", "SUB", "MUL", "RECIPROCAL", "EXP"]
@@ -233,21 +234,28 @@ class Distributed_SRAM_allocator:
         # Steps 2: Update the related tensors' info
         for op in reshape_ops:
             input_tensor_id = op.info['inputs'][0]
-            for tensor in self.tensor_info[input_tensor_id].tensors:
+            for input_idx, tensor in enumerate(self.tensor_info[input_tensor_id].tensors):
                 if tensor.cid == op.opid:
-                    input_tensor = tensor
+                    ori_input_tensor = tensor
+                    ori_input_idx = input_idx
                     break
+            # For reshape op that have multiple consumers, we need to copy the input tensor
+            input_tensor_list = []
             output_tensor_id = op.info['outputs'][0]
             for tensor in self.tensor_info[output_tensor_id].tensors:
                 if tensor.pid == op.opid:
                     output_tensor = tensor
-                    break
-            # Update the pid & cid
-            input_tensor.cid = output_tensor.cid
-            # Update the input tensor's live range
-            input_tensor.live_range['last_time_used'] = output_tensor.live_range['last_time_used']
+                    input_tensor = copy.deepcopy(ori_input_tensor)
+                    # Update the pid & cid
+                    input_tensor.cid = output_tensor.cid
+                    # Update the input tensor's live range
+                    input_tensor.live_range['last_time_used'] = output_tensor.live_range['last_time_used']
+                    input_tensor_list.append(input_tensor)
+            # Update input tensor's tensors
+            self.tensor_info[input_tensor_id].tensors.pop(ori_input_idx)
+            self.tensor_info[input_tensor_id].tensors += input_tensor_list
             # Update output tensor's tensors
-            self.tensor_info[output_tensor_id].tensors = [input_tensor]
+            self.tensor_info[output_tensor_id].tensors = input_tensor_list
         
     # Use Chaitin-Briggs algorithm to color the graph
     # Note: In here, we only accept that SRAM be reused between the sequential patterns, 

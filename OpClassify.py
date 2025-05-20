@@ -18,7 +18,7 @@ class Op_Classify:
                                 "ADD", "SUB", "MUL", "RECIPROCAL", "SQUARED_DIFFERENCE"]
 
         # The operation that need reduce
-        self.reduce_ops = ["REDUCE_MAX", "SUM"]
+        self.reduce_ops = ["REDUCE_MAX", "SUM", "SOFTMAX"]
 
         # The input of the operation
         self.unary_ops = ["RSQRT", "GELU", "QUANTIZE", "DEQUANTIZE", \
