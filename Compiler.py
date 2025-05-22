@@ -163,19 +163,19 @@ if args.verbose_performance:
 ##############################################
 
 if not args.codegen:
-    ################## DF SCHEDULE ##################
-    df_graph = copy.deepcopy(new_graph)
-    df_need_allocate_tensors = copy.deepcopy(mem_allocator.need_allocate_tensors)
-    df_scheduler = DF_scheduler(df_graph, df_need_allocate_tensors)
-    df_graph = df_scheduler.df_schedule()
+    # ################## DF SCHEDULE ##################
+    # df_graph = copy.deepcopy(new_graph)
+    # df_need_allocate_tensors = copy.deepcopy(mem_allocator.need_allocate_tensors)
+    # df_scheduler = DF_scheduler(df_graph, df_need_allocate_tensors)
+    # df_graph = df_scheduler.df_schedule()
 
-    model_sim = simulator(df_graph, df_scheduler.tensor_info)
-    if args.verbose_performance:
-        df_dma_cycles, df_op_cycles, df_total_cycles = model_sim.estimate_model(pipeline = False)
-        # model_sim.print_performance()
-        print(f"After use cache: dma cycles = {df_dma_cycles :.1f}, op cycles = {df_op_cycles :.1f}, total cycles = {df_total_cycles :.1f}")
-        print(f"speedup = {((baseline_total_cycles/df_total_cycles) - 1) * 100 :.2f}%")
-    ##############################################
+    # model_sim = simulator(df_graph, df_scheduler.tensor_info)
+    # if args.verbose_performance:
+    #     df_dma_cycles, df_op_cycles, df_total_cycles = model_sim.estimate_model(pipeline = False)
+    #     # model_sim.print_performance()
+    #     print(f"After DF schedule: dma cycles = {df_dma_cycles :.1f}, op cycles = {df_op_cycles :.1f}, total cycles = {df_total_cycles :.1f}")
+    #     print(f"speedup = {((baseline_total_cycles/df_total_cycles) - 1) * 100 :.2f}%")
+    # ##############################################
 
     ################## WEIGHTS REUSE ##################
     # Perform the weight reuse schedule on the new_graph
@@ -234,7 +234,7 @@ if args.codegen:
 # new_buffers, new_tensors, new_inputs, new_outputs, new_operators, new_opcodes = ori_graph.export()
 new_buffers, new_tensors, new_inputs, new_outputs, new_operators, new_opcodes = new_graph.export()
 # new_buffers, new_tensors, new_inputs, new_outputs, new_operators, new_opcodes = layer_wise_graph.export_without_reschedule()
-# new_buffers, new_tensors, new_inputs, new_outputs, new_operators, new_opcodes = normal_graph.export()
+# new_buffers, new_tensors, new_inputs, new_outputs, new_operators, new_opcodes = df_graph.export_without_reschedule()
 # new_buffers, new_tensors, new_inputs, new_outputs, new_operators, new_opcodes = weight_reuse_graph.export_without_reschedule()
 # new_buffers, new_tensors, new_inputs, new_outputs, new_operators, new_opcodes = pipeline_new_graph.export_without_reschedule()
 new_model = copy.deepcopy(model)

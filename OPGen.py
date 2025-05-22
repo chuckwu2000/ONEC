@@ -360,12 +360,20 @@ class OPGen:
         scale = input_quant_scale * weight_quant_scale / output_quant_scale
         multiplier, shift = self.QuantizeMultiplier(scale)
 
+        # OEM's NPU assume batch size is 1, if batch size > 1, try to interchange the batch and height
+        batch = input_tensor['shape'][0]
+        height = input_tensor['shape'][1]
+        assert batch == 1 or height == 1
+        if batch > 1:
+            height = batch
+            batch = 1
+
         # Set op metadata
         self.op_metadata[self.op_gen_id] += str(stride_h) + " "
         self.op_metadata[self.op_gen_id] += str(stride_w) + " "
         self.op_metadata[self.op_gen_id] += str(pad_h) + "\n"
-        self.op_metadata[self.op_gen_id] += str(input_tensor['shape'][0]) + " "
-        self.op_metadata[self.op_gen_id] += str(input_tensor['shape'][1]) + " "
+        self.op_metadata[self.op_gen_id] += str(batch) + " "
+        self.op_metadata[self.op_gen_id] += str(height) + " "
         self.op_metadata[self.op_gen_id] += str(input_tensor['shape'][2]) + " "
         self.op_metadata[self.op_gen_id] += str(input_tensor['shape'][3]) + "\n"
         self.op_metadata[self.op_gen_id] += str(filter_tensor['shape'][0]) + " "
