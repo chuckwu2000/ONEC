@@ -330,19 +330,18 @@ class OPGen:
                     # print(f"out_h: {out_h}, in_h: {in_h}, source_sid: {source_sid}")
                     input_range_required[source_sid][0] = min(input_range_required[source_sid][0], in_h)
                     input_range_required[source_sid][1] = max(input_range_required[source_sid][1], in_h)
-        total_input_elements = 0
-        input_tensor_idxs = []
-        if len(op.info['inputs']) <= 5:
-            input_tensor_idxs.append(0)
-        else:
-            for i in range(4, len(op.info['inputs'])):
-                input_tensor_idxs.append(i - 4)
-        for input_tensor_idx in input_tensor_idxs:
-            batch = input_tensors[input_tensor_idx]['shape'][0]
-            height = input_range_required[input_id_list[input_tensor_idx]][1] - input_range_required[input_id_list[input_tensor_idx]][0] + 1
-            width = input_tensors[input_tensor_idx]['shape'][2]
-            ic = input_tensors[input_tensor_idx]['shape'][3]
-            total_input_elements += batch * height * width * ic
+
+        # OEM's NPU not support padding in conv now
+        # Compute the input tensor's range required (without padding)
+        batch = input_tensors[0]['shape'][0]
+        ic = input_tensors[0]['shape'][3]
+        kernel_h = filter_tensor['shape'][1]
+        kernel_w = filter_tensor['shape'][2]
+        output_height = output_tensor['shape'][1]
+        output_width = output_tensor['shape'][2]
+        input_height = (output_height - 1) * stride_h + kernel_h
+        input_width = (output_width - 1) * stride_w + kernel_w
+        total_input_elements = batch * input_height * input_width * ic
         self.op_launch_related[self.op_gen_id]['input_elements'] = total_input_elements
         self.op_launch_related[self.op_gen_id]['weight_elements'] = self.Compute_tensor_size(filter_tensor)
         self.op_launch_related[self.op_gen_id]['output_elements'] = self.Compute_tensor_size(output_tensor)
@@ -361,20 +360,20 @@ class OPGen:
         multiplier, shift = self.QuantizeMultiplier(scale)
 
         # OEM's NPU assume batch size is 1, if batch size > 1, try to interchange the batch and height
-        batch = input_tensor['shape'][0]
-        height = input_tensor['shape'][1]
-        assert batch == 1 or height == 1
+        assert batch == 1 or input_height == 1
         if batch > 1:
-            height = batch
+            input_height = batch
             batch = 1
+        # OEM's NPU not support padding in conv now, so we need to set the padding to 0
+        pad_h = 0
 
         # Set op metadata
         self.op_metadata[self.op_gen_id] += str(stride_h) + " "
         self.op_metadata[self.op_gen_id] += str(stride_w) + " "
         self.op_metadata[self.op_gen_id] += str(pad_h) + "\n"
         self.op_metadata[self.op_gen_id] += str(batch) + " "
-        self.op_metadata[self.op_gen_id] += str(height) + " "
-        self.op_metadata[self.op_gen_id] += str(input_tensor['shape'][2]) + " "
+        self.op_metadata[self.op_gen_id] += str(input_height) + " "
+        self.op_metadata[self.op_gen_id] += str(input_width) + " "
         self.op_metadata[self.op_gen_id] += str(input_tensor['shape'][3]) + "\n"
         self.op_metadata[self.op_gen_id] += str(filter_tensor['shape'][0]) + " "
         self.op_metadata[self.op_gen_id] += str(filter_tensor['shape'][1]) + " "
