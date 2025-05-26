@@ -23,6 +23,7 @@ from Simulator import simulator
 from Memory_allocation import memory_allocator
 from Distributed_SRAM_allocator import Distributed_SRAM_allocator
 from CodeGen import CodeGen
+from Roofline_model import RooflineModel
 
 parser = argparse.ArgumentParser()
 parser.add_argument("model_path")
@@ -160,6 +161,13 @@ if args.verbose_performance:
     baseline_dma_cycles, baseline_op_cycles, baseline_total_cycles = model_sim.estimate_model(pipeline = False)
     # model_sim.print_performance()
     print(f"Baseline schedule: dma cycles = {baseline_dma_cycles :.1f}, op cycles = {baseline_op_cycles :.1f}, total cycles = {baseline_total_cycles :.1f}")
+    
+    roofline_model = RooflineModel(layer_wise_graph, layer_wise_scheduler.tensor_info, baseline_total_cycles)
+    roofline_model.roofline_model_build()
+    print(f"Turning point: operational intensity = {roofline_model.peak_operational_intensity :.2f}, \
+        operations per second = {roofline_model.peak_giga_operations_per_second :.2f}")
+    print(f"Model: operational intensity = {roofline_model.operational_intensity :.2f}, \
+        operations per second = {roofline_model.giga_operations_per_second :.2f}")
 ##############################################
 
 if not args.codegen:
