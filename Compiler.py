@@ -101,8 +101,8 @@ if args.pad_fusion and model_type == 1:
 # When encount bert model, try to eliminate some data layout ops (only take effect on bert model)
 if args.remove_data_layout_op and model_type == 0:
     Eliminater(splitter).Eliminate_useless_data_layout_op()
-if args.codegen:
-    Lowering_for_codegen(splitter).lowering()
+# Perform lowering for codegen
+Lowering_for_codegen(splitter).lowering()
 # Perform softmax lowering
 if args.softmax_lowering and not args.codegen:
     SoftMax(splitter).softmax_lowering()
@@ -198,6 +198,11 @@ if not args.codegen:
         # model_sim.print_performance()
         print(f"After weight reuse schedule: dma cycles = {reuse_dma_cycles :.1f}, op cycles = {reuse_op_cycles :.1f}, total cycles = {reuse_total_cycles :.1f}")
         print(f"speedup = {((baseline_total_cycles/reuse_total_cycles) - 1) * 100 :.2f}%")
+
+        roofline_model = RooflineModel(weight_reuse_graph, weight_reuse_scheduler.tensor_info, reuse_total_cycles)
+        roofline_model.roofline_model_build()
+        print(f"Reuse tensor Model: operational intensity = {roofline_model.operational_intensity :.2f}, \
+              operations per second = {roofline_model.giga_operations_per_second :.2f}")
     ###################################################
 
     # print(f"Diff data reuse:")
@@ -226,6 +231,11 @@ if not args.codegen:
         else:
             print(f"After pipeline schedule: dma cycles = {pipeline_dma_cycles :.1f}, op cycles = {pipeline_op_cycles :.1f}, total cycles = {pipeline_total_cycles :.1f}")
         print(f"speedup = {((baseline_total_cycles/pipeline_total_cycles) - 1) * 100 :.2f}%")
+
+        roofline_model = RooflineModel(pipeline_new_graph, weights_reuse_need_allocate_tensors, pipeline_total_cycles)
+        roofline_model.roofline_model_build()
+        print(f"Pipeline Model: operational intensity = {roofline_model.operational_intensity :.2f}, \
+              operations per second = {roofline_model.giga_operations_per_second :.2f}")
     #######################################################
 
     # Tensor allocation in DRAM (SRAM allocation is implemented above)
