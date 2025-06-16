@@ -108,6 +108,13 @@ class simulator:
             elif op_type == "DEQUANTIZE":
                 cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"] 
             op_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
+
+            ############### Compute memory access energy ###############
+            # DRAM access energy
+            total_energy = dram_transfer_size * 8 * ArchitectureFeatures.dram_cost
+            # SRAM access energy
+            total_energy += ifm_elems * ifm_elem_size * ArchitectureFeatures.sram_cost
+            total_energy += ofm_elems * ofm_elem_size * ArchitectureFeatures.sram_cost
         elif op_type in binary_elementwise_ops:
             ifm1 = tensors[inputs[0]]
             ifm2 = tensors[inputs[1]]
@@ -178,6 +185,14 @@ class simulator:
                 cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["ADD/SUB"] + ArchitectureFeatures.output_cycles_per_elem["MUL"]
             op_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
 
+            ############### Compute memory access energy ###############
+            # DRAM access energy
+            total_energy = dram_transfer_size * 8 * ArchitectureFeatures.dram_cost
+            # SRAM access energy
+            total_energy += ifm1_elems * ifm1_elem_size * ArchitectureFeatures.sram_cost
+            total_energy += ifm2_elems * ifm2_elem_size * ArchitectureFeatures.sram_cost
+            total_energy += ofm_elems * ofm_elem_size * ArchitectureFeatures.sram_cost
+
         dram_transfer_size -= (initial_dram_reads + final_dram_writes)
         # DRAM transfer bytes per cycle
         dram_bandwidth = (ArchitectureFeatures.axi_bit_width / 8) * ArchitectureFeatures.Dram_clock_scale
@@ -186,7 +201,7 @@ class simulator:
         dram_transfer_cycles = math.ceil(dram_transfer_size / float(dram_bandwidth))
         dma_transfer_cycles = max(0, dram_transfer_cycles - op_cycles) + latency
         total_cycles = op_cycles + dma_transfer_cycles
-        return dma_transfer_cycles, op_cycles, total_cycles
+        return dma_transfer_cycles, op_cycles, total_cycles, total_energy
     
     def estimate_mac_op_cycles(self, opid: int, op_type: str) -> int:
         tensors = self.tensors
@@ -327,7 +342,16 @@ class simulator:
                     dram_transfer_size += ofm_storge_size
                 break
 
-        ############### Compute cycles & SRAM access cycles ###############
+        ############### Compute memory access energy ###############
+        # DRAM access energy
+        total_energy = dram_transfer_size * ifm_elem_size * ArchitectureFeatures.dram_cost
+        # SRAM access energy
+        total_energy += ifm_storge_size * ifm_elem_size * ArchitectureFeatures.sram_cost
+        total_energy += ofm_storge_size * ofm_elem_size * ArchitectureFeatures.sram_cost
+        if op_type in need_weights_ops:
+            total_energy += weights_storage_size * ifm_elem_size * ArchitectureFeatures.sram_cost
+
+        ############### Compute cycles ###############
         # Every time deal with new ocs, the weight and init_inputs need to be reloaded
         compute_full_oc_times = math.ceil(OC / float(oc_finish_per_cycle))
         
@@ -337,6 +361,7 @@ class simulator:
         if op_type == "DEPTHWISE_CONV_2D":
             op_cycles *= ofm_shape[3]
 
+        ############### Memory access cycles ###############
         # ----- We assume that cost of access SRAM is zero (by prefetching) -----
         # weights_needed_size = initial_weight_dram_read
         # load_weights_cycles  = math.ceil(weights_needed_size / float(sram_bandwidth)) * compute_full_oc_times * total_windows
@@ -354,27 +379,28 @@ class simulator:
         latency = math.ceil(initial_dram_reads / float(dram_bandwidth)) + math.ceil(final_dram_writes / float(dram_bandwidth))
         dram_transfer_cycles = math.ceil(dram_transfer_size / float(dram_bandwidth))
         dma_transfer_cycles = max(0, dram_transfer_cycles - op_cycles) + latency
-        total_cycles = op_cycles + dma_transfer_cycles
-        return dma_transfer_cycles, op_cycles, total_cycles
 
-    # Estimate the number of cycles for a given operation
+        total_cycles = op_cycles + dma_transfer_cycles
+        return dma_transfer_cycles, op_cycles, total_cycles, total_energy
+
+    # Estimate the number of cycles for a given operation and energy consumption (only contain memory access now)
     def estimate_op_cycles(self, opid: int) -> int:
         op = self.ops[opid]
         opcode_index = op.info.get("opcode_index")
         opcode_type = self.opcodes[opcode_index].get("builtin_code")
         if opcode_type in elementwise_ops:
-            dma_cycles, op_cycles, total_cycles = self.estimate_elementwise_op_cycles(opid, opcode_type)
+            dma_cycles, op_cycles, total_cycles, total_energy = self.estimate_elementwise_op_cycles(opid, opcode_type)
             op.estimated_DMA_cycles = dma_cycles
             op.estimated_op_cycles = op_cycles
             op.estimated_total_cycles = total_cycles
         elif opcode_type in mac_ops:
-            dma_cycles, op_cycles, total_cycles = self.estimate_mac_op_cycles(opid, opcode_type)
+            dma_cycles, op_cycles, total_cycles, total_energy = self.estimate_mac_op_cycles(opid, opcode_type)
             op.estimated_DMA_cycles = dma_cycles
             op.estimated_op_cycles = op_cycles
             op.estimated_total_cycles = total_cycles
         elif opcode_type in data_layout_ops:
             # NPU won't do these ops, so for now set the cycles to 0
-            dma_cycles, op_cycles, total_cycles = 0, 0, 0
+            dma_cycles, op_cycles, total_cycles, total_energy = 0, 0, 0, 0
             op.estimated_DMA_cycles = dma_cycles
             op.estimated_op_cycles = op_cycles
             op.estimated_total_cycles = total_cycles
@@ -382,32 +408,27 @@ class simulator:
             dma_cycles = 0
             op_cycles = 0
             total_cycles = 0
+            total_energy = 0
             print(f"Not yet supported {opcode_type}'s cycle estimation, its opcode_index is {opcode_index}")
-        return dma_cycles, op_cycles, total_cycles
+        return dma_cycles, op_cycles, total_cycles, total_energy
 
     def estimate_model(self, pipeline: bool) -> int:
         total_dma_cycles = 0
         total_op_cycles = 0
         total_cycles = 0
-
-        mac_idle_cycles = 0
-        elem_wise_idle_cycles = 0
+        total_energy = 0
 
         for op in self.model.ordered_ops:
             opid = op.opid
             # w/wo pipeline schedule, the estimated total cycles will be different, since we consider the memory footprint between DRAM and SRAM
-            dma_cycles, op_cycles, op_total_cycles = self.estimate_op_cycles(opid)
+            dma_cycles, op_cycles, op_total_cycles, op_energy = self.estimate_op_cycles(opid)
             # For later pipeline schedule, op_total_cycles will be used to determine the overlap range
             if not pipeline:
                 self.ops[opid].non_overlap_cycles = op_total_cycles
             total_dma_cycles += dma_cycles
             total_op_cycles += op_cycles
             total_cycles += op_total_cycles
-
-            if self.ops[opid].is_mac_main_op == True:
-                elem_wise_idle_cycles += op_cycles
-            elif self.ops[opid].is_elem_wise_main_op == True:
-                mac_idle_cycles += op_cycles
+            total_energy += op_energy
             
         if pipeline:
             cascade_matched_ops = self.model.cascade_matched_ops
@@ -454,7 +475,7 @@ class simulator:
                     match_save_cycles += op1.estimated_op_cycles
             # print(f"cascade_total_op: {cascade_total_op}, cascade_save_cycles: {cascade_save_cycles}")
             # print(f"match_total_op: {match_total_op}, match_save_cycles: {match_save_cycles}")
-        return total_dma_cycles, total_op_cycles, total_cycles
+        return total_dma_cycles, total_op_cycles, total_cycles, total_energy
 
     def print_performance(self):
         for order, op in enumerate(self.model.ordered_ops):

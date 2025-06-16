@@ -41,3 +41,10 @@ class ArchitectureFeatures:
 
     # Element-wise operation vectorization
     VECTOR_LEN = 128
+
+    # DRAM access energy (nJ/bit)
+    dram_cost = 22 * 1e-3
+    # SRAM access energy (nJ/bit)
+    sram_cost = 0.2 * 1e-3
+    # Network on chip (NoC) energy (nJ/bit)
+    noc_cost = 0.61 * 1e-3

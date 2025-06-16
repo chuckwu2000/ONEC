@@ -158,9 +158,10 @@ layer_wise_graph = layer_wise_scheduler.layer_wise_schedule()
 # Estimate the performance of layer-wise schedule (baseline)
 model_sim = simulator(layer_wise_graph, layer_wise_scheduler.tensor_info)
 if args.verbose_performance:
-    baseline_dma_cycles, baseline_op_cycles, baseline_total_cycles = model_sim.estimate_model(pipeline = False)
+    baseline_dma_cycles, baseline_op_cycles, baseline_total_cycles, baseline_total_energy = model_sim.estimate_model(pipeline = False)
     # model_sim.print_performance()
     print(f"Baseline schedule: dma cycles = {baseline_dma_cycles :.1f}, op cycles = {baseline_op_cycles :.1f}, total cycles = {baseline_total_cycles :.1f}")
+    print(f"Baseline energy = {baseline_total_energy :.2f} nJ")
     
     roofline_model = RooflineModel(layer_wise_graph, layer_wise_scheduler.tensor_info, baseline_total_cycles)
     roofline_model.roofline_model_build()
@@ -194,10 +195,12 @@ if not args.codegen:
 
     model_sim = simulator(weight_reuse_graph, weight_reuse_scheduler.tensor_info)
     if args.verbose_performance:
-        reuse_dma_cycles, reuse_op_cycles, reuse_total_cycles = model_sim.estimate_model(pipeline = False)
+        reuse_dma_cycles, reuse_op_cycles, reuse_total_cycles, reuse_total_energy = model_sim.estimate_model(pipeline = False)
         # model_sim.print_performance()
         print(f"After weight reuse schedule: dma cycles = {reuse_dma_cycles :.1f}, op cycles = {reuse_op_cycles :.1f}, total cycles = {reuse_total_cycles :.1f}")
         print(f"speedup = {((baseline_total_cycles/reuse_total_cycles) - 1) * 100 :.2f}%")
+        print(f"Weight reuse energy = {reuse_total_energy :.2f} nJ")
+        print(f"Weight reuse energy reduction = {((baseline_total_energy/reuse_total_energy) - 1) * 100 :.2f}%")
 
         roofline_model = RooflineModel(weight_reuse_graph, weight_reuse_scheduler.tensor_info, reuse_total_cycles)
         roofline_model.roofline_model_build()
@@ -224,13 +227,15 @@ if not args.codegen:
     # Estimate the performance after pipeline schedule
     model_sim = simulator(pipeline_new_graph, weights_reuse_need_allocate_tensors)
     if args.verbose_performance:
-        pipeline_dma_cycles, pipeline_op_cycles, pipeline_total_cycles = model_sim.estimate_model(pipeline = True)
+        pipeline_dma_cycles, pipeline_op_cycles, pipeline_total_cycles, pipeline_total_energy = model_sim.estimate_model(pipeline = True)
         # model_sim.print_performance()
         if args.genesys:
             print(f"After GeneSys schedule: dma cycles = {pipeline_dma_cycles :.1f}, op cycles = {pipeline_op_cycles :.1f}, total cycles = {pipeline_total_cycles :.1f}")
         else:
             print(f"After pipeline schedule: dma cycles = {pipeline_dma_cycles :.1f}, op cycles = {pipeline_op_cycles :.1f}, total cycles = {pipeline_total_cycles :.1f}")
         print(f"speedup = {((baseline_total_cycles/pipeline_total_cycles) - 1) * 100 :.2f}%")
+        print(f"Pipeline energy = {pipeline_total_energy :.2f} nJ")
+        print(f"Pipeline energy reduction = {((baseline_total_energy/pipeline_total_energy) - 1) * 100 :.2f}%")
 
         roofline_model = RooflineModel(pipeline_new_graph, weights_reuse_need_allocate_tensors, pipeline_total_cycles)
         roofline_model.roofline_model_build()
