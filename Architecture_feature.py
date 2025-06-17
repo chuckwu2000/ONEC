@@ -43,8 +43,10 @@ class ArchitectureFeatures:
     VECTOR_LEN = 128
 
     # DRAM access energy (nJ/bit)
-    dram_cost = 22 * 1e-3
+    dram_cost = 12 * 1e-3
     # SRAM access energy (nJ/bit)
     sram_cost = 0.2 * 1e-3
-    # Network on chip (NoC) energy (nJ/bit)
-    noc_cost = 0.61 * 1e-3
+    # MAC engine energy (nJ/cycle)
+    mac_cost = 4.48
+    # Vector engine energy (nJ/cycle)
+    vector_cost = 0.1 * VECTOR_LEN * 1e-3

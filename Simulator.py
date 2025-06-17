@@ -81,13 +81,16 @@ class simulator:
             # Element-wise operation will speedup by vectorization
             if op_type == "EXP":
                 cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["EXP"]
+                operation_count = 6
             elif op_type == "RECIPROCAL":
                 cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["RECIPROCAL"]
+                operation_count = 13
             elif op_type == "RSQRT":
                 # There have quick rsqrt method, but it looks like can't be used in our design
                 # Above reference: https://zh.wikipedia.org/zh-tw/%E5%B9%B3%E6%96%B9%E6%A0%B9%E5%80%92%E6%95%B0%E9%80%9F%E7%AE%97%E6%B3%95
                 # So, we use the LUT to get the rsqrt result
                 cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["LUT"]
+                operation_count = 0
             elif op_type == "POW":
                 # Pow(x, y) = x^y
                 # Extract the exponent from the second input tensor, tflite store the data in little-endian format
@@ -96,17 +99,22 @@ class simulator:
                 # Parse the exp_buffer_data to get the exponent, '<': little-endian, 'f': float
                 Exponent = int(struct.unpack('<f', exp_buffer_data)[0])
                 cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["MUL"] * (Exponent - 1)
+                operation_count = Exponent - 1
             elif op_type == "TANH":
                 # Tanh(x): 2 * Logistic(2 * x) - 1
                 cycle_per_elem = (ArchitectureFeatures.output_cycles_per_elem["LOGISTIC"])
+                operation_count = 20
             elif op_type == "GELU":
                 # Gelu(x) = x * logistic(1.702 * x)
                 cycle_per_elem = (ArchitectureFeatures.output_cycles_per_elem["LOGISTIC"] + ArchitectureFeatures.output_cycles_per_elem["MUL"])
+                operation_count = 21
             
             if op_type == "QUANTIZE":
                 cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"]
+                operation_count = 2
             elif op_type == "DEQUANTIZE":
-                cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"] 
+                cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["DE/QUANTIZE"]
+                operation_count = 2
             op_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
 
             ############### Compute memory access energy ###############
@@ -115,6 +123,8 @@ class simulator:
             # SRAM access energy
             total_energy += ifm_elems * ifm_elem_size * ArchitectureFeatures.sram_cost
             total_energy += ofm_elems * ofm_elem_size * ArchitectureFeatures.sram_cost
+            # Compute energy for elementwise operations
+            total_energy += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * ArchitectureFeatures.vector_cost * operation_count
         elif op_type in binary_elementwise_ops:
             ifm1 = tensors[inputs[0]]
             ifm2 = tensors[inputs[1]]
@@ -176,13 +186,17 @@ class simulator:
             # Element-wise operation will speedup by vectorization
             if op_type == "ADD":
                 cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["ADD/SUB"]
+                operation_count = 1
             elif op_type == "SUB":
                 cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["ADD/SUB"]
+                operation_count = 1
             elif op_type == "MUL":
                 cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["MUL"]
+                operation_count = 1
             elif op_type == "SQUARED_DIFFERENCE":
                 # SquaredDifference(x, y) = (x - y)(x - y)
                 cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["ADD/SUB"] + ArchitectureFeatures.output_cycles_per_elem["MUL"]
+                operation_count = 2
             op_cycles = math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * cycle_per_elem
 
             ############### Compute memory access energy ###############
@@ -192,6 +206,8 @@ class simulator:
             total_energy += ifm1_elems * ifm1_elem_size * ArchitectureFeatures.sram_cost
             total_energy += ifm2_elems * ifm2_elem_size * ArchitectureFeatures.sram_cost
             total_energy += ofm_elems * ofm_elem_size * ArchitectureFeatures.sram_cost
+            # Compute energy for elementwise operations
+            total_energy += math.ceil(ofm_elems / ArchitectureFeatures.VECTOR_LEN) * ArchitectureFeatures.vector_cost * operation_count
 
         dram_transfer_size -= (initial_dram_reads + final_dram_writes)
         # DRAM transfer bytes per cycle
@@ -222,6 +238,9 @@ class simulator:
         # Now only support batch = 1
         B = 1
         if op_type == "CONV_2D":
+            # Special case in mean's convert
+            if(len(ofm_shape) == 3):
+                ofm_shape.insert(0, 1)
             B = ofm_shape[0]
             OH = ofm_shape[1]
             OW = ofm_shape[2]
@@ -233,9 +252,6 @@ class simulator:
             OC = filter_shape[0]
             stride = info["builtin_options"]["stride_h"]
         elif op_type == "DEPTHWISE_CONV_2D":
-            # Special case in mean's convert
-            if(len(ofm_shape) == 3):
-                ofm_shape.append(1)
             B = ofm_shape[0]
             OH = ofm_shape[1]
             OW = ofm_shape[2]
@@ -360,6 +376,8 @@ class simulator:
         op_cycles = total_windows * compute_full_oc_times * ArchitectureFeatures.output_cycles_per_elem["MAC"]
         if op_type == "DEPTHWISE_CONV_2D":
             op_cycles *= ofm_shape[3]
+        # Compute energy for MAC operations
+        total_energy += op_cycles * ArchitectureFeatures.mac_cost
 
         ############### Memory access cycles ###############
         # ----- We assume that cost of access SRAM is zero (by prefetching) -----
