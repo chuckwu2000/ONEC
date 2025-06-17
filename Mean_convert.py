@@ -1,7 +1,6 @@
 from AutoSplit import Splitter
 from MyGraph import Graph
 from MyGraph import Node
-import copy
 import numpy as np
 
 class Mean:
@@ -14,14 +13,14 @@ class Mean:
         self.operators = self.graph.operators
         self.ops = self.graph.ops
 
-    def convert_mean_to_depthwise_conv(self):
+    def convert_mean_to_conv(self):
         # Find all mean ops
         mean_ops = self.find_mean_op()
         for i, op in enumerate(mean_ops):
             mean_input_tensor_id = op.info['inputs'][0]
             mean_output_tensor_id = op.info['outputs'][0]
 
-            # Step 1: Create depthwise conv2d op to compute the mean value of the input tensor in axis
+            # Step 1: Create conv op to compute the mean value of the input tensor in axis
             #         Perform the div(reduce_size) with output tensor's quantization scale
             # Get the axis dim info & the reduce size
             axis_tensor = self.tensors[op.info['inputs'][1]]
@@ -44,7 +43,7 @@ class Mean:
                     if reduce_size != self.tensors[mean_input_tensor_id]['shape'][axis]:
                         raise 'unsupported mean format, if multi reduce axis, the reduce size must be same!!'
 
-            # Step 1.1: Prepare for the depthwise conv2d op's needed info
+            # Step 1.1: Prepare for the depthwise conv op's needed info
             input_shape = self.tensors[mean_input_tensor_id]['shape']
             output_shape = self.tensors[mean_output_tensor_id]['shape']
             # If keep_dims is false, we set output shape equal to input shape
@@ -53,22 +52,20 @@ class Mean:
                 self.tensors[mean_output_tensor_id]['shape'] = input_shape
 
             if len(input_shape) == 4:
-                if 0 in axis_list or 3 in axis_list:
-                    raise 'unsupported mean format, if 4D input tensor, the reduce axis must be 1, 2!!'
-                height = input_shape[1] if 1 in axis_list else 1
-                width = input_shape[2] if 2 in axis_list else 1
-                channel = input_shape[3]
-            # If the input tensor is 3D, change it to 4D, and if the mean over depth-axis, left shift the channel dim
-            elif len(input_shape) == 3:
                 if 0 in axis_list:
-                    raise 'unsupported mean format, if 3D input tensor, the reduce axis must be 1, 2!!'
+                    raise 'unsupported mean format, in 4D input tensor, the reduce axis can not be conv batch dim!!'
                 height = input_shape[1] if 1 in axis_list else 1
                 width = input_shape[2] if 2 in axis_list else 1
-                channel = 1
+                channel = input_shape[3] if 3 in axis_list else 1
+            # If the input tensor is 3D, change it to 4D (1 x 384 x 128 -> 1 x 1 x 384 x 128)
+            elif len(input_shape) == 3:
+                height = input_shape[0] if 0 in axis_list else 1
+                width = input_shape[1] if 1 in axis_list else 1
+                channel = input_shape[2] if 2 in axis_list else 1
             else:
                 raise 'unsupported mean format!!'
 
-            # Step 1.2: Create the weight tensor of the depthwise conv2d op
+            # Step 1.2: Create the weight tensor of the depthwise conv op
             weight_shape = [1, height, width, channel]
             np_ones_array = np.ones(weight_shape, dtype = np.int8)
             ones_array = np_ones_array.astype(np.int8).tobytes()
@@ -83,17 +80,17 @@ class Mean:
                 "shape": weight_shape,
                 "type": "INT8",
                 "buffer": weights_buffer_id,
-                "name": 'mean_lower_depthwise_conv2d_weight_%d' % i,
+                "name": 'mean_lower_depthwise_conv_weight_%d' % i,
                 "quantization": {'scale': one_scale, 'zero_point': [0]}
             }
             self.tensors.append(weights_tensor)
             weights_tensor_id = len(self.tensors) - 1
 
-            # Step 1.3: Create the output tensor of the depthwise conv2d op
-            depthwise_conv2d_output_tensor = self.tensors[mean_output_tensor_id]
-            depthwise_conv2d_output_tensor['name'] = 'mean_lower_depthwise_conv2d_%d' % i
+            # Step 1.3: Create the output tensor of the conv op
+            conv_output_tensor = self.tensors[mean_output_tensor_id]
+            conv_output_tensor['name'] = 'mean_lower_conv_%d' % i
             for axis in axis_list:
-                depthwise_conv2d_output_tensor['shape'][axis] = 1
+                conv_output_tensor['shape'][axis] = 1
             # Since Y = S_in * S_w * sigma(Xq - Z_in) = S_in * sigma(Xq - Z_in) [S_w = 1.0]
             # Div the reduce_size: Y = S_in / reduce_size * sigma(Xq - Z_in)
             # Yq = Y / S_out + Z_out = S_in / reduce_size / S_out * sigma(Xq - Z_in) + Z_out
@@ -102,46 +99,45 @@ class Mean:
             float_input_scale = np.int32(int_input_scale).view('float32')
             int_output_scale = self.tensors[mean_output_tensor_id]['quantization']['scale'][0]
             float_output_scale = np.int32(int_output_scale).view('float32')
-            float_depthwith_conv2d_output_scale = float_input_scale / (reduce_size * float_output_scale)
-            np_int_scale = np.float32(float_depthwith_conv2d_output_scale).view('int32')
+            float_depthwith_conv_output_scale = float_input_scale / (reduce_size * float_output_scale)
+            np_int_scale = np.float32(float_depthwith_conv_output_scale).view('int32')
             np_arr = np.array([np_int_scale], dtype=np.int32)
             int_scale = np_arr.tolist()
-            depthwise_conv2d_output_tensor['quantization']['scale'] = int_scale
-            depthwise_conv2d_output_tensor_id = mean_output_tensor_id
+            conv_output_tensor['quantization']['scale'] = int_scale
+            conv_output_tensor_id = mean_output_tensor_id
 
-            # Step 1.4: Create the depthwise conv2d op
-            depthwise_conv2d_op = {
-                "opcode_index": self.get_opcode_index(4),
+            # Step 1.4: Create the depthwise conv op
+            conv_op = {
+                "opcode_index": self.get_opcode_index(3),
                 "inputs": [mean_input_tensor_id, weights_tensor_id, -1],
-                "outputs": [depthwise_conv2d_output_tensor_id],
-                "builtin_options_type": "DepthwiseConv2DOptions",
+                "outputs": [conv_output_tensor_id],
+                "builtin_options_type": "Conv2DOptions",
                 "builtin_options": {
                     "padding": "VALID",
                     "stride_w": 1,
                     "stride_h": 1,
-                    "depth_multiplier": 1,
                     "dilation_w_factor": 1,
                     "dilation_h_factor": 1
                 }
             }
-            self.operators.append(depthwise_conv2d_op)
-            depthwise_conv2d_opid = len(self.operators) - 1
-            self.ops.append(Node(depthwise_conv2d_op, depthwise_conv2d_opid))
+            self.operators.append(conv_op)
+            conv_opid = len(self.operators) - 1
+            self.ops.append(Node(conv_op, conv_opid))
 
-            # Update the parent and children of the converted depthwise conv2d op
+            # Update the parent and children of the converted depthwise conv op
             parent_opid = op.parents[0]
             for i, opid in enumerate(self.ops[parent_opid].children):
                 if opid == op.opid:
                     del self.ops[parent_opid].children[i]
-                    self.ops[parent_opid].children.append(depthwise_conv2d_opid)
-                    self.ops[depthwise_conv2d_opid].parents.append(parent_opid)
+                    self.ops[parent_opid].children.append(conv_opid)
+                    self.ops[conv_opid].parents.append(parent_opid)
                     break
             for child_opid in op.children:
                 for i, opid in enumerate(self.ops[child_opid].parents):
                     if opid == op.opid:
                         del self.ops[child_opid].parents[i]
-                        self.ops[child_opid].parents.append(depthwise_conv2d_opid)
-                        self.ops[depthwise_conv2d_opid].children.append(child_opid)
+                        self.ops[child_opid].parents.append(conv_opid)
+                        self.ops[conv_opid].children.append(child_opid)
                         break
         
         new_buffers, new_tensors, new_inputs, new_outputs, new_operators, new_opcodes = self.graph.export()

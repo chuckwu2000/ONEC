@@ -125,12 +125,11 @@ class SoftMax:
                 "opcode_index": self.get_opcode_index(3),
                 "inputs": [exp_output_tensor_id, weights_tensor_id, -1],
                 "outputs": [conv_output_tensor_id],
-                "builtin_options_type": "DepthwiseConv2DOptions",
+                "builtin_options_type": "Conv2DOptions",
                 "builtin_options": {
                     "padding": "VALID",
                     "stride_w": 1,
                     "stride_h": 1,
-                    "depth_multiplier": 1,
                     "dilation_w_factor": 1,
                     "dilation_h_factor": 1
                 }
