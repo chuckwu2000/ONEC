@@ -363,9 +363,8 @@ class simulator:
         total_energy = dram_transfer_size * ifm_elem_size * ArchitectureFeatures.dram_cost
         # SRAM access energy
         total_energy += ifm_storge_size * ifm_elem_size * ArchitectureFeatures.sram_cost
+        total_energy += weights_storage_size * ifm_elem_size * ArchitectureFeatures.sram_cost
         total_energy += ofm_storge_size * ofm_elem_size * ArchitectureFeatures.sram_cost
-        if op_type in need_weights_ops:
-            total_energy += weights_storage_size * ifm_elem_size * ArchitectureFeatures.sram_cost
 
         ############### Compute cycles ###############
         # Every time deal with new ocs, the weight and init_inputs need to be reloaded

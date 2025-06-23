@@ -56,8 +56,7 @@ class Lowering_for_codegen:
             logistic_op = {
                 "opcode_index": self.get_opcode_index(14),
                 "inputs": [logistic_input_tensor_id],
-                "outputs": [logistic_output_tensor_id],
-                "builtin_options_type": "LogisticOptions"
+                "outputs": [logistic_output_tensor_id]
             }
             self.operators.append(logistic_op)
             logistic_opid = len(self.operators) - 1
@@ -145,8 +144,7 @@ class Lowering_for_codegen:
             logistic_op = {
                 "opcode_index": self.get_opcode_index(14),
                 "inputs": [reshape_output_tensor_id],
-                "outputs": [logistic_output_tensor_id],
-                "builtin_options_type": "LogisticOptions"
+                "outputs": [logistic_output_tensor_id]
             }
             self.operators.append(logistic_op)
             logistic_opid = len(self.operators) - 1

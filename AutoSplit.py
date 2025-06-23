@@ -130,7 +130,10 @@ class Splitter:
         for parent in self.nodes[current_opid].node.parents:
             if self.nodes[parent].visited == False:
                 return None
-
+            
+        if self.nodes[current_opid].node.info in self.new_operators:
+            # Avoid the duplicated op
+            return None
         self.new_operators.append(self.nodes[current_opid].node.info)
 
         self.nodes[current_opid].visited = True
@@ -141,7 +144,12 @@ class Splitter:
 
     def traverse_til_splittable(self, current_opid):
         if self.nodes[current_opid].node.info.get("opcode_index",0) in self.splittable_opcode_idxes.values():
-            return current_opid
+            if self.model_type == ModelType.BERT:
+                # Check whether the split token size is in the current op's input shape
+                if self.token_size in self.tensors[self.nodes[current_opid].node.info['inputs'][0]]['shape']:
+                    return current_opid
+            else:
+                return current_opid
         for parent in self.nodes[current_opid].node.parents:
             if self.nodes[parent].visited == False:
                 return None
@@ -200,6 +208,20 @@ class Splitter:
             # Last op no need to split
             splittables.pop(-1)
             end_ids.append(current_opid)
+        # Avoid to let op which has multiple inputs to be the end op (hard to manage), and set both its inputs as end_ids
+        check_end_ids = True
+        while(check_end_ids):
+            check_end_ids = False
+            old_end_ids = copy.deepcopy(end_ids)
+            for end_id in old_end_ids:
+                if len(self.nodes[end_id].node.parents) > 1:
+                    check_end_ids = True
+                    end_ids.remove(end_id)
+                    for parent in self.nodes[end_id].node.parents:
+                        if parent not in end_ids:
+                            end_ids.append(parent)
+                        if parent in splittables:
+                            splittables.remove(parent)
         return None
     
     # Not use now, idea is prepare for block_based option use (option had been removed in commit bd7874d36eea8e3966b9fbb83e743cbf548a5713)
@@ -1985,6 +2007,7 @@ class Splitter:
             for i in range(len(info['inputs'])):
                 info['inputs'][i] = self.split_tensor_table[info['inputs'][i]][0]
         else:
+            axis = self.nodes[end_opid].node.split_dim
             for i in range(number_of_concate):
                 new_op_info = {
                     "opcode_index": self.get_opcode_index(2),
@@ -1992,7 +2015,7 @@ class Splitter:
                     "outputs": [info['inputs'][i]],
                     "builtin_options_type": "ConcatenationOptions",
                     "builtin_options": {
-                        'axis': 1
+                        'axis': axis
                     }
                 }
                 self.new_operators.append(new_op_info)
