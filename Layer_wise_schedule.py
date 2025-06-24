@@ -28,9 +28,12 @@ class Layer_wise_scheduler:
     def layer_wise_schedule(self):
         # Traverse the DF order to reschedule
         ordered_ops = self.graph.ordered_ops
-        for op in ordered_ops:
+        for i, op in enumerate(ordered_ops):
             if self.visited[op.opid]:
                 continue
+            if i % 100 == 0:
+                # To accerlate the scheduling process
+                self.need_virtual_allocate_opids.clear()
             self.tensor_in_SRAM = set()
             self.opids_in_block = set()
             # Steps 1: Fetch opids in the same layer

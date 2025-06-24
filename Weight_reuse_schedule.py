@@ -31,9 +31,12 @@ class Weight_reuse_scheduler:
         block_id = 0
         # Traverse the DF order to reschedule
         ordered_ops = self.graph.ordered_ops
-        for op in ordered_ops:
+        for i, op in enumerate(ordered_ops):
             if self.visited[op.opid]:
                 continue
+            if i % 100 == 0:
+                # To accerlate the scheduling process
+                self.need_virtual_allocate_opids.clear()
             # Step 1: Fetch opids in the same layer
             same_layer_opids = self.collect_same_layer_opids_in_same_block(op.opid)
             self.opids_in_block.update(same_layer_opids)
