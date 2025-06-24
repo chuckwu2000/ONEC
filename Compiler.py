@@ -109,12 +109,12 @@ if args.softmax_lowering and not args.codegen:
 # Perform mean convert
 if args.mean_convert:
     Mean(splitter).convert_mean_to_conv()
+# Perform data layout sinking or hoisting
+if args.move_data_layout_op:
+    Safe_Sinker_Hoister(splitter).data_layout_sink()
 # Perform logistic lowering
 if args.logistic_lowering:
     Logistic(splitter).logistic_lowering()
-# Perform data layout sinking or hoisting
-if args.move_data_layout_op and model_type == 0:
-    Safe_Sinker_Hoister(splitter).data_layout_sink()
 ori_graph = splitter.ori_graph
 
 # Pick the best tile size

@@ -29,7 +29,10 @@ class Logistic:
             self.buffers.append(sub_input1_buffer)
             sub_input1_tensor = copy.deepcopy(self.tensors[logistic_input_tensor_id])
             sub_input1_tensor['name'] = 'logistic_lower_zero_sub_%d' % i
-            sub_input1_tensor['shape'] = [1, 1, 1, 1]
+            # Generate a zero tensor with the same shape as the input tensor
+            input_shape_len = len(self.tensors[logistic_input_tensor_id]['shape'])
+            zero_tensor_shape = [1] * input_shape_len
+            sub_input1_tensor['shape'] = zero_tensor_shape
             sub_input1_tensor['buffer'] = len(self.buffers) - 1
             self.tensors.append(sub_input1_tensor)
             sub_input1_tensor_id = len(self.tensors) - 1
