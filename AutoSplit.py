@@ -215,13 +215,17 @@ class Splitter:
             old_end_ids = copy.deepcopy(end_ids)
             for end_id in old_end_ids:
                 if len(self.nodes[end_id].node.parents) > 1:
-                    check_end_ids = True
-                    end_ids.remove(end_id)
                     for parent in self.nodes[end_id].node.parents:
-                        if parent not in end_ids:
-                            end_ids.append(parent)
-                        if parent in splittables:
-                            splittables.remove(parent)
+                        # In GPT2, the k, v path will not split at original, skip it
+                        # This is a stupid way to temperarily solve the problem in our benchmark
+                        if len(self.nodes[parent].node.children) == 1:
+                            check_end_ids = True
+                            if parent not in end_ids:
+                                end_ids.append(parent)
+                            if parent in splittables:
+                                splittables.remove(parent)
+                    if check_end_ids:
+                        end_ids.remove(end_id)
         return None
     
     # Not use now, idea is prepare for block_based option use (option had been removed in commit bd7874d36eea8e3966b9fbb83e743cbf548a5713)

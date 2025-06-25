@@ -35,7 +35,7 @@ class Weight_reuse_scheduler:
             if self.visited[op.opid]:
                 continue
             if i % 100 == 0:
-                # To accerlate the scheduling process
+                # To accerlate the scheduling process, actually need to clear tensor_in_SRAM also
                 self.need_virtual_allocate_opids.clear()
             # Step 1: Fetch opids in the same layer
             same_layer_opids = self.collect_same_layer_opids_in_same_block(op.opid)

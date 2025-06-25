@@ -32,7 +32,7 @@ class Layer_wise_scheduler:
             if self.visited[op.opid]:
                 continue
             if i % 100 == 0:
-                # To accerlate the scheduling process
+                # To accerlate the scheduling process, actually need to clear tensor_in_SRAM also
                 self.need_virtual_allocate_opids.clear()
             self.tensor_in_SRAM = set()
             self.opids_in_block = set()
