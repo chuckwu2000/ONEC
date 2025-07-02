@@ -104,7 +104,7 @@ if args.remove_data_layout_op and model_type == 0:
 # Perform lowering for codegen
 Lowering_for_codegen(splitter).lowering()
 # Perform softmax lowering
-if args.softmax_lowering and not args.codegen:
+if args.softmax_lowering:
     SoftMax(splitter).softmax_lowering()
 # Perform mean convert
 if args.mean_convert:
@@ -158,10 +158,15 @@ layer_wise_graph = layer_wise_scheduler.layer_wise_schedule()
 # Estimate the performance of layer-wise schedule (baseline)
 model_sim = simulator(layer_wise_graph, layer_wise_scheduler.tensor_info)
 if args.verbose_performance:
-    baseline_dma_cycles, baseline_op_cycles, baseline_total_cycles, baseline_total_energy = model_sim.estimate_model(pipeline = False)
+    baseline_dma_cycles, baseline_op_cycles, baseline_total_cycles = model_sim.estimate_model(pipeline = False)
+    baseline_total_energy = model_sim.total_energy
     # model_sim.print_performance()
+    print("*" * 100)
     print(f"Baseline schedule: dma cycles = {baseline_dma_cycles :.1f}, op cycles = {baseline_op_cycles :.1f}, total cycles = {baseline_total_cycles :.1f}")
     print(f"Baseline energy = {baseline_total_energy :.2f} nJ")
+    print(f"core energy ratio: {model_sim.core_energy / baseline_total_energy :.2f}")
+    print(f"SRAM energy ratio: {model_sim.sram_energy / baseline_total_energy :.2f}")
+    print(f"DRAM energy ratio: {model_sim.dram_energy / baseline_total_energy :.2f}")
     
     roofline_model = RooflineModel(layer_wise_graph, layer_wise_scheduler.tensor_info, baseline_total_cycles)
     roofline_model.roofline_model_build()
@@ -195,8 +200,10 @@ if not args.codegen:
 
     model_sim = simulator(weight_reuse_graph, weight_reuse_scheduler.tensor_info)
     if args.verbose_performance:
-        reuse_dma_cycles, reuse_op_cycles, reuse_total_cycles, reuse_total_energy = model_sim.estimate_model(pipeline = False)
+        reuse_dma_cycles, reuse_op_cycles, reuse_total_cycles = model_sim.estimate_model(pipeline = False)
+        reuse_total_energy = model_sim.total_energy
         # model_sim.print_performance()
+        print("*" * 100)
         print(f"After weight reuse schedule: dma cycles = {reuse_dma_cycles :.1f}, op cycles = {reuse_op_cycles :.1f}, total cycles = {reuse_total_cycles :.1f}")
         print(f"speedup = {((baseline_total_cycles/reuse_total_cycles) - 1) * 100 :.2f}%")
         print(f"Weight reuse energy = {reuse_total_energy :.2f} nJ")
@@ -227,8 +234,10 @@ if not args.codegen:
     # Estimate the performance after pipeline schedule
     model_sim = simulator(pipeline_new_graph, weights_reuse_need_allocate_tensors)
     if args.verbose_performance:
-        pipeline_dma_cycles, pipeline_op_cycles, pipeline_total_cycles, pipeline_total_energy = model_sim.estimate_model(pipeline = True)
+        pipeline_dma_cycles, pipeline_op_cycles, pipeline_total_cycles = model_sim.estimate_model(pipeline = True)
+        pipeline_total_energy = model_sim.total_energy
         # model_sim.print_performance()
+        print("*" * 100)
         if args.genesys:
             print(f"After GeneSys schedule: dma cycles = {pipeline_dma_cycles :.1f}, op cycles = {pipeline_op_cycles :.1f}, total cycles = {pipeline_total_cycles :.1f}")
         else:
@@ -236,6 +245,9 @@ if not args.codegen:
         print(f"speedup = {((baseline_total_cycles/pipeline_total_cycles) - 1) * 100 :.2f}%")
         print(f"Pipeline energy = {pipeline_total_energy :.2f} nJ")
         print(f"Pipeline energy reduction = {((baseline_total_energy/pipeline_total_energy) - 1) * 100 :.2f}%")
+        print(f"core energy ratio: {model_sim.core_energy / baseline_total_energy :.2f}")
+        print(f"SRAM energy ratio: {model_sim.sram_energy / baseline_total_energy :.2f}")
+        print(f"DRAM energy ratio: {model_sim.dram_energy / baseline_total_energy :.2f}")
 
         roofline_model = RooflineModel(pipeline_new_graph, weights_reuse_need_allocate_tensors, pipeline_total_cycles)
         roofline_model.roofline_model_build()

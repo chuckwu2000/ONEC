@@ -7,11 +7,9 @@ class Mem_area(Enum):
     OffChipFlash = 3
 
 class ArchitectureFeatures:
-    # Assume bandwidth in SRAM (assume 10 times faster) and DRAM (19.2 GB/s)
-    # DDR4 DRAM's DIMM always 64-bit wide, and can bursts of 8 data words -> gives 64 bytes per burst 
-    # DMA will fetch SRAM_burst_length(bytes) in one cycle
-    axi_bit_width = 512
     core_clock = 3e8
+    core_period = 1 / core_clock * 1e9  # in ns
+    # Assume bandwidth in SRAM (assume 10 times faster than DRAM)
     Sram_clock_scale = 10
     Dram_clock_scale = 1
     
@@ -42,11 +40,12 @@ class ArchitectureFeatures:
     # Element-wise operation vectorization
     VECTOR_LEN = 128
 
-    # DRAM access energy (nJ/bit)
-    dram_cost = 12 * 1e-3
     # SRAM access energy (nJ/bit)
     sram_cost = 0.2 * 1e-3
     # MAC engine energy (nJ/cycle)
     mac_cost = 4.48
     # Vector engine energy (nJ/cycle)
     vector_cost = 0.1 * VECTOR_LEN * 1e-3
+
+    # DRAM config yaml [related to OEM_wrappers/main.cc]
+    config_path = "extern/ramulator2/OEM_config.yaml"
