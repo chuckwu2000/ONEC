@@ -222,8 +222,8 @@ class simulator:
 
         dram_transfer_size -= (initial_dram_reads + final_dram_writes)
         # First tile's read from DRAM & last tile's write to DRAM can't be overlapped by double buffer
-        latency_energy, latency = self.ramulator2_simulate(initial_dram_reads + final_dram_writes)
-        dram_transfer_energy, dram_transfer_cycles = self.ramulator2_simulate(dram_transfer_size)
+        latency, latency_energy = self.ramulator2_simulate(initial_dram_reads + final_dram_writes)
+        dram_transfer_cycles, dram_transfer_energy = self.ramulator2_simulate(dram_transfer_size)
         dma_transfer_cycles = max(0, dram_transfer_cycles - op_cycles) + latency
         total_cycles = op_cycles + dma_transfer_cycles
         # DRAM access energy
@@ -271,8 +271,8 @@ class simulator:
             filter_shape = filter.get("shape")
             FH = filter_shape[1]
             FW = filter_shape[2]
-            IC = 1
-            OC = 1
+            IC = filter_shape[3]
+            OC = ofm_shape[3]
             stride = info["builtin_options"]["stride_h"]
         elif op_type == "FULLY_CONNECTED":
             OH = ofm_shape[-2]
@@ -387,8 +387,6 @@ class simulator:
         total_windows = B * OH * OW
         # Requantization is performed alongside MAC operations in the pipeline (compute an output likely takes 1 cycle)
         op_cycles = total_windows * compute_full_oc_times * ArchitectureFeatures.output_cycles_per_elem["MAC"]
-        if op_type == "DEPTHWISE_CONV_2D":
-            op_cycles *= ofm_shape[3]
         # Compute energy for MAC operations
         self.total_energy += op_cycles * ArchitectureFeatures.mac_cost
         self.core_energy += op_cycles * ArchitectureFeatures.mac_cost
@@ -406,8 +404,8 @@ class simulator:
 
         dram_transfer_size -= (initial_dram_reads + final_dram_writes)
         # First tile's read from DRAM & last tile's write to DRAM can't be overlapped
-        latency_energy, latency = self.ramulator2_simulate(initial_dram_reads + final_dram_writes)
-        dram_transfer_energy, dram_transfer_cycles = self.ramulator2_simulate(dram_transfer_size)
+        latency, latency_energy  = self.ramulator2_simulate(initial_dram_reads + final_dram_writes)
+        dram_transfer_cycles, dram_transfer_energy = self.ramulator2_simulate(dram_transfer_size)
         dma_transfer_cycles = max(0, dram_transfer_cycles - op_cycles) + latency
         total_cycles = op_cycles + dma_transfer_cycles
         # DRAM access energy
@@ -448,6 +446,11 @@ class simulator:
         total_op_cycles = 0
         total_cycles = 0
 
+        ##### For Experiment #####
+        # fused_op_cycles = 0
+        # elementwise_op_cycles = 0
+        # mac_op_cycles = 0
+
         for op in self.model.ordered_ops:
             opid = op.opid
             # w/wo pipeline schedule, the estimated total cycles will be different, since we consider the memory footprint between DRAM and SRAM
@@ -458,7 +461,16 @@ class simulator:
             total_dma_cycles += dma_cycles
             total_op_cycles += op_cycles
             total_cycles += op_total_cycles
-            
+
+            ##### For Experiment #####
+            # op = self.ops[opid]
+            # opcode_index = op.info.get("opcode_index")
+            # opcode_type = self.opcodes[opcode_index].get("builtin_code")
+            # if opcode_type in mac_ops:
+            #     mac_op_cycles += op_cycles
+            # elif opcode_type in elementwise_ops:
+            #     elementwise_op_cycles += op_cycles
+
         if pipeline:
             cascade_matched_ops = self.model.cascade_matched_ops
             cascade_total_op = 0
@@ -468,19 +480,25 @@ class simulator:
                 cascade_total_op += len(cascade_matched_op)
                 op1 = self.ops[cascade_matched_op[0]]
                 op2_estimated_op_cycles = 0
-                op2_estimated_total_cycles = 0
                 for op_id in range(1, len(cascade_matched_op)):
                     op2 = self.ops[cascade_matched_op[op_id]]
                     op2_estimated_op_cycles += op2.estimated_op_cycles
-                    op2_estimated_total_cycles += op2.estimated_total_cycles
-                if op1.estimated_total_cycles > op2_estimated_total_cycles:
+                if op1.estimated_op_cycles > op2_estimated_op_cycles:
                     total_op_cycles -= op2_estimated_op_cycles
                     total_cycles -= op2_estimated_op_cycles
                     cascade_save_cycles += op2_estimated_op_cycles
+                    ##### For Experiment #####
+                    # fused_op_cycles += op1.estimated_op_cycles
+                    # mac_op_cycles -= op1.estimated_op_cycles
+                    # elementwise_op_cycles -= op2_estimated_op_cycles
                 else:
                     total_op_cycles -= op1.estimated_op_cycles
                     total_cycles -= op1.estimated_op_cycles
                     cascade_save_cycles += op1.estimated_op_cycles
+                    ##### For Experiment #####
+                    # fused_op_cycles += op2_estimated_op_cycles
+                    # mac_op_cycles -= op1.estimated_op_cycles
+                    # elementwise_op_cycles -= op2_estimated_op_cycles
             matched_ops = self.model.matched_ops
             match_total_op = 0
             match_save_cycles = 0
@@ -489,21 +507,46 @@ class simulator:
                 match_total_op += len(matched_op)
                 op1 = self.ops[matched_op[0]]
                 op2_estimated_op_cycles = 0
-                op2_estimated_total_cycles = 0
                 for op_id in range(1, len(matched_op)):
                     op2 = self.ops[matched_op[op_id]]
                     op2_estimated_op_cycles += op2.estimated_op_cycles
-                    op2_estimated_total_cycles += op2.estimated_total_cycles
-                if op1.estimated_total_cycles > op2_estimated_total_cycles:
+                if op1.estimated_op_cycles > op2_estimated_op_cycles:
                     total_op_cycles -= op2_estimated_op_cycles
                     total_cycles -= op2_estimated_op_cycles
                     match_save_cycles += op2_estimated_op_cycles
+                    
+                    ### For Experiment #####
+                    # fused_op_cycles += op1.estimated_op_cycles
+                    # opcode_index = op1.info.get("opcode_index")
+                    # opcode_type = self.opcodes[opcode_index].get("builtin_code")
+                    # if opcode_type in mac_ops:
+                    #     mac_op_cycles -= op1.estimated_op_cycles
+                    #     elementwise_op_cycles -= op2_estimated_op_cycles
+                    # elif opcode_type in elementwise_ops:
+                    #     mac_op_cycles -= op2_estimated_op_cycles
+                    #     elementwise_op_cycles -= op1.estimated_op_cycles
                 else:
                     total_op_cycles -= op1.estimated_op_cycles
                     total_cycles -= op1.estimated_op_cycles
                     match_save_cycles += op1.estimated_op_cycles
-            # print(f"cascade_total_op: {cascade_total_op}, cascade_save_cycles: {cascade_save_cycles}")
-            # print(f"match_total_op: {match_total_op}, match_save_cycles: {match_save_cycles}")
+
+                    ##### For Experiment #####
+                    # fused_op_cycles += op2_estimated_op_cycles
+                    # opcode_index = op1.info.get("opcode_index")
+                    # opcode_type = self.opcodes[opcode_index].get("builtin_code")
+                    # if opcode_type in mac_ops:
+                    #     mac_op_cycles -= op1.estimated_op_cycles
+                    #     elementwise_op_cycles -= op2_estimated_op_cycles
+                    # elif opcode_type in elementwise_ops:
+                    #     mac_op_cycles -= op2_estimated_op_cycles
+                    #     elementwise_op_cycles -= op1.estimated_op_cycles
+        ##### For Experiment #####
+        # print(f"mac ratio: {mac_op_cycles / total_op_cycles * 100:.2f}%, elementwise ratio: {elementwise_op_cycles / total_op_cycles * 100:.2f}%, fused ratio: {fused_op_cycles / total_op_cycles * 100:.2f}%")
+        # print(f"!!!! elementwise_idle ratio: {1 - (elementwise_op_cycles + fused_op_cycles) / total_cycles:.2f}, mac_idle ratio: {1 - (mac_op_cycles + fused_op_cycles) / total_cycles:.2f} !!!!")
+        # print(f"fused_op_ratio: {fused_op_cycles / total_cycles * 100:.2f}%, \
+        #         mac_op_ratio: {mac_op_cycles / total_cycles * 100:.2f}%, \
+        #         elementwise_op_ratio: {elementwise_op_cycles / total_cycles * 100:.2f}%, \
+        #         dma_transfer_ratio: {total_dma_cycles / total_cycles * 100:.2f}%")
         return total_dma_cycles, total_op_cycles, total_cycles
 
     def print_performance(self):

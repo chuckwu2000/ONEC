@@ -132,7 +132,7 @@ if args.split_height == None:
             if dim_value > 1:
                 token_size = dim_value
                 break
-        splitter.split_height = tilesize_selection.pick_best_tile_size(token_size)
+    split_height = tilesize_selection.pick_best_tile_size(token_size)
 else:
     split_height = args.split_height
 splitter.split_height = split_height

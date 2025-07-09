@@ -4,10 +4,12 @@ from OpClassify import Op_Classify
 op_classify = Op_Classify()
 # Classify refer to the tandem processor's paper
 # The elementwise main op
-elem_wise_ops = ["ADD", "SUB", "MUL", "LOGISTIC", "RSQRT", "SQUARED_DIFFERENCE", "SOFTMAX", "GELU", "LEAKY_RELU", \
-                 "REDUCE_MAX", "QUANTIZE", "DEQUANTIZE", "TANH", "POW", "MAX_POOL_2D", "RESHAPE", "EXP", "SUM"]
+# elem_wise_ops = ["ADD", "SUB", "MUL", "LOGISTIC", "RSQRT", "SQUARED_DIFFERENCE", "SOFTMAX", "GELU", "LEAKY_RELU", \
+#                 "REDUCE_MAX", "QUANTIZE", "DEQUANTIZE", "TANH", "POW", "MAX_POOL_2D", "RESHAPE", "EXP", "SUM"]
 # The mac main op
-mac_ops = ["MEAN", "CONV_2D", "DEPTHWISE_CONV_2D", "FULLY_CONNECTED", "TRANSPOSE_CONV", "BATCH_MATMUL"]
+#mac_ops = ["MEAN", "CONV_2D", "DEPTHWISE_CONV_2D", "FULLY_CONNECTED", "TRANSPOSE_CONV", "BATCH_MATMUL"]
+elem_wise_ops = op_classify.elementwise_ops
+mac_ops = op_classify.mac_ops
 
 def genesys_schedule(split_graph: Graph, weights_reuse_need_allocate_tensors, genesys_options: dict):
     # GeneSys have three rules:

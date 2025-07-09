@@ -48,4 +48,6 @@ class ArchitectureFeatures:
     vector_cost = 0.1 * VECTOR_LEN * 1e-3
 
     # DRAM config yaml [related to OEM_wrappers/main.cc]
-    config_path = "extern/ramulator2/OEM_config.yaml"
+    config_path = "extern/ramulator2/OEM_DDR5_config.yaml"
+    # config_path = "extern/ramulator2/OEM_DDR4_config.yaml"
+    # config_path = "extern/ramulator2/OEM_HBM_config.yaml"
