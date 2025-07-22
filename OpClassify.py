@@ -25,3 +25,4 @@ class Op_Classify:
                           "TANH", "POW", "MAX_POOL_2D", "EXP", "RECIPROCAL"]
         self.binary_ops = ["ADD", "SUB", "MUL", "SQUARED_DIFFERENCE", "BATCH_MATMUL"]
         self.trinary_ops = ["CONV_2D", "DEPTHWISE_CONV_2D", "FULLY_CONNECTED"]
+        self.use_lut_ops = ["RSQRT", "EXP", "RECIPROCAL"]

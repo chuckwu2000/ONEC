@@ -8,6 +8,7 @@ fall_back_cpu_ops = op_classify.fall_back_cpu_ops
 unary_ops = op_classify.unary_ops
 binary_ops = op_classify.binary_ops
 trinary_ops = op_classify.trinary_ops
+use_lut_ops = op_classify.use_lut_ops
 
 # Based on the DF order, but DF's depth is 1
 class Layer_wise_scheduler:
@@ -118,6 +119,8 @@ class Layer_wise_scheduler:
                     input_nums = [unary, binary, trinary]
                     if opcode_type in unary_ops:
                         input_idx = 0
+                        if opcode_type in use_lut_ops:
+                            input_idx = 1
                     elif opcode_type in binary_ops:
                         input_idx = 1
                     elif opcode_type in trinary_ops:

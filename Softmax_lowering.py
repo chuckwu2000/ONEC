@@ -51,7 +51,11 @@ class SoftMax:
             subtract_output_tensor = copy.deepcopy(self.tensors[softmax_input_tensor_id])
             subtract_output_tensor['name'] = 'softmax_lower_subtract_%d' % i
             # Since Xq' = Xq - Xq_max => X' = S_in * (Xq - Z_in) - S_in * (Xq_max - Z_in) = S_in * (Xq - Xq_max)
-            # Output tensor's scale is same to softmax_input_scale, zero point is no needed
+            # Output tensor's scale may be too large, so we let real value: [-6, 0] quant to [-127, 0]
+            np_int_scale = np.float32(6.0 / 127.0).view('int32')
+            np_arr = np.array([np_int_scale], dtype=np.int32)
+            int_scale = np_arr.tolist()
+            subtract_output_tensor['quantization']['scale'] = int_scale
             subtract_output_tensor['quantization']['zero_point'] = [0]
             self.tensors.append(subtract_output_tensor)
             subtract_output_tensor_id = len(self.tensors) - 1

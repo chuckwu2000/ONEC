@@ -12,6 +12,7 @@ from Softmax_lowering import SoftMax
 from Mean_convert import Mean
 from Logistic_lowering import Logistic
 from Sink_or_Hoist import Safe_Sinker_Hoister
+from Build_LUT import LUT
 from TileSize_selection import TileSizeSelection
 from Layer_wise_schedule import Layer_wise_scheduler
 from DF_schedule import DF_scheduler
@@ -115,6 +116,8 @@ if args.move_data_layout_op:
 # Perform logistic lowering
 if args.logistic_lowering:
     Logistic(splitter).logistic_lowering()
+# Build the LUT for some elementwise operations
+    LUT(splitter).build_lut()
 ori_graph = splitter.ori_graph
 
 # Pick the best tile size

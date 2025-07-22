@@ -1490,7 +1490,8 @@ class Splitter:
         inputs = info['inputs']
         outputs = info['outputs']
 
-        if len(inputs) != 1:
+        # We put LUT in the input
+        if len(inputs) > 2:
             raise "wrong input number"
         elif len(outputs) != 1:
             raise "wrong output number"
@@ -1499,7 +1500,7 @@ class Splitter:
             for a,b in zip(self.split_tensor_table[inputs[0]],
                             self.split_tensor_table[outputs[0]]):
                 new_op_info = copy.deepcopy(info)
-                new_op_info['inputs'] = [a]
+                new_op_info['inputs'][0] = a
                 new_op_info['outputs'] = [b]
                 self.new_operators.append(new_op_info)
                 self.nodes[opid].split_id.append(split_op_id)
@@ -1624,7 +1625,8 @@ class Splitter:
         inputs = info['inputs']
         outputs = info['outputs']
 
-        if len(inputs) != 1:
+        # We put LUT in the input
+        if len(inputs) > 2:
             raise "wrong input number"
         elif len(outputs) != 1:
             raise "wrong output number"
@@ -1633,7 +1635,7 @@ class Splitter:
             for a,b in zip(self.split_tensor_table[inputs[0]],
                             self.split_tensor_table[outputs[0]]):
                 new_op_info = copy.deepcopy(info)
-                new_op_info['inputs'] = [a]
+                new_op_info['inputs'][0] = a
                 new_op_info['outputs'] = [b]
                 self.new_operators.append(new_op_info)
                 self.nodes[opid].split_id.append(split_op_id)
@@ -1676,7 +1678,8 @@ class Splitter:
         inputs = info['inputs']
         outputs = info['outputs']
 
-        if len(inputs) != 1:
+        # We put LUT in the input
+        if len(inputs) > 2:
             raise "wrong input number"
         elif len(outputs) != 1:
             raise "wrong output number"
@@ -1685,7 +1688,7 @@ class Splitter:
             for a,b in zip(self.split_tensor_table[inputs[0]],
                            self.split_tensor_table[outputs[0]]):
                 new_op_info = copy.deepcopy(info)
-                new_op_info['inputs'] = [a]
+                new_op_info['inputs'][0] = a
                 new_op_info['outputs'] = [b]
                 self.new_operators.append(new_op_info)
                 self.nodes[opid].split_id.append(split_op_id)

@@ -16,6 +16,7 @@ need_bias_ops = op_classify.need_bias_ops
 unary_elementwise_ops = op_classify.unary_ops
 binary_elementwise_ops = op_classify.binary_ops
 elementwise_ops = op_classify.elementwise_ops
+use_lut_ops = op_classify.use_lut_ops
 
 class simulator:
     def __init__(self, model: Graph, tensors_info):
@@ -74,6 +75,13 @@ class simulator:
                         initial_dram_reads += min(ifm_elems, ArchitectureFeatures.VECTOR_LEN) * (ifm_elem_size / 8)
                         dram_transfer_size += self.tensor_info[inputs[0]].size
                     break
+            if op_type in use_lut_ops:
+                for tensor_metadata in self.tensor_info[inputs[1]].tensors:
+                    # Find the corresponding tensor metadata
+                    if tensor_metadata.cid == opid:
+                        if tensor_metadata.in_DRAM:
+                            initial_dram_reads += 256 * (ifm_elem_size / 8)  # LUT size is 256
+                            dram_transfer_size += 256
             # OFM's data transfer
             for tensor_metadata in self.tensor_info[outputs[0]].tensors:
                 # Find the corresponding tensor metadata
@@ -86,11 +94,12 @@ class simulator:
             ############### Compute cycles ###############
             # Element-wise operation will speedup by vectorization
             if op_type == "EXP":
-                cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["EXP"]
-                operation_count = 6
+                # To reduce the elementwise engine size, we use the LUT to get the exp result
+                cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["LUT"]
+                operation_count = 0
             elif op_type == "RECIPROCAL":
-                cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["RECIPROCAL"]
-                operation_count = 13
+                cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["LUT"]
+                operation_count = 0
             elif op_type == "RSQRT":
                 # There have quick rsqrt method, but it looks like can't be used in our design
                 # Above reference: https://zh.wikipedia.org/zh-tw/%E5%B9%B3%E6%96%B9%E6%A0%B9%E5%80%92%E6%95%B0%E9%80%9F%E7%AE%97%E6%B3%95
@@ -316,7 +325,8 @@ class simulator:
         if one_element_compute_needed <= total_PEs:
             oc_finish_per_cycle = math.floor(total_PEs / one_element_compute_needed)
         else:
-            raise ValueError("Not support one element compute needed > total MAC PEs")
+            oc_finish_per_cycle = total_PEs / one_element_compute_needed
+            # raise ValueError("Not support one element compute needed > total MAC PEs")
 
         ############### DRAM access cycles ###############
         initial_dram_reads = 0
@@ -362,7 +372,7 @@ class simulator:
                         dram_transfer_size += weights_storage_size
                     break
         # Check output tensor
-        final_output_dram_write = oc_finish_per_cycle * (ofm_elem_size / 8)
+        final_output_dram_write = math.ceil(oc_finish_per_cycle) * (ofm_elem_size / 8)
         for tensor_metadata in self.tensor_info[outputs[0]].tensors:
             if tensor_metadata.pid == opid:
                 if tensor_metadata.in_DRAM:
