@@ -75,7 +75,7 @@ class simulator:
                         initial_dram_reads += min(ifm_elems, ArchitectureFeatures.VECTOR_LEN) * (ifm_elem_size / 8)
                         dram_transfer_size += self.tensor_info[inputs[0]].size
                     break
-            if op_type in use_lut_ops:
+            if op_type in use_lut_ops and ifm_elem_size == 8:
                 for tensor_metadata in self.tensor_info[inputs[1]].tensors:
                     # Find the corresponding tensor metadata
                     if tensor_metadata.cid == opid:

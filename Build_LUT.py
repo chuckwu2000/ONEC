@@ -163,7 +163,10 @@ class LUT:
             opcode_index = op.info.get("opcode_index")
             opcode_type = self.opcodes[opcode_index].get("builtin_code")
             if opcode_type == "EXP":
-                exp_ops.append(op)
+                # There may have some exp ops' inputs had been dequantized, we only handle the int8 input
+                exp_input_tensor_id = op.info['inputs'][0]
+                if self.tensors[exp_input_tensor_id].get('type', "FLOAT32") == "INT8":
+                    exp_ops.append(op)
         return exp_ops
     
     def find_reciprocal_op(self):
