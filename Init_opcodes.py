@@ -1,3 +1,6 @@
+# Pre-initialization of opcodes for future optimizations
+# The original opcodes are only contained originally operator in the model
+
 class Init_opcodes:
     def __init__(self, opcodes, new_opcodes, codegen: bool):
         self.opcodes = opcodes

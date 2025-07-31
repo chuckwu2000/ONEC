@@ -1,3 +1,5 @@
+# Use the Chaitin-Briggs algorithm to allocate tensors to limited SRAMs(8)
+
 from OpClassify import Op_Classify
 from collections import defaultdict
 import copy
@@ -83,7 +85,7 @@ class Distributed_SRAM_allocator:
                     self.tensor_info[tensor_id].tensors.append(Distributed_SRAM_tensor_info(op.opid, op.opid))
         # For codegen convenience, we sort the tensor's info by their cid
         for tensor_id in self.need_allocate_tensor_ids:
-            self.tensor_info[tensor_id].tensors.sort(key=lambda tensor: self.graph.ops[tensor.cid].schedule_order)
+            self.tensor_info[tensor_id].tensors.sort(key = lambda tensor: self.graph.ops[tensor.cid].schedule_order)
         # In here, we don't check if the tensor overuse the DRAM (since OEM's NPU not connect to DRAM now)
         # TODO: If NPU connect DRAM in the future, can reference Memory_allocation.py
 

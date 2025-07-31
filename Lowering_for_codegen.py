@@ -1,3 +1,5 @@
+# Lowering NPU un-supported ops to supported ones
+
 from AutoSplit import Splitter
 from MyGraph import Graph
 from MyGraph import Node

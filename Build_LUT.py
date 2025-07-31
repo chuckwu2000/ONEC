@@ -1,3 +1,5 @@
+# Build LUT
+
 from AutoSplit import Splitter
 from MyGraph import Graph
 from MyGraph import Node
@@ -22,6 +24,7 @@ class LUT:
         new_graph = Graph(new_operators, new_tensors, new_buffers, new_opcodes, new_inputs, new_outputs, "DF")
         self.splitter.re_init(new_graph)
 
+    # Dequant to the real value, calculate the real result by math function, then quantize it back to the quantized value and store it in the LUT
     def build_exp_lut(self):
         exp_ops = self.find_exp_op()
         for i, op in enumerate(exp_ops):
@@ -39,6 +42,7 @@ class LUT:
             quantized_max = 127
             for input in range(-128, 128):
                 input_real = (input - ifm_zp) * ifm_scale
+                # Avoid overflow happening
                 try:
                     output_real = math.exp(input_real)
                 except OverflowError:

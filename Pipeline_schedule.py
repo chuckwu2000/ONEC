@@ -1,3 +1,6 @@
+# Try to fuse the elementwise operators and mac operators
+# Or elementwise operators and elementwise operators
+
 from MyGraph import Graph
 from OpClassify import Op_Classify
 
@@ -35,7 +38,7 @@ def pipeline_schedule(split_graph: Graph):
                 continue
 
             # We start from the mac-main-op, since its output can directlly be used by elem-wise-main-op
-            # Conversely, elem-wise-main-op's output can't be directly used by mac-main-op (it normally need neighbor elems to be calculated)
+            # Conversely, elem-wise-main-op's output can't be directly used by mac-main-op (it normally need neighbor elems to be calculated finished)
             if candidate_op.is_mac_main_op:
                 estimated_total_cycles = candidate_op.estimated_total_cycles
                 cascade_matched_ops = [candidate_op.opid]
@@ -290,6 +293,44 @@ def pipeline_schedule(split_graph: Graph):
                             split_graph.matched_ops.append(matched_ops)
                             break
 
+    def seq_elementwise_schedule(split_graph: Graph):
+        for idx, candidate_op in enumerate(split_graph.ordered_ops):
+            # Skip the op that has been matched
+            if candidate_op.have_fully_matched:
+                continue
+
+            if candidate_op.is_elem_wise_main_op:
+                seq_elem_ops = [candidate_op.opid]
+                now_idx = idx
+                child_idx = idx + 1
+                while child_idx < len(split_graph.ordered_ops):
+                    now_op = split_graph.ordered_ops[now_idx]
+                    child_op = split_graph.ordered_ops[child_idx]
+                    opcode_index = child_op.info.get("opcode_index")
+                    opcode_type = split_graph.opcodes[opcode_index].get("builtin_code")
+                    # If the child op not elementwise op, jump out
+                    if opcode_type in elem_wise_ops and not child_op.have_fully_matched:
+                        # Check whether have producer-consumer relationship
+                        have_producer_consumer = False
+                        for child in now_op.children:
+                            if child == child_op.opid:
+                                have_producer_consumer = True
+                                break
+                        if not have_producer_consumer:
+                            break
+                        seq_elem_ops.append(child_op.opid)
+                        child_op.have_fully_matched = True
+                        now_idx = child_idx
+                        child_idx += 1
+                        # OEM NPU can only support 4 elementwise ops run concurrently
+                        if len(seq_elem_ops) >= 4:
+                            break
+                    else:
+                        break
+                if len(seq_elem_ops) > 1:
+                    candidate_op.have_fully_matched = True
+                    split_graph.seq_elem_ops.append(seq_elem_ops)
+
     def update_schedule_order(split_graph: Graph):
         # Update the schedule order in the ordered_ops
         split_graph.ordered_ops = sorted(split_graph.ops, key=lambda x: x.schedule_order)
@@ -300,10 +341,13 @@ def pipeline_schedule(split_graph: Graph):
     
     # Start to piepline schedule
     first_priority_schedule(split_graph)
+    
     second_priority_schedule(split_graph)
-
     # Update the schedule order
     update_schedule_order(split_graph)
+
+    # If there are still some elem-wise ops that haven't been matched, we can fuse them into a sequence
+    seq_elementwise_schedule(split_graph)
     
     #return pipeline_split_graph
     split_graph.pipeline_schedule = True

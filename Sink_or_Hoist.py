@@ -1,3 +1,5 @@
+# Move data layout ops up or down in the graph
+
 from collections import defaultdict
 from MyGraph import Node, Graph
 from AutoSplit import Splitter
@@ -6,7 +8,7 @@ import copy
 import numpy as np
 import math
 
-sink_data_layout = ["PACK", "CONCATENATION"]
+sink_data_layout = ["PACK"]
 hoist_data_layout = ["SPLIT"]
 safe_data_layout_ops = ["RESHAPE"]
 reduce_ops = Op_Classify().reduce_ops
@@ -243,11 +245,12 @@ class Safe_Sinker_Hoister:
         # Sink the pack/candidate ops
         # Rule 1: If the path encount the op has multiple children or multiple parents, then stop sinking
         # Rule 2: If the path encount the op that is belong to the reduce op, then stop sinking
-        # Rule 3: If the path doesn't have the concurrent run oppotunity, then cancel the sinking
+        # Rule 3: If the path don't have the concurrent run oppotunity, then cancel the sinking
         # Rule 3.1: If the path don't have the elementwise op, then cancel the sinking
         # Rule 3.2: If the path's elementwise op will concurrent run with other mac-main ops, then cancel the sinking
         valid_pattern = []
         for op in candidate_ops:
+            # tmp_pattern: ops in the sink path
             tmp_pattern = [op]
             now_opid = op.opid
             if len(op.children) == 0:
@@ -284,7 +287,7 @@ class Safe_Sinker_Hoister:
                         if opcode_type not in sink_data_layout:
                             can_sink = False
                             break
-                    # This is multiple pack/concatenate producer case, but we only want to handle the case if the pack op is the this op's input1 
+                    # This is multiple pack/concatenate producer case, but we only want to handle the case when the pack op is next op's first input
                     # (also avoid duplicate sink)
                     if can_sink:
                         if op.info['inputs'][0] not in tmp_pattern[0].info['outputs']:
@@ -321,6 +324,7 @@ class Safe_Sinker_Hoister:
                 for op in tmp_pattern[i:]:
                     if op in tmp_pattern:
                         tmp_pattern.remove(op)
+            # Check whether the pattern has elementwise op (concurrent run opportunity)
             for op in tmp_pattern:
                 opcode_index = op.info.get("opcode_index")
                 opcode_type = self.opcodes[opcode_index].get("builtin_code")

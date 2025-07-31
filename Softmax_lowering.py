@@ -1,3 +1,5 @@
+# Softmax lowering
+
 from AutoSplit import Splitter
 from MyGraph import Graph
 from MyGraph import Node

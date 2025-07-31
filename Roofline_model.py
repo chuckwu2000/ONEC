@@ -1,3 +1,5 @@
+# Roofline model
+
 from MyGraph import Graph
 from OpClassify import Op_Classify
 import struct
@@ -124,15 +126,6 @@ class RooflineModel:
             IC = 1
             OC = 1
             stride = info["builtin_options"]["stride_h"]
-        # This estimation is not accurate
-        elif op_type == "BATCH_MATMUL":
-            OH = ofm_shape[1]
-            OW = ofm_shape[2]
-            FH = 1
-            FW = 1
-            IC = ofm_shape[3]
-            OC = ofm_shape[3]
-            stride = 1
         IH = (OH - 1) * stride + FH
         IW = (OW - 1) * stride + FW
 
@@ -202,12 +195,12 @@ class RooflineModel:
 
             ############## Calculate the operations ##############
             if op_type == "EXP":
-                operation_count = 6
+                operation_count = 1
             elif op_type == "RECIPROCAL":
-                operation_count = 13
+                operation_count = 1
             elif op_type == "RSQRT":
                 # We use the LUT to get the rsqrt result, so there is no operation perform
-                operation_count = 0
+                operation_count = 1
             elif op_type == "POW":
                 exp_tensor = tensors[inputs[1]]
                 exp_buffer_data = bytes(self.buffers[exp_tensor['buffer']]['data'])

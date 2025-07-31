@@ -1,3 +1,5 @@
+# Model graph representation for TFLite models
+
 import copy
 from collections import defaultdict
 
@@ -11,10 +13,9 @@ class Node:
         self.is_mac_main_op = False
         self.is_elem_wise_main_op = False
         self.is_mem_main_op = False
-        # This represent this op only can hoist to the opid larger than this value.
+        # This represent the operator can only be hoisted to the order which is larger than this value
         self.hoist_min_schedule_order = -1
-        # This represent that this op is matched with another op run currently in each of MAC/ELE engine.
-        # But depend on its computation ratio, it can overlap more than one op.
+        # This represent that this op is matched with another op run currently in each of MAC/ELE engine
         self.have_fully_matched = False
         # This represent that op is belong to which weight reuse block
         self.block_id = -1
@@ -25,53 +26,7 @@ class Node:
         # Represent the split dimention of the output tensors
         self.split_dim = -1
     def append_children(self, children):
-        self.children+=children
-
-    def SplitOp(self, opid, opcode_index, inputA, inputB, outputs, num_splits):
-        info = {
-            "inputs": [
-                inputA,
-                inputB
-            ],
-            "outputs": outputs,
-            "builtin_options_type": "SplitOptions",
-            "builtin_options": {
-                "num_splits": num_splits
-            }
-        }
-        if opcode_index:
-            info["opcode_index"] = opcode_index
-        return Node(info, opid)
-
-
-    def AddOp(self, opid, opcode_index, inputA, inputB, output, builtin_options):
-        info = {
-            "inputs": [
-                inputA,
-                inputB
-            ],
-            "outputs": [
-                output
-            ],
-            "builtin_options_type": "AddOptions",
-            "builtin_options": builtin_options
-        }
-        if opcode_index:
-            info["opcode_index"] = opcode_index
-
-        return Node(info, opid)
-
-    def ConvOp(self, opid, opcode_index, inputs, outputs, conv_options):
-        info =  {
-            "inputs": inputs,
-            "outputs": outputs,
-            "builtin_options_type": "Conv2DOptions",
-            "builtin_options": conv_options
-        }
-        if opcode_index:
-            info["opcode_index"] = opcode_index
-
-        return Node(info, opid)
+        self.children += children
 
 class Graph:
     def __init__(self, ops, tensors, buffers, opcodes, inputs, outputs, exec_order):
@@ -84,14 +39,14 @@ class Graph:
         # We consider the model have multiple roots
         self.root_op_ids = []
         self.ops = None
-        self.DFS_ordered = False
-        self.BFS_ordered = False
         self.cascade_matched_ops = []
         self.matched_ops = []
+        self.seq_elem_ops = []
         self.pipeline_schedule = False
         self.build_graph_from_ops(copy.deepcopy(ops))
 
     def build_DFS(self, current_id, op_lookup_input):
+        # If the current op has children, it means it has been visited
         if len(self.ops[current_id].children) > 0:
             return
         new_children = []
@@ -107,10 +62,10 @@ class Graph:
             self.build_DFS(child, op_lookup_input)
 
     def build_graph_from_ops(self, ops):
-        # init all nodes
+        # Init all nodes
         self.ops = [Node(op, i) for i, op in enumerate(ops)]
 
-        # build input-op lookup table
+        # Build input-op lookup table
         op_lookup_input = defaultdict(list)
         for opid, op in enumerate(ops):
             for in_id in op['inputs']:
@@ -119,15 +74,15 @@ class Graph:
                 op_lookup_input[in_id].append(opid)
         self.op_lookup_input = op_lookup_input
 
-        # find root (it may have multiple roots)
+        # Find root (it may have multiple roots)
         for in_tensor_id in self.inputs:
             self.root_op_ids.append(op_lookup_input[in_tensor_id][0])
 
-        # build the remainder
+        # Build the remainder
         for root_op_id in self.root_op_ids:
             self.build_DFS(root_op_id, op_lookup_input)
 
-        # reorder execution ordering to the input exec_order
+        # Reorder execution ordering to the input exec_order
         self.ensure_order()
 
     def ensure_DFS_order(self):
@@ -136,64 +91,22 @@ class Graph:
                 if parent not in DFS_orderred_operators:
                     return None
             DFS_orderred_operators.append(current_id)
-            # To reach maximal performance of DFS ordering, sort children by output tensor ID of children op.
+            # To reach maximal performance of DFS ordering, sort children by output tensor ID of children op
             for child in sorted(self.ops[current_id].children, key=lambda op_id: self.ops[op_id].info['outputs'][0]):
                 if child not in DFS_orderred_operators:
                     DFS_ordering(child, DFS_orderred_operators)
         if self.pipeline_schedule == False:
-            self.DFS_ordered = True
-            self.BFS_ordered = False
             # new_operators store the opid
             new_operators = []
             for root_op_id in self.root_op_ids:
                 DFS_ordering(root_op_id, new_operators)
             self.operators = []
-            # For pipeline schedule, we need to record the order of each op.
+            # For pipeline schedule, we need to record the order of each op
             self.ordered_ops = []
             for i, opid in enumerate(new_operators):
                 self.ops[opid].schedule_order = i
                 self.operators.append(self.ops[opid].info)
                 self.ordered_ops.append(self.ops[opid])
-
-    def ensure_BFS_order(self):
-        import collections
-        grid, inp = {k.opid: [] for k in self.ops}, collections.Counter({k.opid: 0 for k in self.ops})
-        prerequisites = []
-        for current in self.ops:
-            for child in self.ops[current.opid].children:
-                prerequisites.append((child, current.opid))
-            for parent in self.ops[current.opid].parents:
-                prerequisites.append((current.opid, parent))
-        [(grid[b].append(a), inp.update({a: 1})) for a, b in prerequisites]
-        ans = [k for k, v in inp.items() if not v]
-        [inp.update({kid: -1}) or inp[kid] == 0 and ans.append(kid) for node in ans for kid in grid[node]]
-        self.operators = [self.ops[op].info for op in ans]
-
-    def ensure_BFS_order_orig(self):
-        import queue
-        if self.BFS_ordered == False:
-            self.BFS_ordered = True
-            self.DFS_ordered = False
-            BFS_queue = queue.Queue()
-            BFS_orderred_operators = []
-            for i, op in enumerate(self.ops):
-                if self.in_tensor_id in op.info['inputs']:
-                    start_id = i
-
-            BFS_queue.put(start_id)
-            while(not BFS_queue.empty()):
-                current_id = BFS_queue.get()
-                if current_id in BFS_orderred_operators:
-                    continue
-                for parent in self.ops[current_id].parents:
-                    if parent not in BFS_orderred_operators:
-                        continue
-                BFS_orderred_operators.append(current_id)
-                for child in self.ops[current_id].children:
-                    if child not in BFS_orderred_operators:
-                        BFS_queue.put(child)
-
-            self.operators = [self.ops[op].info for op in BFS_orderred_operators]
 
     def recycle_tensors_buffers(self):
         new_tensor_ids = [-1 for _ in range(len(self.tensors))]
@@ -297,8 +210,7 @@ class Graph:
     def ensure_order(self):
         if self.exec_order == 'DF':
             self.ensure_DFS_order()
-        elif self.exec_order == 'BF':
-            self.ensure_BFS_order()
+        # Actually have BFS order, but in here we don't use it, can refer to the TinyTS
         else:
             raise(BaseException("Unknown execution order setting."))
 

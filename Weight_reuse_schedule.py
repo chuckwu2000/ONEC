@@ -1,3 +1,5 @@
+# According on the unify SRAM, we use greedy allocation to sequentially allocate the tensors
+
 from Architecture_feature import ArchitectureFeatures
 from OpClassify import Op_Classify
 
@@ -35,9 +37,6 @@ class Weight_reuse_scheduler:
         for i, op in enumerate(ordered_ops):
             if self.visited[op.opid]:
                 continue
-            if i % 100 == 0:
-                # To accerlate the scheduling process, actually need to clear tensor_in_SRAM also
-                self.need_virtual_allocate_opids.clear()
             # Step 1: Fetch opids in the same layer
             same_layer_opids = self.collect_same_layer_opids_in_same_block(op.opid)
             self.opids_in_block.update(same_layer_opids)
@@ -99,6 +98,8 @@ class Weight_reuse_scheduler:
                     input_nums = [unary, binary]
                     if opcode_type in unary_ops:
                         input_idx = 0
+                        if opcode_type in use_lut_ops:
+                            input_idx = 1
                     elif opcode_type in binary_ops:
                         input_idx = 1
                     for tensor_id in op_info['inputs'][0:input_nums[input_idx]]:
@@ -131,8 +132,6 @@ class Weight_reuse_scheduler:
                     input_nums = [unary, binary, trinary]
                     if opcode_type in unary_ops:
                         input_idx = 0
-                        if opcode_type in use_lut_ops:
-                            input_idx = 1
                     elif opcode_type in binary_ops:
                         input_idx = 1
                     elif opcode_type in trinary_ops:
@@ -207,9 +206,49 @@ class Weight_reuse_scheduler:
             # Step 1: Update tensor's live range
             need_allocate_tensor_ids = set()
             for opid in opids:
-                for tensor_id in ops[opid].info['inputs'] + ops[opid].info['outputs']:
-                    if tensor_id == -1:
-                        continue
+                op_tensor_ids = set()
+                op_info = self.graph.ops[opid].info
+                opcode_index = op_info.get('opcode_index')
+                opcode_type = self.graph.opcodes[opcode_index].get('builtin_code')
+                if opcode_type in elem_wise_ops:
+                    # Input tensor
+                    unary, binary = 1, 2
+                    input_nums = [unary, binary]
+                    if opcode_type in unary_ops:
+                        input_idx = 0
+                        if opcode_type in use_lut_ops:
+                            input_idx = 1
+                    elif opcode_type in binary_ops:
+                        input_idx = 1
+                    for tensor_id in op_info['inputs'][0:input_nums[input_idx]]:
+                        if tensor_id == -1:
+                            continue
+                        op_tensor_ids.add(tensor_id)
+                    # Output tensor
+                    for tensor_id in op_info['outputs']:
+                        op_tensor_ids.add(tensor_id)
+                # Operation that will execute in NPU's MAC unit
+                elif opcode_type in mac_ops:
+                    op_info = self.graph.ops[opid].info
+                    # Input tensor
+                    unary, binary, trinary = 1, 2, 3
+                    input_nums = [unary, binary, trinary]
+                    if opcode_type in unary_ops:
+                        input_idx = 0
+                    elif opcode_type in binary_ops:
+                        input_idx = 1
+                    elif opcode_type in trinary_ops:
+                        input_idx = 2
+                    for tensor_id in op_info['inputs'][0:input_nums[input_idx]]:
+                        # Sometimes the tensor maybe empty, ex: no bias
+                        if tensor_id == -1:
+                            continue
+                        op_tensor_ids.add(tensor_id)
+                    # Output tensor
+                    for tensor_id in op_info['outputs']:
+                        op_tensor_ids.add(tensor_id)
+
+                for tensor_id in op_tensor_ids:
                     # Update the tensor's first time used
                     if ops[opid].schedule_order < tensor_info[tensor_id].live_range.get('first_time_used', len(ops)):
                         tensor_info[tensor_id].live_range['first_time_used'] = ops[opid].schedule_order
@@ -224,7 +263,7 @@ class Weight_reuse_scheduler:
 
             # Step 3: Greedy by size
             # Step 3.1: Sort tensors by size
-            sorted_tensor_ids = sorted(need_allocate_tensor_ids, key=lambda x: tensor_info[x].size, reverse=True)
+            sorted_tensor_ids = sorted(need_allocate_tensor_ids, key = lambda x: tensor_info[x].size, reverse = True)
             # Step 3.2: Allocate memory
             for tensor_id in sorted_tensor_ids:
                 prev_start = 0

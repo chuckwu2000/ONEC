@@ -1,3 +1,5 @@
+# Classify the operation type
+
 class Op_Classify:
     def __init__(self):
         # The operation that will be fall back to CPU
@@ -6,10 +8,10 @@ class Op_Classify:
         self.fall_back_cpu_ops = list(set(self.data_layout_ops) - set(["RESHAPE"]))
 
         # MAC main operation
-        self.mac_ops = ["CONV_2D", "DEPTHWISE_CONV_2D", "FULLY_CONNECTED", "MAX_POOL_2D", "BATCH_MATMUL"]
+        self.mac_ops = ["CONV_2D", "DEPTHWISE_CONV_2D", "FULLY_CONNECTED", "MAX_POOL_2D"]
 
         # The operation that need weights
-        self.need_weights_ops = ["CONV_2D", "DEPTHWISE_CONV_2D", "FULLY_CONNECTED", "BATCH_MATMUL"]
+        self.need_weights_ops = ["CONV_2D", "DEPTHWISE_CONV_2D", "FULLY_CONNECTED"]
         # The operation that need bias
         self.need_bias_ops = ["CONV_2D", "DEPTHWISE_CONV_2D", "FULLY_CONNECTED"]
 
@@ -23,6 +25,6 @@ class Op_Classify:
         # The input of the operation
         self.unary_ops = ["RSQRT", "GELU", "QUANTIZE", "DEQUANTIZE", \
                           "TANH", "POW", "MAX_POOL_2D", "EXP", "RECIPROCAL"]
-        self.binary_ops = ["ADD", "SUB", "MUL", "SQUARED_DIFFERENCE", "BATCH_MATMUL"]
+        self.binary_ops = ["ADD", "SUB", "MUL", "SQUARED_DIFFERENCE"]
         self.trinary_ops = ["CONV_2D", "DEPTHWISE_CONV_2D", "FULLY_CONNECTED"]
         self.use_lut_ops = ["RSQRT", "EXP", "RECIPROCAL"]

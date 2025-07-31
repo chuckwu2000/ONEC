@@ -1,19 +1,26 @@
+# Memory allocation related (DRAM)
+
 from collections import defaultdict
-from Architecture_feature import Mem_area
 from Architecture_feature import ArchitectureFeatures
 
+# According to the tensor id, each tensor info is stored in tensor_memory
 class tensor_memory:
     def __init__(self, tensor_id):
         self.tensor_id = tensor_id
         self.size = -1
         self.live_range = defaultdict(int)
-        # May different to tensor_metadata's start_address and end_address, because the storage space of each tensor metadata is different
+        # Different to tensor_metadata's start_address and end_address: Because the storage space of each tensor metadata may different
         self.sram_start_addr = -1
         self.sram_end_addr = -1
+        # For multi-bank SRAM, we record the start and end bank-id
+        self.sram_start_bank = -1
+        self.sram_end_bank = -1
+        # DRAM start and end address
         self.dram_start_addr = -1
         self.dram_end_addr = -1
         self.tensors = []
 
+# According to the tensor's pid and cid, each tensor's metadata is stored in tensor_metadata
 class tensor_metadata:
     def __init__(self, pid, cid):
         # pid: parent opid, cid: child opid
@@ -57,8 +64,8 @@ class memory_allocator:
                             continue
                         # Check if the tensor_metadata is already allocated
                         tensor_metadata_allocated = False
-                        for tensor in self.need_allocate_tensors[tensor_id].tensors:
-                            if tensor.cid == op.opid and tensor.pid == parent_id:
+                        for tensor_meta in self.need_allocate_tensors[tensor_id].tensors:
+                            if tensor_meta.cid == op.opid and tensor_meta.pid == parent_id:
                                 tensor_metadata_allocated = True
                                 break
                         if not tensor_metadata_allocated:
@@ -86,10 +93,6 @@ class memory_allocator:
         for tensor_id in self.need_allocate_tensor_ids:
             self.need_allocate_tensors[tensor_id].size = self.compute_tensor_size(tensor_id)
             total_size += self.need_allocate_tensors[tensor_id].size
-
-        # Check if the size of tensors exceeds the DRAM's max size
-        if total_size > ArchitectureFeatures.DRAM_MAX_SIZE:
-            raise ValueError("The total size of tensors exceeds the DRAM's max size")
         
     def compute_tensor_size(self, tensor_id) -> int:
         tensor = self.graph.tensors[tensor_id]
@@ -125,6 +128,7 @@ class memory_allocator:
         sorted_tensor_ids = sorted(need_allocated_tensor_ids, key=lambda x: tensor_info[x].size, reverse=True)
         # Step 2.2: Allocate memory
         for tensor_id in sorted_tensor_ids:
+            # Each tensor can always try to allocate from address 0
             prev_start = 0
             best_start = None
             smallest_gap = ArchitectureFeatures.DRAM_MAX_SIZE
@@ -139,8 +143,8 @@ class memory_allocator:
                         smallest_gap = gap
                         best_start = prev_start
                     prev_start = max(prev_start, tensor_info[allocated_tensor].dram_end_addr)
-                # If no large enough gap can reuse or this tensor's live range overlap with all the allocated tensors,
-                # prev_start will start from the highest end address
+                # If no overlap with all the previous allocated tensors -> prev_start will be 0,
+                # Or no best_start found, then we can allocate to the highest valid address
                 if best_start is None:
                     best_start = prev_start
                 tensor_info[tensor_id].dram_start_addr = best_start

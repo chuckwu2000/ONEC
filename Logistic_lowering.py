@@ -1,3 +1,5 @@
+# Perform logistic lowering in the model graph
+
 from AutoSplit import Splitter
 from MyGraph import Graph
 from MyGraph import Node
@@ -24,8 +26,10 @@ class Logistic:
             logistic_output_tensor_id = op.info['outputs'][0]
 
             # Step 1: Create sub op to use 0 to subtract the input tensor to compute the negative value
-            # Step 1.1: Create the zero tensor (scale and zero point is same to input tensor)
-            sub_input1_buffer = {"data": [0]}
+            # Step 1.1: Create the zero tensor (scale is same to input tensor), value is input tensor's zero point
+            input_zero_point = self.tensors[logistic_input_tensor_id]['quantization']['zero_point'][0]
+            np_buffer = np.full((1), input_zero_point, dtype = np.int8)
+            sub_input1_buffer = {"data": list(np_buffer.tobytes())}
             self.buffers.append(sub_input1_buffer)
             sub_input1_tensor = copy.deepcopy(self.tensors[logistic_input_tensor_id])
             sub_input1_tensor['name'] = 'logistic_lower_zero_sub_%d' % i

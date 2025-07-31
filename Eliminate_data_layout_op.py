@@ -1,3 +1,5 @@
+# Use hardcoded manual decide pattern to eliminate useless data layout ops in transformer self-attention part
+
 from AutoSplit import Splitter
 from MyGraph import Graph
 from OpClassify import Op_Classify

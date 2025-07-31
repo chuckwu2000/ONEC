@@ -1,4 +1,5 @@
 # This simulator is aligned with our NPU design
+
 from MyGraph import Graph
 from Architecture_feature import ArchitectureFeatures
 from OpClassify import Op_Classify
@@ -96,16 +97,16 @@ class simulator:
             if op_type == "EXP":
                 # To reduce the elementwise engine size, we use the LUT to get the exp result
                 cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["LUT"]
-                operation_count = 0
+                operation_count = 1
             elif op_type == "RECIPROCAL":
                 cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["LUT"]
-                operation_count = 0
+                operation_count = 1
             elif op_type == "RSQRT":
                 # There have quick rsqrt method, but it looks like can't be used in our design
                 # Above reference: https://zh.wikipedia.org/zh-tw/%E5%B9%B3%E6%96%B9%E6%A0%B9%E5%80%92%E6%95%B0%E9%80%9F%E7%AE%97%E6%B3%95
                 # So, we use the LUT to get the rsqrt result
                 cycle_per_elem = ArchitectureFeatures.output_cycles_per_elem["LUT"]
-                operation_count = 0
+                operation_count = 1
             elif op_type == "POW":
                 # Pow(x, y) = x^y
                 # Extract the exponent from the second input tensor, tflite store the data in little-endian format
@@ -307,15 +308,6 @@ class simulator:
             IC = 1
             OC = 1
             stride = info["builtin_options"]["stride_h"]
-        # This estimation is not accurate
-        elif op_type == "BATCH_MATMUL":
-            OH = ofm_shape[1]
-            OW = ofm_shape[2]
-            FH = 1
-            FW = 1
-            IC = ofm_shape[3]
-            OC = ofm_shape[3]
-            stride = 1
         IH = (OH - 1) * stride + FH
         IW = (OW - 1) * stride + FW
 
@@ -550,6 +542,12 @@ class simulator:
                     # elif opcode_type in elementwise_ops:
                     #     mac_op_cycles -= op2_estimated_op_cycles
                     #     elementwise_op_cycles -= op1.estimated_op_cycles
+            for elem_ops in self.model.seq_elem_ops:
+                exec_time = [self.ops[opid].estimated_op_cycles for opid in elem_ops]
+                max_exec_time = max(exec_time)
+                # Fused op will take the longest time in the sequence elementwise operators 
+                total_op_cycles -= sum(exec_time) - max_exec_time
+                total_cycles -= sum(exec_time) - max_exec_time
         ##### For Experiment #####
         # print(f"mac ratio: {mac_op_cycles / total_op_cycles * 100:.2f}%, elementwise ratio: {elementwise_op_cycles / total_op_cycles * 100:.2f}%, fused ratio: {fused_op_cycles / total_op_cycles * 100:.2f}%")
         # print(f"!!!! elementwise_idle ratio: {1 - (elementwise_op_cycles + fused_op_cycles) / total_cycles:.2f}, mac_idle ratio: {1 - (mac_op_cycles + fused_op_cycles) / total_cycles:.2f} !!!!")

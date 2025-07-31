@@ -1,3 +1,5 @@
+# This option not use now
+
 from Architecture_feature import ArchitectureFeatures
 from AutoSplit import ModelType
 from OpClassify import Op_Classify

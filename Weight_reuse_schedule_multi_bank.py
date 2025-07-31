@@ -1,3 +1,5 @@
+# According to the NPU's SRAM have multi banks, the subgraph decides consider the available SRAM banks
+
 from Architecture_feature import ArchitectureFeatures
 from OpClassify import Op_Classify
 import math

@@ -1,3 +1,5 @@
+# Entry to the code generation process for the NPU
+
 from OPGen import OPGen
 from MyGraph import Graph
 

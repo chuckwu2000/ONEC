@@ -1,3 +1,5 @@
+# Code generation for OEM's NPU
+
 import numpy as np
 import math
 from collections import defaultdict

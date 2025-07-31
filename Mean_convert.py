@@ -1,3 +1,5 @@
+# Convert mean operations to convolution operations
+
 from AutoSplit import Splitter
 from MyGraph import Graph
 from MyGraph import Node
@@ -27,23 +29,19 @@ class Mean:
             axis_buffer = self.buffers[axis_tensor['buffer']]
             axis_shape = axis_tensor.get('shape', [])
             axis_list = []
-            multi_axis = False
             # Check whether needs to reduce > 2 dimensions
             if axis_shape != [] and axis_shape[0] > 1:
-                multi_axis = True
                 for i in range(axis_shape[0]):
                     axis_list.append(axis_buffer['data'][i * 4])
             else:
                 axis_list.append(axis_buffer['data'][0])
             
-            # Set the reduce size for the division, now only support same reduce size
-            reduce_size = self.tensors[mean_input_tensor_id]['shape'][axis_list[0]]
-            if multi_axis:
-                for axis in axis_list[1:]:
-                    if reduce_size != self.tensors[mean_input_tensor_id]['shape'][axis]:
-                        raise 'unsupported mean format, if multi reduce axis, the reduce size must be same!!'
+            # Set the reduce size for the division
+            reduce_size = 1
+            for axis in axis_list:
+                reduce_size *= self.tensors[mean_input_tensor_id]['shape'][axis]
 
-            # Step 1.1: Prepare for the depthwise conv op's needed info
+            # Step 1.1: Prepare for the conv op's needed info
             input_shape = self.tensors[mean_input_tensor_id]['shape']
             output_shape = self.tensors[mean_output_tensor_id]['shape']
             # If keep_dims is false, we set output shape equal to input shape
@@ -65,7 +63,7 @@ class Mean:
             else:
                 raise 'unsupported mean format!!'
 
-            # Step 1.2: Create the weight tensor of the depthwise conv op
+            # Step 1.2: Create the weight tensor of the conv op
             weight_shape = [1, height, width, channel]
             np_ones_array = np.ones(weight_shape, dtype = np.int8)
             ones_array = np_ones_array.astype(np.int8).tobytes()
@@ -80,7 +78,7 @@ class Mean:
                 "shape": weight_shape,
                 "type": "INT8",
                 "buffer": weights_buffer_id,
-                "name": 'mean_lower_depthwise_conv_weight_%d' % i,
+                "name": 'mean_lower_conv_weight_%d' % i,
                 "quantization": {'scale': one_scale, 'zero_point': [0]}
             }
             self.tensors.append(weights_tensor)
@@ -99,14 +97,14 @@ class Mean:
             float_input_scale = np.int32(int_input_scale).view('float32')
             int_output_scale = self.tensors[mean_output_tensor_id]['quantization']['scale'][0]
             float_output_scale = np.int32(int_output_scale).view('float32')
-            float_depthwith_conv_output_scale = float_input_scale / (reduce_size * float_output_scale)
-            np_int_scale = np.float32(float_depthwith_conv_output_scale).view('int32')
-            np_arr = np.array([np_int_scale], dtype=np.int32)
+            float_conv_output_scale = float_input_scale / (reduce_size * float_output_scale)
+            np_int_scale = np.float32(float_conv_output_scale).view('int32')
+            np_arr = np.array([np_int_scale], dtype = np.int32)
             int_scale = np_arr.tolist()
             conv_output_tensor['quantization']['scale'] = int_scale
             conv_output_tensor_id = mean_output_tensor_id
 
-            # Step 1.4: Create the depthwise conv op
+            # Step 1.4: Create the conv op
             conv_op = {
                 "opcode_index": self.get_opcode_index(3),
                 "inputs": [mean_input_tensor_id, weights_tensor_id, -1],
@@ -124,7 +122,7 @@ class Mean:
             conv_opid = len(self.operators) - 1
             self.ops.append(Node(conv_op, conv_opid))
 
-            # Update the parent and children of the converted depthwise conv op
+            # Update the parent and children of the converted conv op
             parent_opid = op.parents[0]
             for i, opid in enumerate(self.ops[parent_opid].children):
                 if opid == op.opid:

@@ -1,18 +1,18 @@
+# Compare with related work, we try to reproduce the Tandem processor's scheduling algorithm
+
 from MyGraph import Graph
 from OpClassify import Op_Classify
 
 op_classify = Op_Classify()
 # Classify refer to the tandem processor's paper
-# The elementwise main op
 # elem_wise_ops = ["ADD", "SUB", "MUL", "LOGISTIC", "RSQRT", "SQUARED_DIFFERENCE", "SOFTMAX", "GELU", "LEAKY_RELU", \
 #                 "REDUCE_MAX", "QUANTIZE", "DEQUANTIZE", "TANH", "POW", "MAX_POOL_2D", "RESHAPE", "EXP", "SUM"]
-# The mac main op
-#mac_ops = ["MEAN", "CONV_2D", "DEPTHWISE_CONV_2D", "FULLY_CONNECTED", "TRANSPOSE_CONV", "BATCH_MATMUL"]
+# mac_ops = ["MEAN", "CONV_2D", "DEPTHWISE_CONV_2D", "FULLY_CONNECTED", "TRANSPOSE_CONV"]
 elem_wise_ops = op_classify.elementwise_ops
 mac_ops = op_classify.mac_ops
 
-def genesys_schedule(split_graph: Graph, weights_reuse_need_allocate_tensors, genesys_options: dict):
-    # GeneSys have three rules:
+def tandem_schedule(split_graph: Graph, weights_reuse_need_allocate_tensors, tandem_options: dict):
+    # Tandem have three rules:
     # 1. The single GEMM layer
     # 2. The group of non-GEMM layers
     # 3. The GEMM layer followed by the group of non-GEMM layers: drawback is that the GEMM layer can't have multiple children
@@ -32,7 +32,7 @@ def genesys_schedule(split_graph: Graph, weights_reuse_need_allocate_tensors, ge
                 while child_idx < len(split_graph.ordered_ops):
                     now_op = split_graph.ordered_ops[now_idx]
                     # Can't keep fit Rule 3
-                    if genesys_options["can_not_followed_multi_child"]:
+                    if tandem_options["can_not_followed_multi_child"]:
                         if len(now_op.children) > 1:
                             break
 
@@ -70,7 +70,7 @@ def genesys_schedule(split_graph: Graph, weights_reuse_need_allocate_tensors, ge
                 while child_idx < len(split_graph.ordered_ops):
                     now_op = split_graph.ordered_ops[now_idx]
                     # Can't keep fit Rule 2
-                    if genesys_options["can_not_followed_multi_child"]:
+                    if tandem_options["can_not_followed_multi_child"]:
                         if len(now_op.children) > 1:
                             rule_two(now_op)
                             break
@@ -97,27 +97,27 @@ def genesys_schedule(split_graph: Graph, weights_reuse_need_allocate_tensors, ge
                     child_idx += 1
                 
     def rule_one(op):
-        if genesys_options["no_intermediate_tensor_reuse"]:
+        if tandem_options["no_intermediate_tensor_reuse"]:
             for tensor_metadata in weights_reuse_need_allocate_tensors[op.info['outputs'][0]].tensors:
                 if tensor_metadata.pid == op.opid:
                     tensor_metadata.in_DRAM = True
 
     def rule_two(op):
-        if genesys_options["no_intermediate_tensor_reuse"]:
+        if tandem_options["no_intermediate_tensor_reuse"]:
             for tensor_metadata in weights_reuse_need_allocate_tensors[op.info['outputs'][0]].tensors:
                 if tensor_metadata.pid == op.opid:
                     tensor_metadata.in_DRAM = True
 
-    def rule_three(casecade_matched_ops):
-        split_graph.cascade_matched_ops.append(casecade_matched_ops)
-        if genesys_options["no_intermediate_tensor_reuse"]:
-            block_end_op = split_graph.ops[casecade_matched_ops[-1]]
+    def rule_three(cascade_matched_ops):
+        split_graph.cascade_matched_ops.append(cascade_matched_ops)
+        if tandem_options["no_intermediate_tensor_reuse"]:
+            block_end_op = split_graph.ops[cascade_matched_ops[-1]]
             block_end_output = block_end_op.info['outputs'][0]
             for tensor_metadata in weights_reuse_need_allocate_tensors[block_end_output].tensors:
                 if tensor_metadata.pid == block_end_op.opid:
                     tensor_metadata.in_DRAM = True
     
-    # Start to perform the GeneSys schedule
+    # Start to perform the Tandem schedule
     rule_schedule(split_graph)
     
     #return pipeline_split_graph
