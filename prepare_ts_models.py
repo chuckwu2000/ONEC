@@ -16,6 +16,7 @@ parser.add_argument("--pad_fusion", action = 'store_true')
 parser.add_argument("--remove_data_layout_op", action = 'store_true')
 parser.add_argument("--cancel_move_data_layout_op", action = 'store_true')
 parser.add_argument("--cancel_lowering", action = 'store_true')
+parser.add_argument("--unify_sram", action = 'store_true')
 parser.add_argument("--codegen", action = 'store_true')
 parser.add_argument("--tandem", action = 'store_true')
 args = parser.parse_args()
@@ -48,15 +49,17 @@ for split_height in [split_size]:
             cmd += " --verbose_performance"
         if args.remove_data_layout_op:
             cmd += " --remove_data_layout_op"
-        if not args.cancel_move_data_layout_op:
+        # Notice that the cancel_move_data_layout_op will interfere with the baseline performance
+        if not args.cancel_move_data_layout_op and not args.tandem:
             cmd += " --move_data_layout_op"
         if not args.cancel_lowering:
             cmd += " --softmax_lowering"
             cmd += " --mean_convert"
             cmd += " --logistic_lowering"
+        if args.unify_sram:
+            cmd += " --unify_sram"
         if args.codegen:
             cmd += " --codegen"
-            cmd += " --multi_bank_sram"
             cmd += f" --code_path {code_path}"
         if args.tandem:
             cmd += " --tandem"

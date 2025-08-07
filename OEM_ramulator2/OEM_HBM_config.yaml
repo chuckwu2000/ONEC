@@ -1,0 +1,33 @@
+Frontend:
+  impl: GEM5
+
+MemorySystem:
+  impl: GenericDRAM
+  clock_ratio: 1
+
+  DRAM:
+    impl: HBM2
+    org:
+      preset: HBM2_4Gb
+      channel: 8
+    timing:
+      preset: HBM2_2Gbps
+    drampower_enable: true
+    voltage:
+      preset: Default
+    curretn:
+      preset: Default
+    RFM:
+
+  Controller:
+    impl: Generic
+    Scheduler:
+      impl: FRFCFS
+    RefreshManager:
+      impl: AllBank
+    RowPolicy:
+      impl: OpenRowPolicy
+    plugins:
+
+  AddrMapper:
+    impl: RoBaRaCoCh

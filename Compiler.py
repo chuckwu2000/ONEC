@@ -40,6 +40,7 @@ parser.add_argument("--move_data_layout_op", action = 'store_true')
 parser.add_argument("--softmax_lowering", action = 'store_true')
 parser.add_argument("--mean_convert", action = 'store_true')
 parser.add_argument("--logistic_lowering", action = 'store_true')
+parser.add_argument("--unify_sram", action = 'store_true')
 parser.add_argument("--codegen", action = 'store_true')
 parser.add_argument("--multi_bank_sram", action = 'store_true')
 parser.add_argument("--code_path")
@@ -165,9 +166,10 @@ layer_wise_graph = layer_wise_scheduler.layer_wise_schedule()
 
 # Estimate the performance of layer-wise schedule (baseline)
 model_sim = simulator(layer_wise_graph, layer_wise_scheduler.tensor_info)
+# Make sure model_sim had performed once, since pipeline schedule will use the operator's estimated cycles
+baseline_dma_cycles, baseline_op_cycles, baseline_total_cycles = model_sim.estimate_model(pipeline = False)
+baseline_total_energy = model_sim.total_energy
 if args.verbose_performance:
-    baseline_dma_cycles, baseline_op_cycles, baseline_total_cycles = model_sim.estimate_model(pipeline = False)
-    baseline_total_energy = model_sim.total_energy
     # model_sim.print_performance()
     print("*" * 100)
     print(f"Baseline schedule: dma cycles = {baseline_dma_cycles :.1f}, op cycles = {baseline_op_cycles :.1f}, total cycles = {baseline_total_cycles :.1f}")
@@ -189,12 +191,12 @@ if not args.codegen:
     # Perform the weight reuse schedule on the new_graph
     same_layer_next_opids = splitter.same_layer_next_opids
     weights_reuse_need_allocate_tensors = copy.deepcopy(mem_allocator.need_allocate_tensors)
-    if args.multi_bank_sram or True:
+    if args.unify_sram:
+        # Use the unify SRAM weight reuse scheduler
+        weight_reuse_scheduler = Weight_reuse_scheduler(new_graph, weights_reuse_need_allocate_tensors, same_layer_next_opids)
+    else:
         # Use the multi-bank SRAM weight reuse scheduler
         weight_reuse_scheduler = Weight_reuse_multi_bank_scheduler(new_graph, weights_reuse_need_allocate_tensors, same_layer_next_opids)
-    else:
-        # Use the normal weight reuse scheduler
-        weight_reuse_scheduler = Weight_reuse_scheduler(new_graph, weights_reuse_need_allocate_tensors, same_layer_next_opids)
     weight_reuse_graph = weight_reuse_scheduler.weight_reuse_schedule()
 
     model_sim = simulator(weight_reuse_graph, weight_reuse_scheduler.tensor_info)

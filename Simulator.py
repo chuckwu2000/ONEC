@@ -394,16 +394,8 @@ class simulator:
         self.core_energy += op_cycles * ArchitectureFeatures.mac_cost
 
         ############### Memory access cycles ###############
-        # ----- We assume that cost of access SRAM is zero (by prefetching) -----
-        # weights_needed_size = initial_weight_dram_read
-        # load_weights_cycles  = math.ceil(weights_needed_size / float(sram_bandwidth)) * compute_full_oc_times * total_windows
-        # # Needed data in input tensor is not sequential at H dimension
-        # load_inputs_cycles = FH * math.ceil(FW * IC * (ifm_elem_size / 8) / float(sram_bandwidth)) * total_windows
-        # # SRAM transfer bytes per cycle
-        # sram_bandwidth = (ArchitectureFeatures.axi_bit_width / 8) * ArchitectureFeatures.Sram_clock_scale
-        # store_outputs_cycles = math.ceil(total_windows * OC / float(sram_bandwidth))
-        # op_cycles += load_weights_cycles + load_inputs_cycles + store_outputs_cycles
-
+        # We assume that cost of access SRAM is zero (by prefetching)
+        # DRAM access cycles
         dram_transfer_size -= (initial_dram_reads + final_dram_writes)
         # First tile's read from DRAM & last tile's write to DRAM can't be overlapped
         latency, latency_energy  = self.ramulator2_simulate(initial_dram_reads + final_dram_writes)
