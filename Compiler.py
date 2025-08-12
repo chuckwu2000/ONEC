@@ -123,7 +123,7 @@ if args.move_data_layout_op:
 if args.logistic_lowering:
     Logistic(splitter).logistic_lowering()
 # Build the LUT for some elementwise operations
-    LUT(splitter).build_lut()
+LUT(splitter).build_lut()
 ori_graph = splitter.ori_graph
 
 # Pick the best tile size (not work now, since the MAC engine will try to increase the utilization itself)
@@ -250,23 +250,26 @@ if not args.codegen:
               operations per second = {roofline_model.giga_operations_per_second :.2f}")
     #######################################################
 
-#     # Tensor allocation in DRAM (SRAM allocation is implemented above)
-#     mem_allocator.dram_allocate(weights_reuse_need_allocate_tensors)
-#     allocated_tensors = mem_allocator.need_allocate_tensors
+    # Tensor allocation in DRAM (SRAM allocation is implemented above)
+    mem_allocator.dram_allocate(weights_reuse_need_allocate_tensors)
+    allocated_tensors = mem_allocator.need_allocate_tensors
 
-# # Generate the code for OEM's NPU
-# if args.codegen:
-#     distributed_SRAM_allocator = Distributed_SRAM_allocator(new_graph)
-#     distributed_SRAM_allocator.allocate_tensors()
-#     code_generator = CodeGen(new_graph, distributed_SRAM_allocator.tensor_info, distributed_SRAM_allocator.cascade_patterns)
-#     code_generator.code_gen()
+# Generate the code for OEM's NPU
+if args.codegen:
+    distributed_SRAM_allocator = Distributed_SRAM_allocator(new_graph)
+    distributed_SRAM_allocator.allocate_tensors()
+    code_generator = CodeGen(new_graph, distributed_SRAM_allocator.tensor_info, distributed_SRAM_allocator.cascade_patterns)
+    code_generator.code_gen()
 
-# # new_buffers, new_tensors, new_inputs, new_outputs, new_operators, new_opcodes = ori_graph.export()
+######################################################################################
+# Each stage's model graph can be checked by uncommenting one of the following lines and the following lines
+# new_buffers, new_tensors, new_inputs, new_outputs, new_operators, new_opcodes = ori_graph.export()
 # new_buffers, new_tensors, new_inputs, new_outputs, new_operators, new_opcodes = new_graph.export()
-# # new_buffers, new_tensors, new_inputs, new_outputs, new_operators, new_opcodes = layer_wise_graph.export_without_reschedule()
-# # new_buffers, new_tensors, new_inputs, new_outputs, new_operators, new_opcodes = df_graph.export_without_reschedule()
-# # new_buffers, new_tensors, new_inputs, new_outputs, new_operators, new_opcodes = weight_reuse_graph.export_without_reschedule()
-# # new_buffers, new_tensors, new_inputs, new_outputs, new_operators, new_opcodes = pipeline_new_graph.export_without_reschedule()
+# new_buffers, new_tensors, new_inputs, new_outputs, new_operators, new_opcodes = layer_wise_graph.export_without_reschedule()
+# new_buffers, new_tensors, new_inputs, new_outputs, new_operators, new_opcodes = df_graph.export_without_reschedule()
+# new_buffers, new_tensors, new_inputs, new_outputs, new_operators, new_opcodes = weight_reuse_graph.export_without_reschedule()
+# new_buffers, new_tensors, new_inputs, new_outputs, new_operators, new_opcodes = pipeline_new_graph.export_without_reschedule()
+
 # new_model = copy.deepcopy(model)
 # new_model['operator_codes'] = new_opcodes
 # new_model['buffers'] = new_buffers
@@ -274,17 +277,17 @@ if not args.codegen:
 # new_model['subgraphs'][0]['inputs'] = new_inputs
 # new_model['subgraphs'][0]['outputs'] = new_outputs
 # new_model['subgraphs'][0]['operators'] = new_operators
-
 # # Save the rewritten model
 # with open(json_model_path, 'w') as f:
 #     json.dump(new_model, f, indent=2)
 
 # os.system(f'flatc -o {tmp_dir_path} --binary {schema_path} {json_model_path}')
 # os.system(f'mv {os.path.join(tmp_dir_path, filename)} {args.out_path}')
+#######################################################################################
 
-# # Save the npu instructions
-# if args.codegen:
-#     with open(args.code_path, 'w') as f:
-#         f.write(code_generator.npu_code)
+# Save the npu instructions
+if args.codegen:
+    with open(args.code_path, 'w') as f:
+        f.write(code_generator.npu_code)
 
 tmp_dir.cleanup()

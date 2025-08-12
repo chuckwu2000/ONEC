@@ -38,6 +38,8 @@ class Weight_reuse_scheduler:
             if self.visited[op.opid]:
                 continue
 
+            # To accelerate the scheduling process, actually need to clear tensor_in_SRAM also
+            # TODO: may need to figure out a new method to accelerate this process
             if len(self.opids_in_block) >= 100:
                 self.need_virtual_allocate_opids.clear()
 

@@ -38,9 +38,11 @@ class Weight_reuse_multi_bank_scheduler:
         for i, op in enumerate(ordered_ops):
             if self.visited[op.opid]:
                 continue
-            # if i % 100 == 0:
-            #     # To accerlate the scheduling process, actually need to clear tensor_in_SRAM also
-            #     self.need_virtual_allocate_opids.clear()
+
+            # To accelerate the scheduling process, actually need to clear tensor_in_SRAM also
+            # TODO: may need to figure out a new method to accelerate this process
+            if len(self.opids_in_block) >= 100:
+                self.need_virtual_allocate_opids.clear()
 
             # Step 1: Fetch opids in the same layer
             same_layer_opids = self.collect_same_layer_opids_in_same_block(op.opid)
