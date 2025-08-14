@@ -322,7 +322,7 @@ def pipeline_schedule(split_graph: Graph):
                         child_op.have_fully_matched = True
                         now_idx = child_idx
                         child_idx += 1
-                        # OEM NPU can only support 4 elementwise ops run concurrently
+                        # ONE NPU can only support 4 elementwise ops run concurrently
                         if len(seq_elem_ops) >= 4:
                             break
                     else:

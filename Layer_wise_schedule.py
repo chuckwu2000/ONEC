@@ -1,4 +1,4 @@
-# Baseline implementation of OEMC experiment
+# Baseline implementation of ONEC experiment
 
 from Architecture_feature import ArchitectureFeatures
 from OpClassify import Op_Classify

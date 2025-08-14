@@ -86,7 +86,7 @@ class Distributed_SRAM_allocator:
         # For codegen convenience, we sort the tensor's info by their cid
         for tensor_id in self.need_allocate_tensor_ids:
             self.tensor_info[tensor_id].tensors.sort(key = lambda tensor: self.graph.ops[tensor.cid].schedule_order)
-        # In here, we don't check if the tensor overuse the DRAM (since OEM's NPU not connect to DRAM now)
+        # In here, we don't check if the tensor overuse the DRAM (since ONE's NPU not connect to DRAM now)
         # TODO: If NPU connect DRAM in the future, can reference Memory_allocation.py
 
     def set_tensor_live_range(self):
@@ -178,7 +178,7 @@ class Distributed_SRAM_allocator:
                 now_order = order
                 next_order = order + 1
                 while next_order < len(self.graph.ordered_ops):
-                    # OEM's NPU can't support the cascade pattern with more than 4 ops
+                    # ONE's NPU can't support the cascade pattern with more than 4 ops
                     if len(cascade_matched_ops) >= 4:
                         break
                     now_op = self.graph.ordered_ops[now_order]
@@ -307,7 +307,7 @@ class Distributed_SRAM_allocator:
                 # Based on pid & cid to find the tensor
                 for tensor in self.tensor_info[tensor_id].tensors:
                     if tensor.cid == op.opid:
-                        # In OEM's NPU the intermediate tensor is flow to buffer not store back to SRAM
+                        # In ONE's NPU the intermediate tensor is flow to buffer not store back to SRAM
                         if prev_op != None and tensor.pid == prev_op.opid:
                             break
                         # Check the tensor whether is already allocated and for now we only accept sram be reused between the concurrent run pattern

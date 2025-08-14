@@ -566,7 +566,7 @@ class simulator:
         env = os.environ.copy()
         # Link the libramulator.so
         env["LD_LIBRARY_PATH"] = "extern/ramulator2"
-        exe_path = "extern/ramulator2/resources/OEM_wrappers/ramulator2"
+        exe_path = "extern/ramulator2/resources/ONEC_wrappers/ramulator2"
         cmd = [
             exe_path,
             ArchitectureFeatures.config_path,

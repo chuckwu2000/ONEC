@@ -55,7 +55,7 @@ model_name = os.path.splitext(filename)[0]
 # schema related to how to parse the tflite model in flatbuffer format
 schema_path = args.schema_path
 
-# Base on the model type, OEMC have different split strategy
+# Base on the model type, ONEC have different split strategy
 if args.model_type == "bert":
     model_type = 0
 elif args.model_type == "CNN":
@@ -254,7 +254,7 @@ if not args.codegen:
     mem_allocator.dram_allocate(weights_reuse_need_allocate_tensors)
     allocated_tensors = mem_allocator.need_allocate_tensors
 
-# Generate the code for OEM's NPU
+# Generate the code for ONE's NPU
 if args.codegen:
     distributed_SRAM_allocator = Distributed_SRAM_allocator(new_graph)
     distributed_SRAM_allocator.allocate_tensors()

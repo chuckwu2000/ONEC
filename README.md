@@ -1,4 +1,4 @@
-# OEMC: Compiling Fused DNN Operators on Heterogeneous NPU Engine Machine - Compiler
+# ONEC: DNN Operator Fusion on Heterogeneous NPU Specialized Engines - Compiler
 
 ## Table of Contents
 
@@ -20,8 +20,7 @@ Some code is used for evaluation procedures and input format conversion.
 | YoloX [YOX]              | Qualcomm     |
 | GCN [GCN]                | [GCN](https://github.com/ZhimingZo/Modulated-GCN)          |
 
-- Corresponding directories and files:
-    - OEMC/benchmark
+- Put [[Benchmark Download Link]](https://drive.google.com/drive/folders/1tT0Vy3KFhyeqRaR6JZ7GHrf6anLUZGJ3?usp=sharing) in new create dir benchmark/tflite
 
 ## TFlite flatbuffers
 - This project will use `flatc` to convert .tflite to .json to modify the tflite model.
@@ -36,7 +35,7 @@ $ sudo ldconfig # Configuring a dynamic link library
 $ flatc --version # Check if FlatBuffers is installed successfully
 ```
 - Corresponding directories and files:
-    - OEMC/utils/schema.fbs
+    - ONEC/utils/schema.fbs
 
 ## Ramulator2
 - This project will use ramulator2 to simulate DRAM access latency & energy
@@ -49,24 +48,24 @@ mkdir build
 cd build
 cmake ..
 make -j # Will generate libramulator.so
-# Copy OEM's DDR4, DDR5, HBM2 config yaml to ramulator2 dir
+# Copy ONEC's DDR4, DDR5, HBM2 config yaml to ramulator2 dir
 cd ..
-cp ../../OEM_ramulator2/*.yaml ./
-# Copy OEM's ramulator2 entry to resource dir
-cp -r ../../OEM_ramulator2/OEM_wrappers ./resources
-cd resources/OEM_wrappers
+cp ../../ONEC_ramulator2/*.yaml ./
+# Copy ONEC's ramulator2 entry to resource dir
+cp -r ../../ONEC_ramulator2/ONEC_wrappers ./resources
+cd resources/ONEC_wrappers
 # Note user needs to type their 
-g++ -c main.cc ramulator.cc -I /path/of/ext/yaml-cpp/include -I /path/of/ext/spdlog/include -I /path/of/src
-g++ main.o ramulator2.o -L path/of/libramulator.so -lramulator -o ramulator2
+g++ -c main.cc ramulator2.cc -I /path/of/ext/yaml-cpp/include -I /path/of/ext/spdlog/include -I /path/of/src
+g++ main.o ramulator2.o -L path/of/libramulator.so/dir -lramulator -o ramulator2
 ```
 
 - Corresponding directories and files:
-    - OEMC/OEM_ramulator2
+    - ONEC/ONEC_ramulator2
 
 # Installation
 ```sh
-git clone https://github.com/chuckwu2000/OEMC.git
-cd OEMC
+git clone https://github.com/chuckwu2000/ONEC.git
+cd ONEC
 ```
 
 # Run
