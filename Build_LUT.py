@@ -50,8 +50,15 @@ class LUT:
                 if output_real == float('inf'):
                     output_result = 127
                 else:
-                    output_quantized = int(round(output_real / ofm_scale + ofm_zp))
-                    output_result = min(max(output_quantized, quantized_min), quantized_max)
+                    try:
+                        output_tmp = output_real / ofm_scale + ofm_zp
+                    except OverflowError:
+                        output_tmp = float('inf')
+                    if output_tmp == float('inf'):
+                        output_result = 127
+                    else:
+                        output_quantized = int(round(output_tmp))
+                        output_result = min(max(output_quantized, quantized_min), quantized_max)
                 results.append(output_result)
 
             # Create the LUT buffer
